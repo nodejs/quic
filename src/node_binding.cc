@@ -4,7 +4,7 @@
 #include "util.h"
 
 #if HAVE_OPENSSL
-#define NODE_BUILTIN_OPENSSL_MODULES(V) V(crypto) V(tls_wrap)
+#define NODE_BUILTIN_OPENSSL_MODULES(V) V(crypto) V(tls_wrap) V(quic)
 #else
 #define NODE_BUILTIN_OPENSSL_MODULES(V)
 #endif
