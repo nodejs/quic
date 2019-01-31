@@ -45,6 +45,11 @@ const { getSystemErrorName } = require('util');
     delete providers.STREAMPIPE;
     delete providers.MESSAGEPORT;
     delete providers.WORKER;
+    // TODO(danbev): Test for these
+    delete providers.QUICCLIENTSESSION;
+    delete providers.QUICSERVERSESSION;
+    delete providers.QUICSOCKET;
+    delete providers.QUICSTREAM;
     if (!common.isMainThread)
       delete providers.INSPECTORJSBINDING;
     delete providers.KEYPAIRGENREQUEST;
