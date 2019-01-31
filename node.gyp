@@ -1,5 +1,6 @@
 {
   'variables': {
+    'experimental_quic': 'false',
     'v8_use_siphash%': 0,
     'v8_use_snapshot%': 0,
     'v8_trace_maps%': 0,
@@ -18,6 +19,7 @@
     'node_shared_cares%': 'false',
     'node_shared_libuv%': 'false',
     'node_shared_nghttp2%': 'false',
+    'node_shared_ngtcp2%': 'false',
     'node_use_openssl%': 'true',
     'node_shared_openssl%': 'false',
     'node_v8_options%': '',
@@ -62,6 +64,7 @@
       'lib/process.js',
       'lib/punycode.js',
       'lib/querystring.js',
+      'lib/quic.js',
       'lib/readline.js',
       'lib/repl.js',
       'lib/stream.js',
@@ -128,6 +131,7 @@
       'lib/internal/fs/sync_write_stream.js',
       'lib/internal/fs/utils.js',
       'lib/internal/fs/watchers.js',
+      'lib/internal/histogram.js',
       'lib/internal/http.js',
       'lib/internal/idna.js',
       'lib/internal/inspector_async_hook.js',
@@ -170,6 +174,8 @@
       'lib/internal/process/task_queues.js',
       'lib/internal/querystring.js',
       'lib/internal/readline/utils.js',
+      'lib/internal/quic/core.js',
+      'lib/internal/quic/util.js',
       'lib/internal/repl.js',
       'lib/internal/repl/await.js',
       'lib/internal/repl/history.js',
@@ -510,6 +516,7 @@
         'src/fs_event_wrap.cc',
         'src/handle_wrap.cc',
         'src/heap_utils.cc',
+        'src/histogram.cc',
         'src/js_native_api.h',
         'src/js_native_api_types.h',
         'src/js_native_api_v8.cc',
@@ -612,6 +619,8 @@
         'src/node_i18n.h',
         'src/node_internals.h',
         'src/node_main_instance.h',
+        'src/node_mem.h',
+        'src/node_mem-inl.h',
         'src/node_messaging.h',
         'src/node_metadata.h',
         'src/node_mutex.h',
@@ -794,7 +803,7 @@
             'src/node_crypto_clienthello-inl.h',
             'src/node_crypto_groups.h',
             'src/tls_wrap.cc',
-            'src/tls_wrap.h'
+            'src/tls_wrap.h',
           ],
         }],
         [ 'node_report=="true"', {
@@ -814,6 +823,26 @@
             }],
           ],
         }],
+        [ 'node_use_openssl=="true" and experimental_quic==1', {
+          'defines': ['NODE_EXPERIMENTAL_QUIC=1'],
+          'sources': [
+            'src/node_quic_buffer.h',
+            'src/node_quic_crypto.h',
+            'src/node_quic_session.h',
+            'src/node_quic_session-inl.h',
+            'src/node_quic_socket.h',
+            'src/node_quic_stream.h',
+            'src/node_quic_util.h',
+            'src/node_quic_state.h',
+            'src/node_quic_crypto.cc',
+            'src/node_quic_session.cc',
+            'src/node_quic_socket.cc',
+            'src/node_quic_stream.cc',
+            'src/node_quic_util.cc',
+            'src/node_quic.cc',
+          ]
+        }
+        ],
         [ 'node_use_large_pages=="true" and OS in "linux freebsd mac"', {
           'defines': [ 'NODE_ENABLE_LARGE_CODE_PAGES=1' ],
           # The current implementation of Large Pages is under Linux.
@@ -1101,6 +1130,7 @@
         'test/cctest/test_linked_binding.cc',
         'test/cctest/test_per_process.cc',
         'test/cctest/test_platform.cc',
+        'test/cctest/test_report_util.cc',
         'test/cctest/test_traced_value.cc',
         'test/cctest/test_util.cc',
         'test/cctest/test_url.cc',
@@ -1112,10 +1142,19 @@
             'HAVE_OPENSSL=1',
           ],
         }],
+        [ 'node_use_openssl=="true" and experimental_quic==1', {
+          'defines': [
+            'NODE_EXPERIMENTAL_QUIC=1',
+          ],
+          'sources': [
+            'test/cctest/test_quic_buffer.cc',
+            'test/cctest/test_quic_verifyhostnameidentity.cc'
+          ]
+        }],
         ['v8_enable_inspector==1', {
           'sources': [
             'test/cctest/test_inspector_socket.cc',
-            'test/cctest/test_inspector_socket_server.cc'
+            'test/cctest/test_inspector_socket_server.cc',
           ],
           'defines': [
             'HAVE_INSPECTOR=1',
