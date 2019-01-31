@@ -8,6 +8,7 @@ const expected_keys = ['ares', 'brotli', 'modules', 'node',
 
 if (common.hasCrypto) {
   expected_keys.push('openssl');
+  expected_keys.push('ngtcp2');
 }
 
 if (common.hasIntl) {
