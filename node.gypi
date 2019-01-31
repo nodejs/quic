@@ -181,6 +181,10 @@
       'dependencies': [ 'deps/nghttp2/nghttp2.gyp:nghttp2' ],
     }],
 
+    [ 'node_shared_ngtcp2=="false"', {
+      'dependencies': [ 'deps/ngtcp2/ngtcp2.gyp:ngtcp2' ],
+    }],
+
     [ 'node_shared_brotli=="false"', {
       'dependencies': [ 'deps/brotli/brotli.gyp:brotli' ],
     }],

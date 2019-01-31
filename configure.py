@@ -250,6 +250,27 @@ shared_optgroup.add_option('--shared-nghttp2-libpath',
     dest='shared_nghttp2_libpath',
     help='a directory to search for the shared nghttp2 DLLs')
 
+shared_optgroup.add_option('--shared-ngtcp2',
+    action='store_true',
+    dest='shared_ngtcp2',
+    help='link to a shared ngtcp2 DLL instead of static linking')
+
+shared_optgroup.add_option('--shared-ngtcp2-includes',
+    action='store',
+    dest='shared_ngtcp2_includes',
+    help='directory containing ngtcp2 header files')
+
+shared_optgroup.add_option('--shared-ngtcp2-libname',
+    action='store',
+    dest='shared_ngtcp2_libname',
+    default='ngtcp2',
+    help='alternative lib name to link to [default: %default]')
+
+shared_optgroup.add_option('--shared-ngtcp2-libpath',
+    action='store',
+    dest='shared_ngctp2_libpath',
+    help='a directory to search for the shared ngtcp2 DLLs')
+
 shared_optgroup.add_option('--shared-openssl',
     action='store_true',
     dest='shared_openssl',
