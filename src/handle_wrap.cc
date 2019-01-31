@@ -100,6 +100,10 @@ void HandleWrap::MarkAsUninitialized() {
   state_ = kClosed;
 }
 
+void HandleWrap::MarkAsClosing() {
+  state_ = kClosing;
+}
+
 
 HandleWrap::HandleWrap(Environment* env,
                        Local<Object> object,

@@ -46,6 +46,7 @@ if (isMainThread)
 const noop = () => {};
 
 const hasCrypto = Boolean(process.versions.openssl);
+const hasQuic = Boolean(process.versions.ngtcp2);
 
 // Check for flags. Skip this for workers (both, the `cluster` module and
 // `worker_threads`) and child processes.
@@ -762,6 +763,7 @@ module.exports = {
   getTTYfd,
   hasIntl,
   hasCrypto,
+  hasQuic,
   hasIPv6,
   hasMultiLocalhost,
   isAIX,
