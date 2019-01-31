@@ -34,7 +34,7 @@ namespace node {
   V(http_parser)                                                               \
 
 #if HAVE_OPENSSL
-#define NODE_VERSIONS_KEY_CRYPTO(V) V(openssl)
+#define NODE_VERSIONS_KEY_CRYPTO(V) V(openssl) V(ngtcp2)
 #else
 #define NODE_VERSIONS_KEY_CRYPTO(V)
 #endif
