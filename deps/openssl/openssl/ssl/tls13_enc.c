@@ -640,6 +640,56 @@ int tls13_change_cipher_state(SSL *s, int which)
         goto err;
     }
 
+    if (s->key_callback) {
+        int type;
+        if (label == client_early_traffic) {
+            type = SSL_KEY_CLIENT_EARLY_TRAFFIC;
+        } else if (label == client_handshake_traffic) {
+            type = SSL_KEY_CLIENT_HANDSHAKE_TRAFFIC;
+        } else if (label == client_application_traffic) {
+            type = SSL_KEY_CLIENT_APPLICATION_TRAFFIC;
+        } else if (label == server_handshake_traffic) {
+            type = SSL_KEY_SERVER_HANDSHAKE_TRAFFIC;
+        } else if (label == server_application_traffic) {
+            type = SSL_KEY_SERVER_APPLICATION_TRAFFIC;
+        } else {
+            SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_TLS13_CHANGE_CIPHER_STATE,
+                     ERR_R_INTERNAL_ERROR);
+            goto err;
+        }
+        if (!s->key_callback(s, type, secret, hashlen, s->key_callback_arg)) {
+            SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_TLS13_CHANGE_CIPHER_STATE,
+                     ERR_R_INTERNAL_ERROR);
+            goto err;
+        }
+
+        if (s->server) {
+            switch (type) {
+            case SSL_KEY_CLIENT_HANDSHAKE_TRAFFIC:
+            case SSL_KEY_CLIENT_APPLICATION_TRAFFIC:
+                if (s->rlayer.rbuf.left) {
+                    SSLfatal(s, SSL_AD_INTERNAL_ERROR,
+                             SSL_F_TLS13_CHANGE_CIPHER_STATE,
+                             ERR_R_INTERNAL_ERROR);
+                    goto err;
+                }
+                break;
+            }
+        } else {
+            switch (type) {
+            case SSL_KEY_SERVER_HANDSHAKE_TRAFFIC:
+            case SSL_KEY_SERVER_APPLICATION_TRAFFIC:
+                if (s->rlayer.rbuf.left) {
+                    SSLfatal(s, SSL_AD_INTERNAL_ERROR,
+                             SSL_F_TLS13_CHANGE_CIPHER_STATE,
+                             ERR_R_INTERNAL_ERROR);
+                    goto err;
+                }
+                break;
+            }
+        }
+    }
+
     if (label == server_application_traffic) {
         memcpy(s->server_app_traffic_secret, secret, hashlen);
         /* Now we create the exporter master secret */
