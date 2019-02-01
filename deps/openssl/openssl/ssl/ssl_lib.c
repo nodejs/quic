@@ -1816,6 +1816,12 @@ int SSL_read_early_data(SSL *s, void *buf, size_t num, size_t *readbytes)
         ret = SSL_accept(s);
         if (ret <= 0) {
             /* NBIO or error */
+            if ((s->mode & SSL_MODE_QUIC_HACK)
+                && s->ext.early_data == SSL_EARLY_DATA_ACCEPTED) {
+                *readbytes = 0;
+                return SSL_READ_EARLY_DATA_FINISH;
+            }
+
             s->early_data_state = SSL_EARLY_DATA_ACCEPT_RETRY;
             return SSL_READ_EARLY_DATA_ERROR;
         }
