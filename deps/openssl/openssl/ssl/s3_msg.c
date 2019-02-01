@@ -74,9 +74,16 @@ int ssl3_dispatch_alert(SSL *s)
     size_t written;
 
     s->s3->alert_dispatch = 0;
-    alertlen = 2;
-    i = do_ssl3_write(s, SSL3_RT_ALERT, &s->s3->send_alert[0], &alertlen, 1, 0,
-                      &written);
+
+    if (!(s->mode & SSL_MODE_QUIC_HACK)) {
+        alertlen = 2;
+        i = do_ssl3_write(s, SSL3_RT_ALERT, &s->s3->send_alert[0], &alertlen, 1,
+                          0, &written);
+    } else {
+        s->rwstate = SSL_WRITING;
+        i = 1;
+    }
+
     if (i <= 0) {
         s->s3->alert_dispatch = 1;
     } else {

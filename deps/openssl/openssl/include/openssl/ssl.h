@@ -494,6 +494,11 @@ typedef int (*SSL_verify_cb)(int preverify_ok, X509_STORE_CTX *x509_ctx);
  */
 # define SSL_MODE_ASYNC 0x00000100U
 
+/*
+ * Support QUIC Hack
+ */
+# define SSL_MODE_QUIC_HACK 0x00000800U
+
 /* Cert related flags */
 /*
  * Many implementations ignore some aspects of the TLS standards such as
@@ -620,6 +625,20 @@ void SSL_set_msg_callback(SSL *ssl,
                                       size_t len, SSL *ssl, void *arg));
 # define SSL_CTX_set_msg_callback_arg(ctx, arg) SSL_CTX_ctrl((ctx), SSL_CTRL_SET_MSG_CALLBACK_ARG, 0, (arg))
 # define SSL_set_msg_callback_arg(ssl, arg) SSL_ctrl((ssl), SSL_CTRL_SET_MSG_CALLBACK_ARG, 0, (arg))
+
+typedef enum {
+    SSL_KEY_CLIENT_EARLY_TRAFFIC,
+    SSL_KEY_CLIENT_HANDSHAKE_TRAFFIC,
+    SSL_KEY_CLIENT_APPLICATION_TRAFFIC,
+    SSL_KEY_SERVER_HANDSHAKE_TRAFFIC,
+    SSL_KEY_SERVER_APPLICATION_TRAFFIC
+} OSSL_KEY_TYPE;
+
+void SSL_set_key_callback(SSL *ssl,
+                          int (*cb)(SSL *ssl, int name,
+                                    const unsigned char *secret,
+                                    size_t secretlen, void *arg),
+                          void *arg);
 
 # define SSL_get_extms_support(s) \
         SSL_ctrl((s),SSL_CTRL_GET_EXTMS_SUPPORT,0,NULL)
