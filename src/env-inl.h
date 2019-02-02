@@ -606,6 +606,15 @@ inline void Environment::set_http2_state(
   http2_state_ = std::move(buffer);
 }
 
+inline QuicState* Environment::quic_state() const {
+  return quic_state_.get();
+}
+
+inline void Environment::set_quic_state(std::unique_ptr<QuicState> buffer) {
+  CHECK(!quic_state_);  // Should be set only once.
+  quic_state_ = std::move(buffer);
+}
+
 bool Environment::debug_enabled(DebugCategory category) const {
   DCHECK_GE(static_cast<int>(category), 0);
   DCHECK_LT(static_cast<int>(category),

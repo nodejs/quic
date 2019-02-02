@@ -25,7 +25,11 @@
 #include "ngtcp2_log.h"
 
 #include <stdio.h>
+
+#ifndef _WIN32
 #include <unistd.h>
+#endif
+
 #include <assert.h>
 #include <errno.h>
 

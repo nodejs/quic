@@ -24,6 +24,7 @@
 #include "node_crypto_bio.h"
 #include "node_crypto_clienthello-inl.h"
 #include "node_crypto_groups.h"
+#include "node_quic_session.h"
 #include "node_errors.h"
 #include "node_mutex.h"
 #include "node_process.h"
@@ -139,36 +140,51 @@ static X509_STORE* root_cert_store;
 static bool extra_root_certs_loaded = false;
 
 // Just to generate static methods
-template void SSLWrap<TLSWrap>::AddMethods(Environment* env,
-                                           Local<FunctionTemplate> t);
-template void SSLWrap<TLSWrap>::ConfigureSecureContext(SecureContext* sc);
-template void SSLWrap<TLSWrap>::SetSNIContext(SecureContext* sc);
-template int SSLWrap<TLSWrap>::SetCACerts(SecureContext* sc);
-template SSL_SESSION* SSLWrap<TLSWrap>::GetSessionCallback(
-    SSL* s,
-    const unsigned char* key,
-    int len,
-    int* copy);
-template int SSLWrap<TLSWrap>::NewSessionCallback(SSL* s,
-                                                  SSL_SESSION* sess);
-template void SSLWrap<TLSWrap>::KeylogCallback(const SSL* s,
-                                               const char* line);
-template void SSLWrap<TLSWrap>::OnClientHello(
-    void* arg,
-    const ClientHelloParser::ClientHello& hello);
-template int SSLWrap<TLSWrap>::TLSExtStatusCallback(SSL* s, void* arg);
-template void SSLWrap<TLSWrap>::DestroySSL();
-template int SSLWrap<TLSWrap>::SSLCertCallback(SSL* s, void* arg);
-template void SSLWrap<TLSWrap>::WaitForCertCb(CertCb cb, void* arg);
-template int SSLWrap<TLSWrap>::SelectALPNCallback(
-    SSL* s,
-    const unsigned char** out,
-    unsigned char* outlen,
-    const unsigned char* in,
-    unsigned int inlen,
+#define V(name)                                                                \
+  template void SSLWrap<name>::AddMethods(                                     \
+    Environment* env,                                                          \
+    Local<FunctionTemplate> t);                                                \
+  template void SSLWrap<name>::ConfigureSecureContext(                         \
+    SecureContext* sc);                                                        \
+  template void SSLWrap<name>::SetSNIContext(                                  \
+    SecureContext* sc);                                                        \
+  template int SSLWrap<name>::SetCACerts(                                      \
+    SecureContext* sc);                                                        \
+  template SSL_SESSION* SSLWrap<name>::GetSessionCallback(                     \
+    SSL* s,                                                                    \
+    const unsigned char* key,                                                  \
+    int len,                                                                   \
+    int* copy);                                                                \
+  template int SSLWrap<name>::NewSessionCallback(                              \
+    SSL* s,                                                                    \
+    SSL_SESSION* sess);                                                        \
+  template void SSLWrap<TLSWrap>::KeylogCallback(                              \
+    const SSL* s,                                                              \
+    const char* line);                                                         \
+  template void SSLWrap<name>::OnClientHello(                                  \
+    void* arg,                                                                 \
+    const ClientHelloParser::ClientHello& hello);                              \
+  template int SSLWrap<name>::TLSExtStatusCallback(                            \
+    SSL* s,                                                                    \
+    void* arg);                                                                \
+  template void SSLWrap<name>::DestroySSL();                                   \
+  template int SSLWrap<name>::SSLCertCallback(                                 \
+    SSL* s,                                                                    \
+    void* arg);                                                                \
+  template void SSLWrap<name>::WaitForCertCb(                                  \
+    CertCb cb,                                                                 \
+    void* arg);                                                                \
+  template int SSLWrap<name>::SelectALPNCallback(                              \
+    SSL* s,                                                                    \
+    const unsigned char** out,                                                 \
+    unsigned char* outlen,                                                     \
+    const unsigned char* in,                                                   \
+    unsigned int inlen,                                                        \
     void* arg);
+SSLWRAP_TYPES(V)
+#undef V
 
-static int PasswordCallback(char* buf, int size, int rwflag, void* u) {
+	static int PasswordCallback(char* buf, int size, int rwflag, void* u) {
   const char* passphrase = static_cast<char*>(u);
   if (passphrase != nullptr) {
     size_t buflen = static_cast<size_t>(size);
@@ -386,7 +402,7 @@ void ThrowCryptoError(Environment* env,
                       unsigned long err,  // NOLINT(runtime/int)
                       // Default, only used if there is no SSL `err` which can
                       // be used to create a long-style message string.
-                      const char* message = nullptr) {
+                      const char* message) {
   char message_buffer[128] = {0};
   if (err != 0 || message == nullptr) {
     ERR_error_string_n(err, message_buffer, sizeof(message_buffer));
@@ -629,6 +645,17 @@ void SecureContext::Init(const FunctionCallbackInfo<Value>& args) {
     } else if (strcmp(*sslmethod, "TLSv1_2_client_method") == 0) {
       min_version = TLS1_2_VERSION;
       max_version = TLS1_2_VERSION;
+      method = TLS_client_method();
+    } else if (strcmp(*sslmethod, "TLSv1_3_method") == 0) {
+      min_version = TLS1_3_VERSION;
+      max_version = TLS1_3_VERSION;
+    } else if (strcmp(*sslmethod, "TLSv1_3_server_method") == 0) {
+      min_version = TLS1_3_VERSION;
+      max_version = TLS1_3_VERSION;
+      method = TLS_server_method();
+    } else if (strcmp(*sslmethod, "TLSv1_3_client_method") == 0) {
+      min_version = TLS1_3_VERSION;
+      max_version = TLS1_3_VERSION;
       method = TLS_client_method();
     } else {
       const std::string msg("Unknown method: ");

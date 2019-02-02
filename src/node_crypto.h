@@ -87,6 +87,8 @@ class SecureContext : public BaseObject {
 
   static void Initialize(Environment* env, v8::Local<v8::Object> target);
 
+  SSL_CTX* operator*() const { return ctx_.get(); }
+
   // TODO(joyeecheung): track the memory used by OpenSSL types
   SET_NO_MEMORY_INFO()
   SET_MEMORY_INFO_NAME(SecureContext)
@@ -182,6 +184,12 @@ class SecureContext : public BaseObject {
     issuer_.reset();
   }
 };
+
+#define SSLWRAP_TYPES(V)                                                       \
+  V(TLSWrap)                                                                   \
+  V(quic::QuicServerSession)                                                   \
+  V(quic::QuicClientSession)
+
 
 // SSLWrap implicitly depends on the inheriting class' handle having an
 // internal pointer to the Base class.
@@ -815,6 +823,10 @@ bool EntropySource(unsigned char* buffer, size_t length);
 void SetEngine(const v8::FunctionCallbackInfo<v8::Value>& args);
 #endif  // !OPENSSL_NO_ENGINE
 void InitCrypto(v8::Local<v8::Object> target);
+
+void ThrowCryptoError(Environment* env,
+                      unsigned long err,  // NOLINT(runtime/int)
+                      const char* message = nullptr);
 
 }  // namespace crypto
 }  // namespace node

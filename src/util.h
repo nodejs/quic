@@ -673,6 +673,11 @@ constexpr size_t arraysize(const T (&)[N]) {
   return N;
 }
 
+template <typename T, size_t N>
+constexpr size_t strsize(const T (&)[N]) {
+  return N - 1;
+}
+
 // Round up a to the next highest multiple of b.
 template <typename T>
 constexpr T RoundUp(T a, T b) {
