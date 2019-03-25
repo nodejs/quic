@@ -35,7 +35,7 @@ socket.on('session', (session) => {
   session.on('secure', () => {
     // Once the TLS handshake is completed, we can
     // open streams...
-    const uni = session.openUnidirectionalStream();
+    const uni = session.openStream({ halfOpen: true });
     uni.write('hi ');
     uni.end('from the server!');
   });
@@ -139,23 +139,17 @@ added: REPLACEME
 
 Set to `true` if the `QuicSession` has been destroyed.
 
-### quicsession.openBidirectionalStream()
+### quicsession.openStream([options])
 <!--YAML
 added: REPLACEME
 -->
-
+* `options` {Object}
+  * `halfOpen` {boolean} Set to `true` to open a unidirectional stream, `false`
+    to open a bidirectional stream. Defaults to `true`.
+  * `highWaterMark` {number}
 * Returns: {QuicStream}
 
-Returns a new bidirectional `QuicStream`.
-
-### quicsession.openUnidirectionalStream()
-<!--YAML
-added: REPLACEME
--->
-
-* Returns: {QuicStream}
-
-Returns a new unidirectional `QuicStream`.
+Returns a new `QuicStream`.
 
 ### quicsession.socket
 <!--YAML

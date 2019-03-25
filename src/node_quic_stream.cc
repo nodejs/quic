@@ -64,7 +64,6 @@ QuicStream::QuicStream(
     streambuf_idx_(0),
     tx_stream_offset_(0),
     should_send_fin_(false) {
-  MakeWeak();
   CHECK_NOT_NULL(session);
   StreamBase::AttachToObject(GetObject());
   PushStreamListener(&stream_listener_);
@@ -125,11 +124,11 @@ int QuicStream::DoWrite(
     streambuf_.emplace_back(
         reinterpret_cast<uint8_t*>(bufs[i].base),
         bufs[i].len,
-        [&](int status, void* user_data) {
+        [&](int status, void* user_data, size_t len) {
           // TODO(@jasnell): Do we need any async magic happening here.
           WriteWrap* wrap = static_cast<WriteWrap*>(user_data);
           CHECK_NOT_NULL(wrap);
-          DecrementAvailableOutboundLength(bufs[i].len);
+          DecrementAvailableOutboundLength(len);
           wrap->Done(status);
         },
         // Persist references to the WriteWrap so it is not GC'd
@@ -152,24 +151,34 @@ QuicSession* QuicStream::Session() {
 int QuicStream::AckedDataOffset(
     uint64_t offset,
     size_t datalen) {
-  // Debug(this, "Acknowledging data for stream %llu. Offset %llu, Length %d.",
-  //       stream_id_, offset, datalen);
   QuicBuffer::AckData(
       streambuf_,
       streambuf_idx_,
       tx_stream_offset_,
       offset + datalen);
-
   if (streambuf_.empty() && flags_ & QUIC_STREAM_FLAG_SHUT) {
     if (session_->ShutdownStreamWrite(stream_id_) != 0) {
       return -1;
     }
   }
-
   return 0;
 }
 
 int QuicStream::Send0RTTData() {
+  int err;
+  for (auto it = std::begin(streambuf_) + streambuf_idx_;
+       it != std::end(streambuf_); ++it) {
+    auto& v = *it;
+    bool fin = should_send_fin_ &&
+               it + 1 == std::end(streambuf_);
+    err = session_->Send0RTTStreamData(this, fin, v);
+    if (err != 0)
+      return err;
+    if (v.size() > 0)
+      break;
+    ++streambuf_idx_;
+  }
+
   return 0;
 }
 

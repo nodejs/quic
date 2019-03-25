@@ -43,10 +43,10 @@ class QuicSocket : public HandleWrap {
     const char* address,
     const char* iface);
   void AddSession(
-    const std::string& dcid,
+    QuicCID& cid,
     QuicSession* session);
   void AssociateCID(
-    const std::string& cid,
+    QuicCID& cid,
     QuicServerSession* session);
   int Bind(
     const char* address,
@@ -54,7 +54,7 @@ class QuicSocket : public HandleWrap {
     uint32_t flags,
     int family);
   void DisassociateCID(
-    const std::string& cid);
+    QuicCID& cid);
   int DropMembership(
     const char* address,
     const char* iface);
@@ -64,7 +64,7 @@ class QuicSocket : public HandleWrap {
   int ReceiveStart();
   int ReceiveStop();
   void RemoveSession(
-    const std::string& cid);
+    QuicCID& cid);
   void ReportSendError(
     int error);
   void SendPendingData(
@@ -86,6 +86,7 @@ class QuicSocket : public HandleWrap {
     const sockaddr* dest,
     QuicBuffer* buf);
   void SetServerSessionSettings(
+    QuicSession* session,
     ngtcp2_settings* settings);
 
   crypto::SecureContext* GetServerSecureContext() {
@@ -123,12 +124,15 @@ class QuicSocket : public HandleWrap {
       const sockaddr* addr);
 
   QuicSession* ServerReceive(
-      const std::string& dcid,
+      QuicCID& dcid,
       ngtcp2_pkt_hd* hd,
       ssize_t nread,
       const uint8_t* data,
       const struct sockaddr* addr,
       unsigned int flags);
+  int SendRetry(
+    const ngtcp2_pkt_hd* chd,
+    const sockaddr* addr);
 
   template <typename T,
             int (*F)(const typename T::HandleType*, sockaddr*, int*)>
@@ -146,6 +150,8 @@ class QuicSocket : public HandleWrap {
   crypto::SecureContext* server_secure_context_;
   std::unordered_map<std::string, QuicSession*> sessions_;
   std::unordered_map<std::string, std::string> dcid_to_scid_;
+  CryptoContext token_crypto_ctx_;
+  std::array<uint8_t, TOKEN_SECRETLEN> token_secret_;
 
   struct socket_stats {
     // The total number of bytes received (and not ignored)

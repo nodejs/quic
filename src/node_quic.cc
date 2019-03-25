@@ -101,24 +101,57 @@ int ALPN_Select_Proto_CB(SSL* ssl,
   return SSL_TLSEXT_ERR_OK;
 }
 
-int Transport_Params_Add_CB(SSL* ssl,
-                            unsigned int ext_type,
-                            unsigned int context,
-                            const unsigned char** out,
-                            size_t* outlen,
-                            X509* x,
-                            size_t chainidx,
-                            int* al,
-                            void* add_arg) {
+int Client_Transport_Params_Add_CB(
+    SSL* ssl,
+    unsigned int ext_type,
+    unsigned int context,
+    const unsigned char** out,
+    size_t* outlen,
+    X509* x,
+    size_t chainidx,
+    int* al,
+    void* add_arg) {
   QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
 
   ngtcp2_transport_params params;
   session->GetLocalTransportParams(&params);
 
-  // params.v.ee.len = 1;
-  // params.v.ee.supported_versions[0] = NGTCP2_PROTO_VER_D19;
+  constexpr size_t bufsize = 64;
+  auto buf = std::make_unique<uint8_t[]>(bufsize);
+
+  auto nwrite = ngtcp2_encode_transport_params(
+      buf.get(), bufsize,
+      NGTCP2_TRANSPORT_PARAMS_TYPE_CLIENT_HELLO,
+      &params);
+  if (nwrite < 0) {
+    // Error encoding transport params
+    *al = SSL_AD_INTERNAL_ERROR;
+    return -1;
+  }
+
+  *out = buf.release();
+  *outlen = static_cast<size_t>(nwrite);
+
+  return 1;
+}
+
+int Server_Transport_Params_Add_CB(
+    SSL* ssl,
+    unsigned int ext_type,
+    unsigned int context,
+    const unsigned char** out,
+    size_t* outlen,
+    X509* x,
+    size_t chainidx,
+    int* al,
+    void* add_arg) {
+  QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
+
+  ngtcp2_transport_params params;
+  session->GetLocalTransportParams(&params);
 
   constexpr size_t bufsize = 512;
+
   auto buf = std::make_unique<uint8_t[]>(bufsize);
 
   ssize_t nwrite = ngtcp2_encode_transport_params(
@@ -145,15 +178,52 @@ void Transport_Params_Free_CB(SSL* ssl,
   delete[] const_cast<unsigned char*>(out);
 }
 
-int Transport_Params_Parse_CB(SSL* ssl,
-                              unsigned int ext_type,
-                              unsigned int context,
-                              const unsigned char* in,
-                              size_t inlen,
-                              X509* x,
-                              size_t chainidx,
-                              int* al,
-                              void* parse_arg) {
+int Client_Transport_Params_Parse_CB(
+    SSL* ssl,
+    unsigned int ext_type,
+    unsigned int context,
+    const unsigned char* in,
+    size_t inlen,
+    X509* x,
+    size_t chainidx,
+    int* al,
+    void* parse_arg) {
+  QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
+
+  ngtcp2_transport_params params;
+
+  if (ngtcp2_decode_transport_params(
+          &params,
+          NGTCP2_TRANSPORT_PARAMS_TYPE_ENCRYPTED_EXTENSIONS,
+          in, inlen) != 0) {
+    *al = SSL_AD_ILLEGAL_PARAMETER;
+    return -1;
+  }
+
+  if (session->SetRemoteTransportParams(&params) != 0) {
+    *al = SSL_AD_ILLEGAL_PARAMETER;
+    return -1;
+  }
+
+  // TODO(@jasnell): Write the transport params for session resumption later
+  // if (config.tp_file && write_transport_params(config.tp_file, &params) != 0) {
+  //   std::cerr << "Could not write transport parameters in " << config.tp_file
+  //             << std::endl;
+  // }
+
+  return 1;
+}
+
+int Server_Transport_Params_Parse_CB(
+    SSL* ssl,
+    unsigned int ext_type,
+    unsigned int context,
+    const unsigned char* in,
+    size_t inlen,
+    X509* x,
+    size_t chainidx,
+    int* al,
+    void* parse_arg) {
   if (context != SSL_EXT_CLIENT_HELLO) {
     *al = SSL_AD_ILLEGAL_PARAMETER;
     return -1;
@@ -161,23 +231,18 @@ int Transport_Params_Parse_CB(SSL* ssl,
 
   QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
 
-  int err;
-
   ngtcp2_transport_params params;
 
-  err = ngtcp2_decode_transport_params(
-       &params,
-       NGTCP2_TRANSPORT_PARAMS_TYPE_CLIENT_HELLO,
-       in, inlen);
-  if (err != 0) {
+  if (ngtcp2_decode_transport_params(
+          &params,
+          NGTCP2_TRANSPORT_PARAMS_TYPE_CLIENT_HELLO,
+          in, inlen) != 0) {
     // Error decoding transport params
     *al = SSL_AD_ILLEGAL_PARAMETER;
     return -1;
   }
 
-  err = session->SetRemoteTransportParams(&params);
-  if (err != 0) {
-    // Error setting remote transport params
+  if (session->SetRemoteTransportParams(&params) != 0) {
     *al = SSL_AD_ILLEGAL_PARAMETER;
     return -1;
   }
@@ -191,8 +256,7 @@ int Transport_Params_Parse_CB(SSL* ssl,
 void QuicInitSecureContext(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   CHECK(args[0]->IsObject());  // Secure Context
-  CHECK(args[1]->IsString());  // ciphers
-  CHECK(args[2]->IsString());  // groups
+  CHECK(args[1]->IsString());  // groups
   SecureContext* sc;
   ASSIGN_OR_RETURN_UNWRAP(&sc, args[0].As<Object>(),
                           args.GetReturnValue().Set(UV_EBADF));
@@ -204,32 +268,52 @@ void QuicInitSecureContext(const FunctionCallbackInfo<Value>& args) {
   SSL_CTX_set_options(**sc, ssl_opts);
   SSL_CTX_clear_options(**sc, SSL_OP_ENABLE_MIDDLEBOX_COMPAT);
   SSL_CTX_set_mode(**sc, SSL_MODE_RELEASE_BUFFERS | SSL_MODE_QUIC_HACK);
-  SSL_CTX_set_min_proto_version(**sc, TLS1_3_VERSION);
-  SSL_CTX_set_max_proto_version(**sc, TLS1_3_VERSION);
   SSL_CTX_set_default_verify_paths(**sc);
   SSL_CTX_set_max_early_data(**sc, std::numeric_limits<uint32_t>::max());
   SSL_CTX_set_alpn_select_cb(**sc, ALPN_Select_Proto_CB, nullptr);
-  CHECK_EQ(SSL_CTX_add_custom_ext(
-           **sc,
-           NGTCP2_TLSEXT_QUIC_TRANSPORT_PARAMETERS,
-           SSL_EXT_CLIENT_HELLO | SSL_EXT_TLS1_3_ENCRYPTED_EXTENSIONS,
-           Transport_Params_Add_CB,
-           Transport_Params_Free_CB, nullptr,
-           Transport_Params_Parse_CB, nullptr), 1);
+  CHECK_EQ(
+      SSL_CTX_add_custom_ext(
+          **sc,
+          NGTCP2_TLSEXT_QUIC_TRANSPORT_PARAMETERS,
+          SSL_EXT_CLIENT_HELLO | SSL_EXT_TLS1_3_ENCRYPTED_EXTENSIONS,
+          Server_Transport_Params_Add_CB,
+          Transport_Params_Free_CB, nullptr,
+          Server_Transport_Params_Parse_CB,
+          nullptr), 1);
 
-  // TODO(@jasnell): This is only necessary because crypto::SecureContext
-  // does not set this properly for TLS 1.3 yet. If that can be fixed
-  // there, we can drop this here, but I don't want to look at that just
-  // yet.
-  const node::Utf8Value ciphers(env->isolate(), args[1]);
-  if (!SSL_CTX_set_ciphersuites(**sc, *ciphers)) {
+  const node::Utf8Value groups(env->isolate(), args[1]);
+  if (!SSL_CTX_set1_groups_list(**sc, *groups)) {
     unsigned long err = ERR_get_error();  // NOLINT(runtime/int)
     if (!err)
-      return env->ThrowError("Failed to set ciphers");
+      return env->ThrowError("Failed to set groups");
     return crypto::ThrowCryptoError(env, err);
   }
+}
 
-  const node::Utf8Value groups(env->isolate(), args[2]);
+void QuicInitSecureContextClient(const FunctionCallbackInfo<Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  CHECK(args[0]->IsObject());  // Secure Context
+  CHECK(args[1]->IsString());  // groups
+  SecureContext* sc;
+  ASSIGN_OR_RETURN_UNWRAP(&sc, args[0].As<Object>(),
+                          args.GetReturnValue().Set(UV_EBADF));
+
+  SSL_CTX_set_mode(**sc, SSL_MODE_QUIC_HACK);
+  SSL_CTX_clear_options(**sc, SSL_OP_ENABLE_MIDDLEBOX_COMPAT);
+  SSL_CTX_set_default_verify_paths(**sc);
+
+  CHECK_EQ(SSL_CTX_add_custom_ext(
+      **sc,
+      NGTCP2_TLSEXT_QUIC_TRANSPORT_PARAMETERS,
+      SSL_EXT_CLIENT_HELLO | SSL_EXT_TLS1_3_ENCRYPTED_EXTENSIONS,
+      Client_Transport_Params_Add_CB,
+      Transport_Params_Free_CB,
+      nullptr,
+      Client_Transport_Params_Parse_CB,
+      nullptr), 1);
+
+
+  const node::Utf8Value groups(env->isolate(), args[1]);
   if (!SSL_CTX_set1_groups_list(**sc, *groups)) {
     unsigned long err = ERR_get_error();  // NOLINT(runtime/int)
     if (!err)
@@ -255,7 +339,7 @@ void Initialize(Local<Object> target,
               FIXED_ONE_BYTE_STRING(isolate, (name)), \
               (field)).FromJust()
   SET_STATE_TYPEDARRAY(
-    "socketConfig", state->quicsocketconfig_buffer.GetJSArray());
+    "socketConfig", state->quicsessionconfig_buffer.GetJSArray());
 #undef SET_STATE_TYPEDARRAY
 
   env->set_quic_state(std::move(state));
@@ -265,10 +349,21 @@ void Initialize(Local<Object> target,
   QuicClientSession::Initialize(env, target, context);
   QuicStream::Initialize(env, target, context);
 
-  env->SetMethod(target, "setCallbacks", QuicSetCallbacks);
-  env->SetMethod(target, "protocolVersion", QuicProtocolVersion);
-  env->SetMethod(target, "alpnVersion", QuicALPNVersion);
-  env->SetMethod(target, "initSecureContext", QuicInitSecureContext);
+  env->SetMethod(target,
+                 "setCallbacks",
+                 QuicSetCallbacks);
+  env->SetMethod(target,
+                 "protocolVersion",
+                 QuicProtocolVersion);
+  env->SetMethod(target,
+                 "alpnVersion",
+                 QuicALPNVersion);
+  env->SetMethod(target,
+                 "initSecureContext",
+                 QuicInitSecureContext);
+  env->SetMethod(target,
+                 "initSecureContextClient",
+                 QuicInitSecureContextClient);
 
   Local<Object> constants = Object::New(env->isolate());
   NODE_DEFINE_CONSTANT(constants, AF_INET);
@@ -282,6 +377,7 @@ void Initialize(Local<Object> target,
   NODE_DEFINE_CONSTANT(constants, UV_UDP_IPV6ONLY);
   NODE_DEFINE_CONSTANT(constants, UV_EBADF);
   NODE_DEFINE_CONSTANT(constants, DEFAULT_MAX_STREAM_DATA_BIDI_LOCAL);
+  NODE_DEFINE_CONSTANT(constants, TLS1_3_VERSION);
   target->Set(context,
               env->constants_string(),
               constants).FromJust();

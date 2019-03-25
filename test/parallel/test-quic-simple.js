@@ -16,11 +16,12 @@ const socket = createSocket({ type: 'udp4', port: 1234 });
 socket.listen({ key, cert, ca });
 
 socket.on('session', common.mustCall((session) => {
-  console.log(session);
 
   session.on('secure', () => {
-    // We can only open a stream after the handshake has completed
-    const uni = session.openUnidirectionalStream();
+    // We can only open a unidirectional stream after the handshake has
+    // completed.
+    // TODO(@jasnell): This will change once we get 0RTT working
+    const uni = session.openStream({ halfOpen: true });
     uni.write("I wonder if it worked.");
     uni.end('test');
   });

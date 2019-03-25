@@ -30,15 +30,12 @@ namespace quic {
 
 namespace {
 inline uint32_t GenerateReservedVersion(
-    const sockaddr* sa,
+    const sockaddr* addr,
     uint32_t version) {
-  socklen_t salen =
-      sa->sa_family == AF_INET6 ?
-          sizeof(sockaddr_in6) :
-          sizeof(sockaddr_in);
+  socklen_t addrlen = SocketAddress::GetAddressLen(addr);
   uint32_t h = 0x811C9DC5u;
-  const uint8_t* p = reinterpret_cast<const uint8_t*>(sa);
-  const uint8_t* ep = p + salen;
+  const uint8_t* p = reinterpret_cast<const uint8_t*>(addr);
+  const uint8_t* ep = p + addrlen;
   for (; p != ep; ++p) {
     h ^= *p;
     h *= 0x01000193u;
@@ -64,10 +61,13 @@ QuicSocket::QuicSocket(
                AsyncWrap::PROVIDER_QUICSOCKET),
                server_listening_(false),
                validate_addr_(false),
-               server_secure_context_(nullptr) {
-  MakeWeak();
+               server_secure_context_(nullptr),
+               token_crypto_ctx_{} {
   CHECK_EQ(uv_udp_init(env->event_loop(), &handle_), 0);
   Debug(this, "New QuicSocket created.");
+
+  QuicSession::SetupTokenContext(token_crypto_ctx_);
+  EntropySource(token_secret_.data(), token_secret_.size());
 }
 
 QuicSocket::~QuicSocket() {
@@ -95,20 +95,19 @@ void QuicSocket::MemoryInfo(MemoryTracker* tracker) const {
 }
 
 void QuicSocket::AddSession(
-    const std::string& dcid,
+    QuicCID& cid,
     QuicSession* session) {
-  sessions_.emplace(dcid, session);
-  Debug(this, "QuicSession added to the QuicSocket.");
+  sessions_.emplace(cid.ToStr(), session);
+  Debug(this, "QuicSession %s added to the QuicSocket.", cid.ToHex().c_str());
 }
 
 void QuicSocket::AssociateCID(
-    const std::string& cid,
+    QuicCID& cid,
     QuicServerSession* session) {
-  auto scid = session->scid();
-  std::string scid_str(scid->data, scid->data + scid->datalen);
+  QuicCID scid(session->scid());
   Debug(this, "Associating scid %s with cid %s.",
-        scid_str.c_str(), cid.c_str());
-  dcid_to_scid_.emplace(cid, scid_str);
+        scid.ToHex().c_str(), cid.ToHex().c_str());
+  dcid_to_scid_.emplace(cid.ToStr(), scid.ToStr());
 }
 
 int QuicSocket::Bind(
@@ -120,19 +119,8 @@ int QuicSocket::Bind(
         "Binding to address %s, port %d, with flags %d, and family %d",
         address, port, flags, family);
 
-  char addr[sizeof(sockaddr_in6)];
-  int err;
-  switch (family) {
-  case AF_INET:
-    err = uv_ip4_addr(address, port, reinterpret_cast<sockaddr_in*>(&addr));
-    break;
-  case AF_INET6:
-    err = uv_ip6_addr(address, port, reinterpret_cast<sockaddr_in6*>(&addr));
-    break;
-  default:
-    CHECK(0 && "unexpected address family");
-    ABORT();
-  }
+  sockaddr_storage addr;
+  int err = SocketAddress::ToSockAddr(family, address, port, &addr);
   if (err != 0)
     return err;
 
@@ -161,9 +149,9 @@ int QuicSocket::Bind(
   return 0;
 }
 
-void QuicSocket::DisassociateCID(const std::string& cid) {
-  Debug(this, "Removing associations for cid %s.", cid.c_str());
-  dcid_to_scid_.erase(cid);
+void QuicSocket::DisassociateCID(QuicCID& cid) {
+  Debug(this, "Removing associations for cid %s", cid.ToHex().c_str());
+  dcid_to_scid_.erase(cid.ToStr());
 }
 
 SocketAddress* QuicSocket::GetLocalAddress() {
@@ -245,17 +233,19 @@ void QuicSocket::Receive(
   }
 
   // Extract the DCID
-  std::string dcid(hd.dcid.data, hd.dcid.data + hd.dcid.datalen);
-  Debug(this, "Received a QUIC packet for dcid %s", dcid.c_str());
+  QuicCID dcid(hd.dcid);
+  auto dcid_hex = dcid.ToHex();
+  auto dcid_str = dcid.ToStr();
+  Debug(this, "Received a QUIC packet for dcid %s", dcid.ToHex().c_str());
 
   QuicSession* session = nullptr;
 
   // Identify the appropriate handler
-  auto session_it = sessions_.find(dcid);
+  auto session_it = sessions_.find(dcid_str);
   if (session_it == std::end(sessions_)) {
-    auto scid_it = dcid_to_scid_.find(dcid);
+    auto scid_it = dcid_to_scid_.find(dcid_str);
     if (scid_it == std::end(dcid_to_scid_)) {
-      Debug(this, "There is no existing session for dcid %s", dcid.c_str());
+      Debug(this, "There is no existing session for dcid %s", dcid_hex.c_str());
       if (!server_listening_) {
         Debug(this, "Ignoring unhandled packet.");
         return;
@@ -281,7 +271,7 @@ void QuicSocket::Receive(
 
   CHECK_NOT_NULL(session);
   // An appropriate handler was found! Dispatch the data
-  Debug(this, "Dispatching packet to session for dcid %s", dcid.c_str());
+  Debug(this, "Dispatching packet to session for dcid %s", dcid_hex.c_str());
   err = session->Receive(&hd, nread, data, addr, flags);
   if (err != 0) {
     Debug(this,
@@ -312,9 +302,9 @@ int QuicSocket::ReceiveStop() {
   return uv_udp_recv_stop(&handle_);
 }
 
-void QuicSocket::RemoveSession(const std::string& cid) {
-  Debug(this, "Removing QuicSession for cid %s.", cid.c_str());
-  sessions_.erase(cid);
+void QuicSocket::RemoveSession(QuicCID& cid) {
+  Debug(this, "Removing QuicSession for cid %s.", cid.ToHex().c_str());
+  sessions_.erase(cid.ToStr());
 }
 
 void QuicSocket::ReportSendError(int error) {
@@ -324,6 +314,10 @@ void QuicSocket::ReportSendError(int error) {
 
 void QuicSocket::SendPendingData(
     bool retransmit) {
+
+  HandleScope handle_scope(env()->isolate());
+  InternalCallbackScope callback_scope(this);
+
   // TODO(@jasnell): Explore scheduled writes similar to how we do
   // it with http2, except as soon as possible rather than on event
   // loop turn over.
@@ -367,8 +361,54 @@ int QuicSocket::SendVersionNegotiation(
   return SendPacket(addr, &buf);
 }
 
+int QuicSocket::SendRetry(
+    const ngtcp2_pkt_hd* chd,
+    const sockaddr* addr) {
+
+  std::array<uint8_t, 256> token;
+  size_t tokenlen = token.size();
+
+  if (QuicSession::GenerateToken(
+          token.data(), tokenlen,
+          addr,
+          &chd->dcid,
+          token_crypto_ctx_,
+          token_secret_) != 0) {
+    return -1;
+  }
+  QuicBuffer buf{NGTCP2_MAX_PKTLEN_IPV4};
+  ngtcp2_pkt_hd hd;
+
+  hd.version = chd->version;
+  hd.flags = NGTCP2_PKT_FLAG_LONG_FORM;
+  hd.type = NGTCP2_PKT_RETRY;
+  hd.pkt_num = 0;
+  hd.token = nullptr;
+  hd.tokenlen = 0;
+  hd.len = 0;
+  hd.dcid = chd->scid;
+  hd.scid.datalen = NGTCP2_SV_SCIDLEN;
+
+  EntropySource(hd.scid.data, hd.scid.datalen);
+
+  ssize_t nwrite =
+      ngtcp2_pkt_write_retry(
+          buf.wpos(), buf.left(),
+          &hd, &chd->dcid,
+          token.data(), tokenlen);
+  if (nwrite < 0)
+    return -1;
+
+  buf.push(nwrite);
+
+  if (SendPacket(addr, &buf) != 0)
+    return -1;
+
+  return 0;
+}
+
 QuicSession* QuicSocket::ServerReceive(
-    const std::string& dcid,
+    QuicCID& dcid,
     ngtcp2_pkt_hd* hd,
     ssize_t nread,
     const uint8_t* data,
@@ -400,13 +440,17 @@ QuicSession* QuicSocket::ServerReceive(
   ngtcp2_cid *pocid = nullptr;
   if (validate_addr_ && hd->type == NGTCP2_PKT_INITIAL) {
     Debug(this, "Stateless address validation.");
-    // TODO(@jasnell): Implement this
-    // if (hd.tokenlen == 0 ||
-    //     verify_token(&ocid, &hd, &su.sa, addrlen) != 0) {
-    //   send_retry(&hd, &su.sa, addrlen);
-    //   return 0;
-    // }
-    // pocid = &ocid;
+    if (hd->tokenlen == 0 ||
+        QuicSession::VerifyToken(
+            env(), &ocid,
+            hd, addr,
+            token_crypto_ctx_,
+            token_secret_) != 0) {
+      Debug(this, "Invalid token. Sending retry");
+      SendRetry(hd, addr);
+      return 0;
+    }
+    pocid = &ocid;
   }
 
   Debug(this, "Creating and initializing a new QuicServerSession.");
@@ -429,11 +473,10 @@ QuicSession* QuicSocket::ServerReceive(
     return nullptr;
   }
 
-  auto scid = session->scid();
-  std::string scid_str(scid->data, scid->data + scid->datalen);
+  QuicCID scid(session->scid());
   Debug(this, "The new QuicServerSession was created successfully. scid %s",
-        scid_str.c_str());
-  AddSession(scid_str, session);
+        scid.ToHex().c_str());
+  AddSession(scid, session);
   AssociateCID(dcid, session);
 
   // Notify the JavaScript side that a new server session has been created
@@ -501,8 +544,10 @@ int QuicSocket::SendPacket(
   return wrap->Send();
 }
 
-void QuicSocket::SetServerSessionSettings(ngtcp2_settings* settings) {
-  server_session_config_.ToSettings(settings);
+void QuicSocket::SetServerSessionSettings(
+    QuicSession* session,
+    ngtcp2_settings* settings) {
+  server_session_config_.ToSettings(settings, true);
 }
 
 QuicSocket::SendWrap::SendWrap(

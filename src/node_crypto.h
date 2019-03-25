@@ -186,10 +186,7 @@ class SecureContext : public BaseObject {
 };
 
 #define SSLWRAP_TYPES(V)                                                       \
-  V(TLSWrap)                                                                   \
-  V(quic::QuicServerSession)                                                   \
-  V(quic::QuicClientSession)
-
+  V(TLSWrap)
 
 // SSLWrap implicitly depends on the inheriting class' handle having an
 // internal pointer to the Base class.
