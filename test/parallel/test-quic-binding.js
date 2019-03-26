@@ -11,6 +11,6 @@ const quic = internalBinding('quic');
 assert(quic);
 
 // Version numbers used to identify IETF drafts are created by adding the draft
-// number to 0xff0000, in this case 11 (17).
-assert.strictEqual(quic.protocolVersion().toString(16), 'ff000011');
-assert.strictEqual(quic.alpnVersion(), '\u0005hq-17');
+// number to 0xff0000, in this case 13 (19).
+assert.strictEqual(quic.protocolVersion().toString(16), 'ff000013');
+assert.strictEqual(quic.alpnVersion(), '\u0005h3-19');
