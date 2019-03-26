@@ -31,7 +31,7 @@ class QuicState {
     quicsocketconfig_buffer(
       isolate,
       offsetof(quic_state_internal, quicsocketconfig_buffer),
-      IDX_QUIC_SOCKET_CONFIG_COUNT,
+      IDX_QUIC_SOCKET_CONFIG_COUNT + 1,
       root_buffer) {
   }
 
@@ -41,7 +41,7 @@ class QuicState {
  private:
   struct quic_state_internal {
     // doubles first so that they are always sizeof(double)-aligned
-    double quicsocketconfig_buffer[IDX_QUIC_SOCKET_CONFIG_COUNT];
+    double quicsocketconfig_buffer[IDX_QUIC_SOCKET_CONFIG_COUNT + 1];
   };
 };
 
