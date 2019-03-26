@@ -66,7 +66,7 @@ class QuicSession : public AsyncWrap {
   virtual void AddStream(
     QuicStream* stream);
   virtual int AckedStreamDataOffset(
-    uint64_t stream_id,
+    int64_t stream_id,
     uint64_t offset,
     size_t datalen);
   virtual void AssociateCID(
@@ -81,7 +81,7 @@ class QuicSession : public AsyncWrap {
     uint64_t max_streams) { return 0; }
   virtual int ExtendMaxStreamsBidi(
     uint64_t max_streams) { return 0; }
-  virtual int GetLocalTransportParams(
+  virtual void GetLocalTransportParams(
     ngtcp2_transport_params* params);
   virtual uint32_t GetNegotiatedVersion();
   virtual SocketAddress* GetRemoteAddress();
@@ -94,22 +94,22 @@ class QuicSession : public AsyncWrap {
     int name,
     const uint8_t *secret,
     size_t secretlen);
-  virtual int OpenBidirectionalStream(uint64_t* stream_id);
-  virtual int OpenUnidirectionalStream(uint64_t* stream_id);
+  virtual int OpenBidirectionalStream(int64_t* stream_id);
+  virtual int OpenUnidirectionalStream(int64_t* stream_id);
   virtual size_t ReadPeerHandshake(
     uint8_t* buf,
     size_t buflen);
   virtual size_t ReadHandshake(
     const uint8_t** pdest);
   virtual int ReceiveStreamData(
-    uint64_t stream_id,
+    int64_t stream_id,
     int fin,
     uint64_t offset,
     const uint8_t* data,
     size_t datalen);
   virtual int ReceiveRetry() { return 0; }
   virtual void RemoveStream(
-    uint64_t stream_id);
+    int64_t stream_id);
   virtual void ScheduleRetransmit();
   virtual int SendStreamData(
       QuicStream* stream,
@@ -120,10 +120,10 @@ class QuicSession : public AsyncWrap {
   virtual int SetRemoteTransportParams(
     ngtcp2_transport_params* params);
   virtual int ShutdownStreamRead(
-    uint64_t stream_id,
+    int64_t stream_id,
     uint16_t code = NGTCP2_APP_NOERROR);
   virtual int ShutdownStreamWrite(
-    uint64_t stream_id,
+    int64_t stream_id,
     uint16_t code = NGTCP2_APP_NOERROR);
   virtual QuicSocket* Socket();
   virtual void StartIdleTimer(
@@ -131,7 +131,7 @@ class QuicSession : public AsyncWrap {
   virtual void StopIdleTimer();
   virtual void StopRetransmitTimer();
   virtual int StreamOpen(
-    uint64_t stream_id);
+    int64_t stream_id);
   virtual int TLSHandshake();
   virtual int TLSRead();
   virtual void WritePeerHandshake(
@@ -143,6 +143,7 @@ class QuicSession : public AsyncWrap {
 
   // These must be implemented by QuicSession types
   virtual int DoHandshake(
+    const ngtcp2_path* path,
     const uint8_t* data,
     size_t datalen) = 0;
   virtual int HandleError(int code) = 0;
@@ -181,6 +182,7 @@ class QuicSession : public AsyncWrap {
     void* user_data);
   static int OnReceiveCryptoData(
     ngtcp2_conn* conn,
+    ngtcp2_crypto_level crypto_level,
     uint64_t offset,
     const uint8_t* data,
     size_t datalen,
@@ -260,7 +262,7 @@ class QuicSession : public AsyncWrap {
     void* user_data);
   static int OnReceiveStreamData(
     ngtcp2_conn* conn,
-    uint64_t stream_id,
+    int64_t stream_id,
     int fin,
     uint64_t offset,
     const uint8_t* data,
@@ -279,20 +281,20 @@ class QuicSession : public AsyncWrap {
     void* user_data);
   static int OnAckedStreamDataOffset(
     ngtcp2_conn* conn,
-    uint64_t stream_id,
+    int64_t stream_id,
     uint64_t offset,
     size_t datalen,
     void* user_data,
     void* stream_user_data);
   static int OnStreamClose(
     ngtcp2_conn* conn,
-    uint64_t stream_id,
+    int64_t stream_id,
     uint16_t app_error_code,
     void* user_data,
     void* stream_user_data);
   static int OnStreamOpen(
     ngtcp2_conn* conn,
-    uint64_t stream_id,
+    int64_t stream_id,
     void* user_data);
   static int OnRand(
     ngtcp2_conn* conn,
@@ -396,7 +398,7 @@ class QuicSession : public AsyncWrap {
     const uint8_t* sample,
     size_t samplelen);
   void StreamClose(
-    uint64_t stream_id,
+    int64_t stream_id,
     uint16_t app_error_code);
   int UpdateKey();
   void RemoveConnectionID(
@@ -406,7 +408,7 @@ class QuicSession : public AsyncWrap {
     uint8_t* token,
     size_t cidlen);
 
-  QuicStream* CreateStream(uint64_t stream_id);
+  QuicStream* CreateStream(int64_t stream_id);
   void WriteHandshake(std::deque<QuicBuffer> &dest,
                       size_t& idx,
                       const uint8_t* data,
@@ -461,6 +463,7 @@ class QuicServerSession : public QuicSession,
     const ngtcp2_cid* cid) override;
 
   int DoHandshake(
+    const ngtcp2_path *path,
     const uint8_t* data,
     size_t datalen) override;
 
@@ -559,6 +562,7 @@ class QuicClientSession : public QuicSession,
     uint32_t version);
 
   int DoHandshake(
+    const ngtcp2_path *path,
     const uint8_t* data,
     size_t datalen) override;
 

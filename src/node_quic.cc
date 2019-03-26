@@ -58,12 +58,12 @@ void QuicSetCallbacks(const FunctionCallbackInfo<Value>& args) {
 }
 
 void QuicProtocolVersion(const FunctionCallbackInfo<Value>& args) {
-  args.GetReturnValue().Set(NGTCP2_PROTO_VER_D17);
+  args.GetReturnValue().Set(NGTCP2_PROTO_VER_D19);
 }
 
 void QuicALPNVersion(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
-  args.GetReturnValue().Set(OneByteString(env->isolate(), NGTCP2_ALPN_D17));
+  args.GetReturnValue().Set(OneByteString(env->isolate(), NGTCP2_ALPN_D19));
 }
 
 int ALPN_Select_Proto_CB(SSL* ssl,
@@ -78,9 +78,9 @@ int ALPN_Select_Proto_CB(SSL* ssl,
   uint32_t version = session->GetNegotiatedVersion();
 
   switch (version) {
-  case NGTCP2_PROTO_VER_D17:
-    alpn = reinterpret_cast<const uint8_t*>(NGTCP2_ALPN_D17);
-    alpnlen = strsize(NGTCP2_ALPN_D17);
+  case NGTCP2_PROTO_VER_D19:
+    alpn = reinterpret_cast<const uint8_t*>(NGTCP2_ALPN_D19);
+    alpnlen = strsize(NGTCP2_ALPN_D19);
     break;
   default:
     // Unexpected QUIC protocol version
@@ -113,13 +113,10 @@ int Transport_Params_Add_CB(SSL* ssl,
   QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
 
   ngtcp2_transport_params params;
-  if (session->GetLocalTransportParams(&params) != 0) {
-    *al = SSL_AD_INTERNAL_ERROR;
-    return -1;
-  }
+  session->GetLocalTransportParams(&params);
 
-  params.v.ee.len = 1;
-  params.v.ee.supported_versions[0] = NGTCP2_PROTO_VER_D17;
+  // params.v.ee.len = 1;
+  // params.v.ee.supported_versions[0] = NGTCP2_PROTO_VER_D19;
 
   constexpr size_t bufsize = 512;
   auto buf = std::make_unique<uint8_t[]>(bufsize);

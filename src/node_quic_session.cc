@@ -706,6 +706,7 @@ int QuicSession::OnReceiveClientInitial(
 
 int QuicSession::OnReceiveCryptoData(
     ngtcp2_conn* conn,
+    ngtcp2_crypto_level crypto_level,
     uint64_t offset,
     const uint8_t* data,
     size_t datalen,
@@ -910,7 +911,7 @@ ssize_t QuicSession::OnDoHPMask(
 
 int QuicSession::OnReceiveStreamData(
     ngtcp2_conn* conn,
-    uint64_t stream_id,
+    int64_t stream_id,
     int fin,
     uint64_t offset,
     const uint8_t* data,
@@ -926,7 +927,7 @@ int QuicSession::OnReceiveStreamData(
 
 int QuicSession::OnStreamOpen(
     ngtcp2_conn* conn,
-    uint64_t stream_id,
+    int64_t stream_id,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
   CHECK_NOT_NULL(session);
@@ -948,7 +949,7 @@ int QuicSession::OnAckedCryptoOffset(
 
 int QuicSession::OnAckedStreamDataOffset(
     ngtcp2_conn* conn,
-    uint64_t stream_id,
+    int64_t stream_id,
     uint64_t offset,
     size_t datalen,
     void* user_data,
@@ -962,7 +963,7 @@ int QuicSession::OnAckedStreamDataOffset(
 
 int QuicSession::OnStreamClose(
     ngtcp2_conn* conn,
-    uint64_t stream_id,
+    int64_t stream_id,
     uint16_t app_error_code,
     void* user_data,
     void* stream_user_data) {
@@ -1069,7 +1070,7 @@ void QuicSession::AckedCryptoOffset(
 }
 
 int QuicSession::AckedStreamDataOffset(
-    uint64_t stream_id,
+    int64_t stream_id,
     uint64_t offset,
     size_t datalen) {
   QuicStream* stream = static_cast<QuicStream*>(FindStream(stream_id));
@@ -1236,12 +1237,9 @@ QuicStream* QuicSession::FindStream(
   return (*it).second;
 }
 
-int QuicSession::GetLocalTransportParams(
+void QuicSession::GetLocalTransportParams(
     ngtcp2_transport_params* params) {
-  return ngtcp2_conn_get_local_transport_params(
-    connection_,
-    params,
-    NGTCP2_TRANSPORT_PARAMS_TYPE_ENCRYPTED_EXTENSIONS);
+  ngtcp2_conn_get_local_transport_params(connection_, params);
 }
 
 uint32_t QuicSession::GetNegotiatedVersion() {
@@ -1531,7 +1529,7 @@ int QuicSession::ReceiveCryptoData(
 }
 
 int QuicSession::ReceiveStreamData(
-    uint64_t stream_id,
+    int64_t stream_id,
     int fin,
     uint64_t offset,
     const uint8_t* data,
@@ -1568,7 +1566,7 @@ void QuicSession::RemoveConnectionID(
 }
 
 void QuicSession::RemoveStream(
-    uint64_t stream_id) {
+    int64_t stream_id) {
   Debug(this, "Removing stream %llu", stream_id);
   streams_.erase(stream_id);
 }
@@ -1635,10 +1633,7 @@ int QuicSession::SendPacket() {
 
 int QuicSession::SetRemoteTransportParams(
     ngtcp2_transport_params* params) {
-  return ngtcp2_conn_set_remote_transport_params(
-    connection_,
-    NGTCP2_TRANSPORT_PARAMS_TYPE_CLIENT_HELLO,
-    params);
+  return ngtcp2_conn_set_remote_transport_params(connection_, params);
 }
 
 void QuicSession::ScheduleRetransmit() {
@@ -1675,7 +1670,7 @@ void QuicSession::SetTLSAlert(
   tls_alert_ = err;
 }
 
-QuicStream* QuicSession::CreateStream(uint64_t stream_id) {
+QuicStream* QuicSession::CreateStream(int64_t stream_id) {
   Debug(this, "Stream %llu is new. Creating.", stream_id);
   QuicStream* stream = QuicStream::New(this, stream_id);
   // TODO(@jasnell): Should we really abort here? It depends on whether
@@ -1691,7 +1686,7 @@ QuicStream* QuicSession::CreateStream(uint64_t stream_id) {
 }
 
 int QuicSession::StreamOpen(
-    uint64_t stream_id) {
+    int64_t stream_id) {
   HandleScope scope(env()->isolate());
   Local<Context> context = env()->context();
   Context::Scope context_scope(context);
@@ -1704,7 +1699,7 @@ int QuicSession::StreamOpen(
   return 0;
 }
 
-int QuicSession::ShutdownStreamRead(uint64_t stream_id, uint16_t code) {
+int QuicSession::ShutdownStreamRead(int64_t stream_id, uint16_t code) {
   // Is this right? Should this be shutdown_stream_write???
   return ngtcp2_conn_shutdown_stream_read(
       connection_,
@@ -1712,7 +1707,7 @@ int QuicSession::ShutdownStreamRead(uint64_t stream_id, uint16_t code) {
       code);
 }
 
-int QuicSession::ShutdownStreamWrite(uint64_t stream_id, uint16_t code) {
+int QuicSession::ShutdownStreamWrite(int64_t stream_id, uint16_t code) {
   // Is this right? Should this be shutdown_stream_write???
   return ngtcp2_conn_shutdown_stream_write(
       connection_,
@@ -1720,11 +1715,11 @@ int QuicSession::ShutdownStreamWrite(uint64_t stream_id, uint16_t code) {
       code);
 }
 
-int QuicSession::OpenUnidirectionalStream(uint64_t* stream_id) {
+int QuicSession::OpenUnidirectionalStream(int64_t* stream_id) {
   return ngtcp2_conn_open_uni_stream(connection_, stream_id, nullptr);
 }
 
-int QuicSession::OpenBidirectionalStream(uint64_t* stream_id) {
+int QuicSession::OpenBidirectionalStream(int64_t* stream_id) {
   return ngtcp2_conn_open_bidi_stream(connection_, stream_id, nullptr);
 }
 
@@ -1773,7 +1768,7 @@ void QuicSession::StopRetransmitTimer() {
 }
 
 void QuicSession::StreamClose(
-    uint64_t stream_id,
+    int64_t stream_id,
     uint16_t app_error_code) {
   Debug(this, "Closing stream %llu with code %d",
         stream_id, app_error_code);
@@ -1987,6 +1982,7 @@ void QuicServerSession::DisassociateCID(
 }
 
 int QuicServerSession::DoHandshake(
+    const ngtcp2_path* path,
     const uint8_t* data,
     size_t datalen) {
   Debug(this, "Performing server TLS handshake.");
@@ -1994,6 +1990,7 @@ int QuicServerSession::DoHandshake(
 
   err = ngtcp2_conn_read_handshake(
       connection_,
+      path,
       data, datalen,
       uv_hrtime());
   if (err != 0) {
@@ -2172,7 +2169,7 @@ int QuicServerSession::Receive(
     Debug(this, "Successfully read packet");
   } else {
     Debug(this, "TLS Handshake continuing");
-    err = DoHandshake(data, nread);
+    err = DoHandshake(nullptr, data, nread);
     if (err != 0)
       return HandleError(err);
   }
@@ -2239,7 +2236,7 @@ int QuicServerSession::SendPendingData(bool retransmit) {
 
   if (!IsHandshakeCompleted()) {
     Debug(this, "Handshake is not completed");
-    err = DoHandshake(nullptr, 0);
+    err = DoHandshake(nullptr, nullptr, 0);
     ScheduleRetransmit();
     return err;
   }
@@ -2460,6 +2457,7 @@ int QuicClientSession::Init(
 }
 
 int QuicClientSession::DoHandshake(
+    const ngtcp2_path* path,
     const uint8_t* data,
     size_t datalen) {
   int err;
@@ -2469,6 +2467,7 @@ int QuicClientSession::DoHandshake(
 
   err = ngtcp2_conn_read_handshake(
       connection_,
+      path,
       data, datalen,
       uv_hrtime());
   if (err != 0) {
@@ -2595,7 +2594,7 @@ int QuicClientSession::Receive(
     Debug(this, "Successfully read packet");
   } else {
     Debug(this, "TLS Handshake continuing");
-    err = DoHandshake(data, nread);
+    err = DoHandshake(nullptr, data, nread);
     if (err != 0)
       return HandleError(err);
   }
@@ -2665,7 +2664,7 @@ int QuicClientSession::SendPendingData(bool retransmit) {
 
   if (!IsHandshakeCompleted()) {
     Debug(this, "Handshake is not completed");
-    err = DoHandshake(nullptr, 0);
+    err = DoHandshake(nullptr, nullptr, 0);
     ScheduleRetransmit();
     return err;
   }
@@ -2904,7 +2903,7 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
       QuicClientSession::New(
           socket,
           const_cast<const sockaddr*>(reinterpret_cast<sockaddr*>(&addr)),
-          NGTCP2_PROTO_VER_D17);
+          NGTCP2_PROTO_VER_D19);
   CHECK_NOT_NULL(session);
 
   args.GetReturnValue().Set(session->object());

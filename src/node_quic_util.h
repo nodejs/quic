@@ -67,7 +67,7 @@ class SocketAddress {
 
   void Update(const ngtcp2_addr* addr) {
     // TODO(@jasnell): Is this right?
-    memcpy(&address_, addr->addr, sizeof(addr->len));
+    memcpy(&address_, addr->addr, sizeof(addr->addrlen));
   }
 
   const sockaddr* operator*() {

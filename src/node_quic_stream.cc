@@ -294,7 +294,7 @@ void OpenUnidirectionalStream(const FunctionCallbackInfo<Value>& args) {
   QuicSession* session;
   ASSIGN_OR_RETURN_UNWRAP(&session, args[0].As<Object>());
 
-  uint64_t stream_id;
+  int64_t stream_id;
   int err = session->OpenUnidirectionalStream(&stream_id);
   if (err != 0) {
     args.GetReturnValue().Set(err);
@@ -312,7 +312,7 @@ void OpenBidirectionalStream(const FunctionCallbackInfo<Value>& args) {
   QuicSession* session;
   ASSIGN_OR_RETURN_UNWRAP(&session, args[0].As<Object>());
 
-  uint64_t stream_id;
+  int64_t stream_id;
   int err = session->OpenBidirectionalStream(&stream_id);
   if (err != 0) {
     args.GetReturnValue().Set(err);
