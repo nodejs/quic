@@ -1265,12 +1265,20 @@ int QuicSession::OnRemoveConnectionID(
   return 0;
 }
 
-int QuicSession::OnPathValidation(
-    ngtcp2_conn* conn,
-    const ngtcp2_path* path,
-    ngtcp2_path_validation_result res,
-    void* user_data) {
-  // TODO(@jasnell): Implement this?
+int QuicSession::OnPathValidation(ngtcp2_conn* conn,
+                                  const ngtcp2_path* path,
+                                  ngtcp2_path_validation_result res,
+                                  void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  CHECK_NOT_NULL(session);
+  if (res == NGTCP2_PATH_VALIDATION_RESULT_SUCCESS) {
+    session->SetLocalAddress(&path->local);
+  } else {
+    // TODO(danbev): How should a failed path validation be handled? A
+    // connection migration might fail, which could be indicated by path
+    // validation failure, and it may no longer be possible to use the local
+    // address (for // example if migrating from wifi to 3g/4g).
+  }
   return 0;
 }
 
@@ -2047,6 +2055,10 @@ void QuicSession::ScheduleRetransmit() {
 void QuicSession::SetHandshakeCompleted() {
   CHECK(!IsDestroyed());
   ngtcp2_conn_handshake_completed(connection_);
+}
+
+void QuicSession::SetLocalAddress(const ngtcp2_addr* addr) {
+  ngtcp2_conn_set_local_addr(connection_, addr);
 }
 
 void QuicSession::SetTLSAlert(

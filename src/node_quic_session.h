@@ -441,6 +441,8 @@ class QuicSession : public AsyncWrap {
                       const uint8_t* data,
                       size_t datalen);
 
+  void SetLocalAddress(const ngtcp2_addr* addr);
+
   bool initial_;
   crypto::SSLPointer ssl_;
   ngtcp2_conn* connection_;
