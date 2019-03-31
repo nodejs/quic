@@ -2905,8 +2905,8 @@ int QuicClientSession::Init(
 void QuicClientSession::InitTLS_Post(SSL* ssl) {
   SSL_set_connect_state(ssl);
 
-  const uint8_t* alpn = reinterpret_cast<const uint8_t*>(NGTCP2_ALPN_D17);
-  size_t alpnlen = strsize(NGTCP2_ALPN_D17);
+  const uint8_t* alpn = reinterpret_cast<const uint8_t*>(NGTCP2_ALPN_D19);
+  size_t alpnlen = strsize(NGTCP2_ALPN_D19);
   SSL_set_alpn_protos(ssl, alpn, alpnlen);
 
   if (SocketAddress::numeric_host(hostname_)) {
