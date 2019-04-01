@@ -113,6 +113,9 @@ const customTypesMap = {
     'perf_hooks.html#perf_hooks_class_performanceobserver',
   'PerformanceObserverEntryList':
     'perf_hooks.html#perf_hooks_class_performanceobserverentrylist',
+  'QuicSession': 'quic.html#quic_class_quicserversession',
+  'QuicSocket': 'quic.html#quic_quic_createsocket_options',
+  'QuicStream': 'quic.html#quic_class_quicstream',
 
   'readline.Interface': 'readline.html#readline_class_interface',
 

@@ -63,7 +63,7 @@ socket.on('listening', () => {
 ```
 
 ### quic.createSocket([options])
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
@@ -77,20 +77,21 @@ added: REPLACEME
 
 Creates a new `QuicSocket` instance.
 
-## Class: QuicSession extends EventEmitter
-<!--YAML
+### Class: QuicSession
+<!-- YAML
 added: REPLACEME
 -->
+* Extends: {EventEmitter}
 
 ### Event: `'close'`
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
 Emiitted after the `QuicSession` has been destroyed.
 
 ### Event: `'error'`
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
@@ -98,21 +99,21 @@ Emitted after the `'close'` event if the `QuicSession` was destroyed with
 an error.
 
 ### Event: `'secure'`
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
 Emitted after the TLS handshake has been completed.
 
 ### Event: `'stream'`
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
 Emitted when a new `QuicStream` has been initiated by the connected peer.
 
 ### quicsession.close([callback])
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
@@ -121,7 +122,7 @@ added: REPLACEME
 Closes the `QuicSession`.
 
 ### quicsession.destroy([error])
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
@@ -131,7 +132,7 @@ Destroys the `QuicSession` causing the `close` event to be emitted. If `error`
 is not `undefined`, the `error` event will be emitted following the `close` event.
 
 ### quicsession.destroyed
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
@@ -140,7 +141,7 @@ added: REPLACEME
 Set to `true` if the `QuicSession` has been destroyed.
 
 ### quicsession.openStream([options])
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 * `options` {Object}
@@ -152,7 +153,7 @@ added: REPLACEME
 Returns a new `QuicStream`.
 
 ### quicsession.socket
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
@@ -160,49 +161,53 @@ added: REPLACEME
 
 The `QuicSocket` the `QuicSession` is associated with.
 
-### Class: QuicClientSession extends QuicSession
-<!--YAML
+### Class: QuicClientSession
+<!-- YAML
 added: REPLACEME
 -->
 
+* Extends: {QuicSession}
+
 TBD
 
-### Class: QuicServerSession extends QuicSession
-<!--YAML
+### Class: QuicServerSession
+<!-- YAML
 added: REPLACEME
 -->
 
+* Extends: {QuicSession}
+
 TBD
 
-## Class: QuicSocket
-<!--YAML
+### Class: QuicSocket
+<!-- YAML
 added: REPLACEME
 -->
 
 ### Event: `'close'`
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
 ### Event: `'error'`
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
 ### Event: `'ready'`
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
 ### Event: `'session'`
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
 Emitted when a new `QuicServerSession` has been created.
 
 ### quicsocket.addMembership(address, iface)
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
@@ -210,14 +215,14 @@ added: REPLACEME
 * `iface` {string}
 
 ### quicsocket.address
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
 * Type: Address
 
 ### quicsocket.bound
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
@@ -226,7 +231,7 @@ added: REPLACEME
 Will be `true` if the `QuicSocket` has been successfully bound to the local UDP port.
 
 ### quicsocket.close([callback])
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
@@ -235,7 +240,7 @@ added: REPLACEME
 Closes the `QuicSocket`.
 
 ### quicsocket.connect([options])
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
@@ -320,7 +325,7 @@ added: REPLACEME
 Create a new `QuicClientSession`.
 
 ### quicsocket.destroy([error])
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
@@ -330,7 +335,7 @@ Destroys the `QuicSocket` then emits the `'close'` event when done. The `'error'
 event will be emitted after `'close'` if the `error` is not `undefined`.
 
 ### quicsocket.destroyed
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
@@ -339,7 +344,7 @@ added: REPLACEME
 Will be `true` if the `QuicSocket` has been destroyed.
 
 ### quicsocket.dropMembership(address, iface)
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
@@ -347,7 +352,7 @@ added: REPLACEME
 * `iface` {string}
 
 ### quicsocket.fd
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
@@ -356,7 +361,7 @@ added: REPLACEME
 The system file descriptor the `QuicSocket` is bound to.
 
 ### quicsocket.listen([options][, callback])
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
@@ -446,7 +451,7 @@ If a `callback` is given, it is registered as a handler for the
 `'session'` event.
 
 ### quicsocket.pending
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
@@ -455,78 +460,86 @@ added: REPLACEME
 Will be `true` if the socket is not yet bound to the local UDP port.
 
 ### quicsocket.ref()
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
 ### quicsocket.setBroadcast([on])
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
 * `on` {boolean}
 
 ### quicsocket.setMulticastLoopback([on])
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
 * `on` {boolean}
 
 ### quicsocket.setMulticastInterface(iface)
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
 * `iface` {string}
 
 ### quicsocket.setMulticastTTL(ttl)
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
+
+* `ttl` {number}
 
 ### quicsocket.setTTL(ttl)
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
+
+* `ttl` {number}
 
 ### quicsocket.unref();
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
 
-## Class: QuicStream extends Duplex
+### Class: QuicStream
+<!-- YAML
+added: REPLACEME
+-->
+* Extends: {stream.Duplex}
 
 ### Event: `'close'`
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
 ### Event: `'data'`
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
 ### Event: `'error'`
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
 ### Event: `'readable'`
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
 ### quicstream.id
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
 * Type: {number}
 
 ### quicstream.session
-<!--YAML
+<!-- YAML
 added: REPLACEME
 -->
 
