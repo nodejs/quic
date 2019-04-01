@@ -2029,7 +2029,7 @@ void QuicSession::ScheduleRetransmit() {
       ngtcp2_conn_ack_delay_expiry(connection_));
   uint64_t now = uv_hrtime();
   uint64_t interval =
-      expiry < now ? 1e-9
+      expiry < now ? 0
           : static_cast<uint64_t>(expiry - now) / NGTCP2_SECONDS;
   Debug(this, "Scheduling retransmission timer for interval %llu", interval);
   if (retransmit_timer_ == nullptr) {
@@ -2040,7 +2040,7 @@ void QuicSession::ScheduleRetransmit() {
   uv_timer_start(retransmit_timer_,
                  OnRetransmitTimeout,
                  interval,
-                 interval);
+                 0);
   uv_unref(reinterpret_cast<uv_handle_t*>(retransmit_timer_));
 }
 
