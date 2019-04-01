@@ -1806,7 +1806,6 @@ int QuicSession::ReceiveClientInitial(
     const ngtcp2_cid* dcid) {
   CHECK(!IsDestroyed());
   Debug(this, "Receiving client initial parameters.");
-  int err;
 
   CryptoInitialParams params;
 
@@ -2836,8 +2835,8 @@ QuicClientSession::QuicClientSession(
     uint32_t port) :
     QuicSession(socket, wrap, context, AsyncWrap::PROVIDER_QUICCLIENTSESSION),
     resumption_(false),
-    hostname_(hostname),
-    port_(port) {
+    hostname_(hostname) {
+    // port_(port) {
   Init(addr, version);
 }
 
@@ -3080,10 +3079,13 @@ int QuicClientSession::HandleError(int code) {
   if (code == NGTCP2_ERR_RECV_VERSION_NEGOTIATION)
     return 0;
 
+  //TODO(danbev) Use error code
+  /*
   uint16_t err_code =
       tls_alert_ ?
           NGTCP2_CRYPTO_ERROR | tls_alert_ :
           ngtcp2_err_infer_quic_transport_error_code(code);
+  */
 
   return SendConnectionClose(code);
 }

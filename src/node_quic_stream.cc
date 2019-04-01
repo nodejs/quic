@@ -297,7 +297,6 @@ void QuicStreamGetID(const FunctionCallbackInfo<Value>& args) {
 }
 
 void OpenUnidirectionalStream(const FunctionCallbackInfo<Value>& args) {
-  Environment* env = Environment::GetCurrent(args);
   CHECK(!args.IsConstructCall());
   CHECK(args[0]->IsObject());
   QuicSession* session;
@@ -315,7 +314,6 @@ void OpenUnidirectionalStream(const FunctionCallbackInfo<Value>& args) {
 }
 
 void OpenBidirectionalStream(const FunctionCallbackInfo<Value>& args) {
-  Environment* env = Environment::GetCurrent(args);
   CHECK(!args.IsConstructCall());
   CHECK(args[0]->IsObject());
   QuicSession* session;

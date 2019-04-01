@@ -465,9 +465,6 @@ class QuicSession : public AsyncWrap {
   size_t ncread_;
   uint64_t tx_crypto_offset_;
 
-  BIO* enc_in_ = nullptr;   // StreamListener fills this for SSL_read().
-  BIO* enc_out_ = nullptr;  // SSL_write()/handshake fills this for EncOut().
-
   std::map<uint64_t, QuicStream*> streams_;
 
   friend class QuicServerSession;
@@ -658,7 +655,7 @@ class QuicClientSession : public QuicSession {
 
   bool resumption_;
   const char* hostname_;
-  uint32_t port_;
+  // uint32_t port_;
 
   const ngtcp2_conn_callbacks callbacks_ = {
       OnClientInitial,
