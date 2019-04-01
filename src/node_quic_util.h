@@ -134,7 +134,7 @@ class SocketAddress {
   }
 
   ngtcp2_addr ToAddr() {
-    return ngtcp2_addr{Size(), reinterpret_cast<uint8_t*>(&address_)};
+    return ngtcp2_addr{Size(), reinterpret_cast<uint8_t*>(&address_), nullptr};
   }
 
   size_t Size() {
