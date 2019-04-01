@@ -282,7 +282,7 @@ class QuicBuffer {
   size_t left() const { return buf_.data() + buf_.size() - tail_; }
 
   // TODO(@jasnell): the current definition has a compiler warning
-  uint8_t* const wpos() { return tail_; }
+  uint8_t* wpos() { return tail_; }
 
   const uint8_t* rpos() const { return head_; }
 
