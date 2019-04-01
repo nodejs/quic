@@ -571,7 +571,11 @@ class QuicServerSession : public QuicSession {
     OnGetNewConnectionID,
     OnRemoveConnectionID,
     OnUpdateKey,
-    OnPathValidation
+    OnPathValidation,
+    nullptr,  // select_preferred_addr;
+    nullptr,  // stream_reset;
+    nullptr,  // extend_max_remote_streams_bidi;
+    nullptr   // extend_max_remote_streams_uni;
   };
 
 };
@@ -683,6 +687,10 @@ class QuicClientSession : public QuicSession {
       OnRemoveConnectionID,
       OnUpdateKey,
       OnPathValidation,
+      nullptr,  // select_preferred_addr;
+      nullptr,  // stream_reset;
+      nullptr,  // extend_max_remote_streams_bidi;
+      nullptr   // extend_max_remote_streams_uni;
   };
 };
 
