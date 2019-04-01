@@ -71,15 +71,15 @@ class QuicStream : public AsyncWrap,
   int DoWrite(WriteWrap* req_wrap,
               uv_buf_t* bufs,
               size_t nbufs,
-              uv_stream_t* send_handle);
+              uv_stream_t* send_handle) override;
 
   inline void IncrementAvailableOutboundLength(size_t amount);
   inline void DecrementAvailableOutboundLength(size_t amount);
 
-  bool IsAlive() {
+  bool IsAlive() override {
     return !IsDestroyed() && !IsShutdown() && !IsClosing();
   }
-  bool IsClosing() {
+  bool IsClosing() override {
     return flags_ & QUIC_STREAM_FLAG_SHUT ||
            flags_ & QUIC_STREAM_FLAG_EOS;
   }
