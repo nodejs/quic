@@ -108,11 +108,11 @@ class QuicSession : public AsyncWrap {
   virtual int Send0RTTStreamData(
       QuicStream* stream,
       int fin,
-      QuicBuffer& data);
+      QuicBuffer* data);
   virtual int SendStreamData(
       QuicStream* stream,
       int fin,
-      QuicBuffer& data);
+      QuicBuffer* data);
   virtual void SetTLSAlert(
     int err);
   virtual int ShutdownStreamRead(
@@ -146,21 +146,21 @@ class QuicSession : public AsyncWrap {
 
 
 
-  static void SetupTokenContext(CryptoContext& context);
+  static void SetupTokenContext(CryptoContext* context);
   static int GenerateToken(
     uint8_t* token,
-    size_t& tokenlen,
+    size_t* tokenlen,
     const sockaddr* addr,
     const ngtcp2_cid* ocid,
-    CryptoContext& context,
-    std::array<uint8_t, TOKEN_SECRETLEN>& token_secret);
+    CryptoContext* context,
+    std::array<uint8_t, TOKEN_SECRETLEN>* token_secret);
   static int VerifyToken(
     Environment* env,
     ngtcp2_cid* ocid,
     const ngtcp2_pkt_hd* hd,
     const sockaddr* addr,
-    CryptoContext& context,
-    std::array<uint8_t, TOKEN_SECRETLEN>& token_secret);
+    CryptoContext* context,
+    std::array<uint8_t, TOKEN_SECRETLEN>* token_secret);
 
   // These must be implemented by QuicSession types
   virtual int DoHandshake(
@@ -172,7 +172,7 @@ class QuicSession : public AsyncWrap {
   virtual void OnIdleTimeout() = 0;
   virtual int OnKey(
     int name,
-    const uint8_t *secret,
+    const uint8_t* secret,
     size_t secretlen) = 0;
   virtual void OnRetransmitTimeout() = 0;
   virtual int Receive(
@@ -194,7 +194,6 @@ class QuicSession : public AsyncWrap {
   static void DebugLog(void* user_data, const char* fmt, ...);
 
  protected:
-
   void SetHandshakeCompleted();
   int SendPacket();
   bool IsInClosingPeriod();
@@ -298,9 +297,9 @@ class QuicSession : public AsyncWrap {
     void* user_data,
     void* stream_user_data);
   static int OnReceiveRetry(
-    ngtcp2_conn *conn,
-    const ngtcp2_pkt_hd *hd,
-    const ngtcp2_pkt_retry *retry,
+    ngtcp2_conn* conn,
+    const ngtcp2_pkt_hd* hd,
+    const ngtcp2_pkt_retry* retry,
     void* user_data);
   static int OnAckedCryptoOffset(
     ngtcp2_conn* conn,
@@ -437,8 +436,8 @@ class QuicSession : public AsyncWrap {
     size_t cidlen);
 
   QuicStream* CreateStream(int64_t stream_id);
-  void WriteHandshake(std::deque<QuicBuffer> &dest,
-                      size_t& idx,
+  void WriteHandshake(std::deque<QuicBuffer>* dest,
+                      size_t* idx,
                       const uint8_t* data,
                       size_t datalen);
 
@@ -488,7 +487,7 @@ class QuicServerSession : public QuicSession {
     const ngtcp2_cid* cid) override;
 
   int DoHandshake(
-    const ngtcp2_path *path,
+    const ngtcp2_path* path,
     const uint8_t* data,
     size_t datalen) override;
 
@@ -497,7 +496,7 @@ class QuicServerSession : public QuicSession {
 
   int OnKey(
     int name,
-    const uint8_t *secret,
+    const uint8_t* secret,
     size_t secretlen) override;
 
   void InitTLS_Post(SSL* ssl) override;
@@ -506,8 +505,8 @@ class QuicServerSession : public QuicSession {
 
   int Init(
     const struct sockaddr* addr,
-    const ngtcp2_cid *dcid,
-    const ngtcp2_cid *ocid,
+    const ngtcp2_cid* dcid,
+    const ngtcp2_cid* ocid,
     uint32_t version);
   bool IsDraining();
   void NewSessionDoneCb();
@@ -577,7 +576,6 @@ class QuicServerSession : public QuicSession {
     nullptr,  // extend_max_remote_streams_bidi;
     nullptr   // extend_max_remote_streams_uni;
   };
-
 };
 
 class QuicClientSession : public QuicSession {
@@ -604,7 +602,7 @@ class QuicClientSession : public QuicSession {
     uint32_t port);
 
   int DoHandshake(
-    const ngtcp2_path *path,
+    const ngtcp2_path* path,
     const uint8_t* data,
     size_t datalen) override;
 
@@ -613,7 +611,7 @@ class QuicClientSession : public QuicSession {
 
   int OnKey(
     int name,
-    const uint8_t *secret,
+    const uint8_t* secret,
     size_t secretlen) override;
 
   int TLSRead() override;

@@ -12,20 +12,19 @@
 #include "node_quic_util.h"
 #include "v8.h"
 #include "uv.h"
-#include "node_crypto_clienthello-inl.h" // ClientHelloParser
+#include "node_crypto_clienthello-inl.h"  // ClientHelloParser
 
-#include <openssl/ssl.h>
+#include <openssl/bio.h>
+#include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/kdf.h>
+#include <openssl/ssl.h>
 
 #include <array>
 #include <functional>
 #include <type_traits>
 #include <utility>
 
-#include <openssl/ssl.h>
-#include <openssl/bio.h>
-#include <openssl/err.h>
 
 namespace node {
 
@@ -81,11 +80,12 @@ int BIO_Gets(
   return -1;
 }
 
+/* NOLINTNEXTLINE(runtime/int) */
 long BIO_Ctrl(
     BIO* b,
     int cmd,
-    long num,
-    void *ptr) {
+    long num,  // NOLINT(runtime/int)
+    void* ptr) {
   return cmd == BIO_CTRL_FLUSH ? 1 : 0;
 }
 
@@ -181,18 +181,18 @@ template <typename F, typename... T> Defer<F, T...> defer(F &&f, T &&... t) {
   return Defer<F, T...>(std::forward<F>(f), std::forward<T>(t)...);
 }
 
-inline void prf_sha256(CryptoContext& ctx) { ctx.prf = EVP_sha256(); }
+inline void prf_sha256(CryptoContext* ctx) { ctx->prf = EVP_sha256(); }
 
-inline void aead_aes_128_gcm(CryptoContext& ctx) {
-  ctx.aead = EVP_aes_128_gcm();
-  ctx.hp = EVP_aes_128_ctr();
+inline void aead_aes_128_gcm(CryptoContext* ctx) {
+  ctx->aead = EVP_aes_128_gcm();
+  ctx->hp = EVP_aes_128_ctr();
 }
 
-inline size_t aead_key_length(const CryptoContext &ctx) {
+inline size_t aead_key_length(const CryptoContext& ctx) {
   return EVP_CIPHER_key_length(ctx.aead);
 }
 
-inline size_t aead_nonce_length(const CryptoContext &ctx) {
+inline size_t aead_nonce_length(const CryptoContext& ctx) {
   return EVP_CIPHER_iv_length(ctx.aead);
 }
 
@@ -373,7 +373,7 @@ inline int HKDF_Expand(
     size_t secretlen,
     const uint8_t* info,
     size_t infolen,
-    const CryptoContext& ctx) {
+    const CryptoContext* ctx) {
   auto pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_HKDF, nullptr);
   if (pctx == nullptr)
     return -1;
@@ -386,7 +386,7 @@ inline int HKDF_Expand(
   if (EVP_PKEY_CTX_hkdf_mode(pctx, EVP_PKEY_HKDEF_MODE_EXPAND_ONLY) != 1)
     return -1;
 
-  if (EVP_PKEY_CTX_set_hkdf_md(pctx, ctx.prf) != 1)
+  if (EVP_PKEY_CTX_set_hkdf_md(pctx, ctx->prf) != 1)
     return -1;
 
   if (EVP_PKEY_CTX_set1_hkdf_salt(pctx, "", 0) != 1)
@@ -411,7 +411,7 @@ inline int HKDF_Extract(
     size_t secretlen,
     const uint8_t* salt,
     size_t saltlen,
-    const CryptoContext& ctx) {
+    const CryptoContext* ctx) {
   auto pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_HKDF, nullptr);
   if (pctx == nullptr)
     return -1;
@@ -424,7 +424,7 @@ inline int HKDF_Extract(
   if (EVP_PKEY_CTX_hkdf_mode(pctx, EVP_PKEY_HKDEF_MODE_EXTRACT_ONLY) != 1)
     return -1;
 
-  if (EVP_PKEY_CTX_set_hkdf_md(pctx, ctx.prf) != 1)
+  if (EVP_PKEY_CTX_set_hkdf_md(pctx, ctx->prf) != 1)
     return -1;
 
   if (EVP_PKEY_CTX_set1_hkdf_salt(pctx, salt, saltlen) != 1)
@@ -446,7 +446,7 @@ inline int HKDF_Expand_Label(
     size_t secretlen,
     const uint8_t* label,
     size_t labellen,
-    const CryptoContext& ctx) {
+    const CryptoContext* ctx) {
   std::array<uint8_t, 256> info;
   static constexpr const uint8_t LABEL[] = "tls13 ";
 
@@ -466,45 +466,45 @@ inline int HKDF_Expand_Label(
 }
 
 inline int DeriveInitialSecret(
-    CryptoInitialParams& params,
+    CryptoInitialParams* params,
     const ngtcp2_cid* secret,
     const uint8_t* salt,
     size_t saltlen) {
   CryptoContext ctx;
-  prf_sha256(ctx);
-  return HKDF_Extract(params.initial_secret.data(),
-                      params.initial_secret.size(),
+  prf_sha256(&ctx);
+  return HKDF_Extract(params->initial_secret.data(),
+                      params->initial_secret.size(),
                       secret->data,
                       secret->datalen,
                       salt,
                       saltlen,
-                      ctx);
+                      &ctx);
 }
 
 inline int DeriveServerInitialSecret(
-    CryptoInitialParams& params) {
+    CryptoInitialParams* params) {
   static constexpr uint8_t LABEL[] = "server in";
   CryptoContext ctx;
-  prf_sha256(ctx);
-  return HKDF_Expand_Label(params.secret.data(),
-                           params.secret.size(),
-                           params.initial_secret.data(),
-                           params.initial_secret.size(),
+  prf_sha256(&ctx);
+  return HKDF_Expand_Label(params->secret.data(),
+                           params->secret.size(),
+                           params->initial_secret.data(),
+                           params->initial_secret.size(),
                            LABEL,
-                           strsize(LABEL), ctx);
+                           strsize(LABEL), &ctx);
 }
 
 inline int DeriveClientInitialSecret(
-    CryptoInitialParams& params) {
+    CryptoInitialParams* params) {
   static constexpr uint8_t LABEL[] = "client in";
   CryptoContext ctx;
-  prf_sha256(ctx);
-  return HKDF_Expand_Label(params.secret.data(),
-                           params.secret.size(),
-                           params.initial_secret.data(),
-                           params.initial_secret.size(),
+  prf_sha256(&ctx);
+  return HKDF_Expand_Label(params->secret.data(),
+                           params->secret.size(),
+                           params->initial_secret.data(),
+                           params->initial_secret.size(),
                            LABEL,
-                           strsize(LABEL), ctx);
+                           strsize(LABEL), &ctx);
 }
 
 inline ssize_t DerivePacketProtectionKey(
@@ -512,10 +512,10 @@ inline ssize_t DerivePacketProtectionKey(
     size_t destlen,
     const uint8_t* secret,
     size_t secretlen,
-    const CryptoContext &ctx) {
+    const CryptoContext* ctx) {
   static constexpr uint8_t LABEL[] = "quic key";
 
-  size_t keylen = aead_key_length(ctx);
+  size_t keylen = aead_key_length(*ctx);
   if (keylen > destlen)
     return -1;
 
@@ -534,10 +534,10 @@ inline ssize_t DerivePacketProtectionIV(
     size_t destlen,
     const uint8_t* secret,
     size_t secretlen,
-    const CryptoContext& ctx) {
+    const CryptoContext* ctx) {
   static constexpr uint8_t LABEL[] = "quic iv";
 
-  size_t ivlen = std::max(static_cast<size_t>(8), aead_nonce_length(ctx));
+  size_t ivlen = std::max(static_cast<size_t>(8), aead_nonce_length(*ctx));
   if (ivlen > destlen)
     return -1;
 
@@ -556,17 +556,17 @@ inline ssize_t DeriveHeaderProtectionKey(
     size_t destlen,
     const uint8_t* secret,
     size_t secretlen,
-    const CryptoContext &ctx) {
+    const CryptoContext& ctx) {
   static constexpr uint8_t LABEL[] = "quic hp";
 
   size_t keylen = aead_key_length(ctx);
   if (keylen > destlen)
     return -1;
 
-  if(HKDF_Expand_Label(dest, keylen,
+  if (HKDF_Expand_Label(dest, keylen,
                        secret, secretlen,
                        LABEL, strsize(LABEL),
-                       ctx) != 0) {
+                       &ctx) != 0) {
     return -1;
   }
 
@@ -574,18 +574,18 @@ inline ssize_t DeriveHeaderProtectionKey(
 }
 
 inline int DeriveTokenKey(
-    CryptoToken& params,
+    CryptoToken* params,
     const uint8_t* rand_data,
     size_t rand_datalen,
-    CryptoContext& context,
-    std::array<uint8_t, TOKEN_SECRETLEN>& token_secret) {
+    CryptoContext* context,
+    std::array<uint8_t, TOKEN_SECRETLEN>* token_secret) {
   std::array<uint8_t, 32> secret;
 
   if (HKDF_Extract(
           secret.data(),
           secret.size(),
-          token_secret.data(),
-          token_secret.size(),
+          token_secret->data(),
+          token_secret->size(),
           rand_data,
           rand_datalen,
           context) != 0) {
@@ -594,25 +594,25 @@ inline int DeriveTokenKey(
 
   ssize_t slen =
       DerivePacketProtectionKey(
-          params.key.data(),
-          params.keylen,
+          params->key.data(),
+          params->keylen,
           secret.data(),
           secret.size(),
           context);
   if (slen < 0)
     return -1;
-  params.keylen = slen;
+  params->keylen = slen;
 
   slen =
       DerivePacketProtectionIV(
-          params.iv.data(),
-          params.ivlen,
+          params->iv.data(),
+          params->ivlen,
           secret.data(),
           secret.size(),
           context);
   if (slen < 0)
     return -1;
-  params.ivlen = slen;
+  params->ivlen = slen;
 
   return 0;
 }
@@ -622,7 +622,7 @@ inline ssize_t UpdateTrafficSecret(
     size_t destlen,
     const uint8_t* secret,
     size_t secretlen,
-    const CryptoContext &ctx) {
+    const CryptoContext& ctx) {
 
   static constexpr uint8_t LABEL[] = "traffic upd";
 
@@ -633,40 +633,40 @@ inline ssize_t UpdateTrafficSecret(
                         secret, secretlen,
                         LABEL,
                         strsize(LABEL),
-                        ctx) != 0) {
+                        &ctx) != 0) {
     return -1;
   }
 
   return secretlen;
 }
 
-inline int Negotiated_PRF(CryptoContext& ctx, SSL* ssl) {
+inline int Negotiated_PRF(CryptoContext* ctx, SSL* ssl) {
   switch (SSL_CIPHER_get_id(SSL_get_current_cipher(ssl))) {
-    case 0x03001301u: // TLS_AES_128_GCM_SHA256
-    case 0x03001303u: // TLS_CHACHA20_POLY1305_SHA256
-      ctx.prf = EVP_sha256();
+    case 0x03001301u:  // TLS_AES_128_GCM_SHA256
+    case 0x03001303u:  // TLS_CHACHA20_POLY1305_SHA256
+      ctx->prf = EVP_sha256();
       return 0;
-    case 0x03001302u: // TLS_AES_256_GCM_SHA384
-      ctx.prf = EVP_sha384();
+    case 0x03001302u:  // TLS_AES_256_GCM_SHA384
+      ctx->prf = EVP_sha384();
       return 0;
     default:
       return -1;
   }
 }
 
-inline int Negotiated_AEAD(CryptoContext& ctx, SSL* ssl) {
+inline int Negotiated_AEAD(CryptoContext* ctx, SSL* ssl) {
   switch (SSL_CIPHER_get_id(SSL_get_current_cipher(ssl))) {
-    case 0x03001301u: // TLS_AES_128_GCM_SHA256
-      ctx.aead = EVP_aes_128_gcm();
-      ctx.hp = EVP_aes_128_ctr();
+    case 0x03001301u:  // TLS_AES_128_GCM_SHA256
+      ctx->aead = EVP_aes_128_gcm();
+      ctx->hp = EVP_aes_128_ctr();
       return 0;
-    case 0x03001302u: // TLS_AES_256_GCM_SHA384
-      ctx.aead = EVP_aes_256_gcm();
-      ctx.hp = EVP_aes_256_ctr();
+    case 0x03001302u:  // TLS_AES_256_GCM_SHA384
+      ctx->aead = EVP_aes_256_gcm();
+      ctx->hp = EVP_aes_256_ctr();
       return 0;
-    case 0x03001303u: // TLS_CHACHA20_POLY1305_SHA256
-      ctx.aead = EVP_chacha20_poly1305();
-      ctx.hp = EVP_chacha20();
+    case 0x03001303u:  // TLS_CHACHA20_POLY1305_SHA256
+      ctx->aead = EVP_chacha20_poly1305();
+      ctx->hp = EVP_chacha20();
       return 0;
     default:
       return -1;
@@ -708,7 +708,7 @@ inline int MessageDigest(
 }
 
 inline int GenerateRandData(
-    uint8_t *buf,
+    uint8_t* buf,
     size_t len) {
   std::array<uint8_t, 16> rand;
   std::array<uint8_t, 32> md;
@@ -734,113 +734,113 @@ inline const char* TLSErrorString(int code) {
 int SetupKeys(
   const uint8_t* secret,
   size_t secretlen,
-  CryptoParams& params,
-  CryptoContext& context) {
-  params.keylen =
+  CryptoParams* params,
+  const CryptoContext& context) {
+  params->keylen =
       DerivePacketProtectionKey(
-          params.key.data(),
-          params.key.size(),
+          params->key.data(),
+          params->key.size(),
           secret,
           secretlen,
-          context);
-  if (params.keylen < 0)
+          &context);
+  if (params->keylen < 0)
     return -1;
 
-  params.ivlen =
+  params->ivlen =
       DerivePacketProtectionIV(
-          params.iv.data(),
-          params.iv.size(),
+          params->iv.data(),
+          params->iv.size(),
           secret, secretlen,
-          context);
-  if (params.ivlen < 0)
+          &context);
+  if (params->ivlen < 0)
     return -1;
 
-  params.hplen =
+  params->hplen =
       DeriveHeaderProtectionKey(
-          params.hp.data(),
-          params.hp.size(),
+          params->hp.data(),
+          params->hp.size(),
           secret, secretlen,
           context);
-  if (params.hplen < 0)
+  if (params->hplen < 0)
     return -1;
 
   return 0;
 }
 
 int SetupClientSecret(
-  CryptoInitialParams& params,
-  CryptoContext& context) {
+  CryptoInitialParams* params,
+  const CryptoContext& context) {
   if (DeriveClientInitialSecret(params) != 0)
     return -1;
 
-  params.keylen =
+  params->keylen =
       DerivePacketProtectionKey(
-          params.key.data(),
-          params.key.size(),
-          params.secret.data(),
-          params.secret.size(),
-          context);
-  if (params.keylen < 0)
+          params->key.data(),
+          params->key.size(),
+          params->secret.data(),
+          params->secret.size(),
+          &context);
+  if (params->keylen < 0)
     return -1;
 
-  params.ivlen =
+  params->ivlen =
       DerivePacketProtectionIV(
-          params.iv.data(),
-          params.iv.size(),
-          params.secret.data(),
-          params.secret.size(),
-          context);
-  if (params.ivlen < 0)
+          params->iv.data(),
+          params->iv.size(),
+          params->secret.data(),
+          params->secret.size(),
+          &context);
+  if (params->ivlen < 0)
     return -1;
 
-  params.hplen =
+  params->hplen =
       DeriveHeaderProtectionKey(
-          params.hp.data(),
-          params.hp.size(),
-          params.secret.data(),
-          params.secret.size(),
+          params->hp.data(),
+          params->hp.size(),
+          params->secret.data(),
+          params->secret.size(),
           context);
-  if (params.hplen < 0)
+  if (params->hplen < 0)
     return -1;
 
   return 0;
 }
 
 int SetupServerSecret(
-    CryptoInitialParams& params,
-    CryptoContext& context) {
+    CryptoInitialParams* params,
+    const CryptoContext& context) {
 
   if (DeriveServerInitialSecret(params) != 0)
     return -1;
 
-  params.keylen =
+  params->keylen =
       DerivePacketProtectionKey(
-          params.key.data(),
-          params.key.size(),
-          params.secret.data(),
-          params.secret.size(),
-          context);
-  if (params.keylen < 0)
+          params->key.data(),
+          params->key.size(),
+          params->secret.data(),
+          params->secret.size(),
+          &context);
+  if (params->keylen < 0)
     return -1;
 
-  params.ivlen =
+  params->ivlen =
       DerivePacketProtectionIV(
-          params.iv.data(),
-          params.iv.size(),
-          params.secret.data(),
-          params.secret.size(),
-          context);
-  if (params.ivlen < 0)
+          params->iv.data(),
+          params->iv.size(),
+          params->secret.data(),
+          params->secret.size(),
+          &context);
+  if (params->ivlen < 0)
     return -1;
 
-  params.hplen =
+  params->hplen =
       DeriveHeaderProtectionKey(
-          params.hp.data(),
-          params.hp.size(),
-          params.secret.data(),
-          params.secret.size(),
+          params->hp.data(),
+          params->hp.size(),
+          params->secret.data(),
+          params->secret.size(),
           context);
-  if (params.hplen < 0)
+  if (params->hplen < 0)
     return -1;
 
   return 0;
@@ -849,7 +849,7 @@ int SetupServerSecret(
 template <install_fn fn>
 int InstallKeys(
     ngtcp2_conn* connection,
-    CryptoParams& params) {
+    const CryptoParams& params) {
   return fn(connection,
      params.key.data(),
      params.keylen,
@@ -862,7 +862,7 @@ int InstallKeys(
 template <install_fn fn>
 int InstallKeys(
     ngtcp2_conn* connection,
-    CryptoInitialParams& params) {
+    const CryptoInitialParams& params) {
   return fn(connection,
      params.key.data(),
      params.keylen,
@@ -955,10 +955,10 @@ int QuicSession::OnReceiveCryptoData(
 }
 
 int QuicSession::OnReceiveRetry(
-    ngtcp2_conn *conn,
-    const ngtcp2_pkt_hd *hd,
-    const ngtcp2_pkt_retry *retry,
-    void *user_data) {
+    ngtcp2_conn* conn,
+    const ngtcp2_pkt_hd* hd,
+    const ngtcp2_pkt_retry* retry,
+    void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
   CHECK_NOT_NULL(session);
   if (session->ReceiveRetry() != 0) {
@@ -1274,18 +1274,18 @@ int QuicSession::OnPathValidation(
   return 0;
 }
 
-void QuicSession::SetupTokenContext(CryptoContext& context) {
+void QuicSession::SetupTokenContext(CryptoContext* context) {
   aead_aes_128_gcm(context);
   prf_sha256(context);
 }
 
 int QuicSession::GenerateToken(
     uint8_t* token,
-    size_t& tokenlen,
+    size_t* tokenlen,
     const sockaddr* addr,
     const ngtcp2_cid* ocid,
-    CryptoContext& token_crypto_ctx,
-    std::array<uint8_t, TOKEN_SECRETLEN>& token_secret) {
+    CryptoContext* token_crypto_ctx,
+    std::array<uint8_t, TOKEN_SECRETLEN>* token_secret) {
   std::array<uint8_t, 4096> plaintext;
 
   const size_t addrlen = SocketAddress::GetAddressLen(addr);
@@ -1304,7 +1304,7 @@ int QuicSession::GenerateToken(
     return -1;
 
   if (DeriveTokenKey(
-          params,
+          &params,
           rand_data.data(),
           rand_data.size(),
           token_crypto_ctx,
@@ -1314,9 +1314,9 @@ int QuicSession::GenerateToken(
 
   ssize_t n =
       Encrypt(
-          token, tokenlen,
+          token, *tokenlen,
           plaintext.data(), std::distance(std::begin(plaintext), p),
-          token_crypto_ctx,
+          *token_crypto_ctx,
           params.key.data(),
           params.keylen,
           params.iv.data(),
@@ -1326,7 +1326,7 @@ int QuicSession::GenerateToken(
   if (n < 0)
     return -1;
   memcpy(token + n, rand_data.data(), rand_data.size());
-  tokenlen = n + rand_data.size();
+  *tokenlen = n + rand_data.size();
   return 0;
 }
 
@@ -1335,8 +1335,8 @@ int QuicSession::VerifyToken(
     ngtcp2_cid* ocid,
     const ngtcp2_pkt_hd* hd,
     const sockaddr* addr,
-    CryptoContext& token_crypto_ctx,
-    std::array<uint8_t, TOKEN_SECRETLEN>& token_secret) {
+    CryptoContext* token_crypto_ctx,
+    std::array<uint8_t, TOKEN_SECRETLEN>* token_secret) {
 
   uv_getnameinfo_t info;
   char* host = nullptr;
@@ -1363,7 +1363,7 @@ int QuicSession::VerifyToken(
   CryptoToken params;
 
   if (DeriveTokenKey(
-        params,
+        &params,
         rand_data,
         TOKEN_RAND_DATALEN,
         token_crypto_ctx,
@@ -1377,7 +1377,7 @@ int QuicSession::VerifyToken(
       Decrypt(
           plaintext.data(), plaintext.size(),
           ciphertext, ciphertextlen,
-          token_crypto_ctx,
+          *token_crypto_ctx,
           params.key.data(),
           params.keylen,
           params.iv.data(),
@@ -1441,7 +1441,7 @@ QuicSession::QuicSession(
   ssl_.reset(SSL_new(ctx->ctx_.get()));
   CHECK(ssl_);
   // TODO(@jasnell): memory accounting
-  //env_->isolate()->AdjustAmountOfExternalAllocatedMemory(kExternalSize);
+  // env_->isolate()->AdjustAmountOfExternalAllocatedMemory(kExternalSize);
 }
 
 QuicSession::~QuicSession() {
@@ -1461,9 +1461,9 @@ void QuicSession::AckedCryptoOffset(
         "Received acknowledgement for crypto data. Offset %llu, Length %d",
         offset, datalen);
   QuicBuffer::AckData(
-      handshake_,
-      handshake_idx_,
-      tx_crypto_offset_,
+      &handshake_,
+      &handshake_idx_,
+      &tx_crypto_offset_,
       offset + datalen);
 }
 
@@ -1519,7 +1519,7 @@ void QuicSession::Destroy() {
 
   if (sendbuf_.WantsAck())
     sendbuf_.Done(UV_ECANCELED, sendbuf_.size());
-  QuicBuffer::Cancel(handshake_);
+  QuicBuffer::Cancel(&handshake_);
 
   ngtcp2_conn_del(connection_);
 
@@ -1670,7 +1670,7 @@ void QuicSession::GetLocalTransportParams(
 uint32_t QuicSession::GetNegotiatedVersion() {
   CHECK(!IsDestroyed());
   return ngtcp2_conn_get_negotiated_version(connection_);
-};
+}
 
 int QuicSession::GetNewConnectionID(
     ngtcp2_cid* cid,
@@ -1738,14 +1738,14 @@ int QuicServerSession::OnKey(
       return 0;
   }
 
-  if (Negotiated_PRF(crypto_ctx_, ssl()) != 0 ||
-      Negotiated_AEAD(crypto_ctx_, ssl()) != 0) {
+  if (Negotiated_PRF(&crypto_ctx_, ssl()) != 0 ||
+      Negotiated_AEAD(&crypto_ctx_, ssl()) != 0) {
     return -1;
   }
 
   CryptoParams params;
 
-  if (SetupKeys(secret, secretlen, params, crypto_ctx_) != 0)
+  if (SetupKeys(secret, secretlen, &params, crypto_ctx_) != 0)
     return -1;
 
   ngtcp2_conn_set_aead_overhead(
@@ -1810,22 +1810,22 @@ int QuicSession::ReceiveClientInitial(
   CryptoInitialParams params;
 
   if (DeriveInitialSecret(
-      params,
+      &params,
       dcid,
       reinterpret_cast<const uint8_t *>(NGTCP2_INITIAL_SALT),
       strsize(NGTCP2_INITIAL_SALT))) {
     return -1;
   }
 
-  prf_sha256(hs_crypto_ctx_);
-  aead_aes_128_gcm(hs_crypto_ctx_);
+  prf_sha256(&hs_crypto_ctx_);
+  aead_aes_128_gcm(&hs_crypto_ctx_);
 
-  if (SetupServerSecret(params, hs_crypto_ctx_) != 0)
+  if (SetupServerSecret(&params, hs_crypto_ctx_) != 0)
     return -1;
 
   InstallKeys<ngtcp2_conn_install_initial_tx_keys>(connection_, params);
 
-  if (SetupClientSecret(params, hs_crypto_ctx_) != 0)
+  if (SetupClientSecret(&params, hs_crypto_ctx_) != 0)
     return -1;
 
   InstallKeys<ngtcp2_conn_install_initial_rx_keys>(connection_, params);
@@ -1873,16 +1873,16 @@ int QuicSession::ReceiveStreamData(
   if (stream == nullptr)
     stream = CreateStream(stream_id);
 
-   ngtcp2_conn_extend_max_stream_offset(
+  ngtcp2_conn_extend_max_stream_offset(
       connection_,
       stream_id,
       datalen);
-   ngtcp2_conn_extend_max_offset(
+  ngtcp2_conn_extend_max_offset(
       connection_,
       datalen);
 
-   if (stream->ReceiveData(fin, data, datalen) != 0)
-     return -1;
+  if (stream->ReceiveData(fin, data, datalen) != 0)
+    return -1;
 
   StartIdleTimer(-1);
 
@@ -1905,12 +1905,12 @@ void QuicSession::RemoveStream(
 int QuicSession::Send0RTTStreamData(
     QuicStream* stream,
     int fin,
-    QuicBuffer& data) {
+    QuicBuffer* data) {
   CHECK(!IsDestroyed());
   ssize_t ndatalen;
 
   for (;;) {
-    ngtcp2_vec datav{const_cast<uint8_t*>(data.rpos()), data.size()};
+    ngtcp2_vec datav{const_cast<uint8_t*>(data->rpos()), data->size()};
     auto n = ngtcp2_conn_client_write_handshake(
         connection_,
         sendbuf_.wpos(),
@@ -1937,7 +1937,7 @@ int QuicSession::Send0RTTStreamData(
       return 0;
 
     if (ndatalen > 0)
-      data.seek(ndatalen);
+      data->seek(ndatalen);
 
     sendbuf_.push(n);
 
@@ -1945,8 +1945,8 @@ int QuicSession::Send0RTTStreamData(
     if (err != 0)
       return err;
 
-    if (data.size() == 0) {
-      data.Done(0, data.size());
+    if (data->size() == 0) {
+      data->Done(0, data->size());
       break;
     }
   }
@@ -1957,7 +1957,7 @@ int QuicSession::Send0RTTStreamData(
 int QuicSession::SendStreamData(
     QuicStream* stream,
     int fin,
-    QuicBuffer& data) {
+    QuicBuffer* data) {
   CHECK(!IsDestroyed());
   ssize_t ndatalen;
   QuicPathStorage path;
@@ -1970,8 +1970,8 @@ int QuicSession::SendStreamData(
                                       &ndatalen,
                                       stream->GetID(),
                                       fin,
-                                      data.rpos(),
-                                      data.size(),
+                                      data->rpos(),
+                                      data->size(),
                                       uv_hrtime());
     if (n < 0) {
       switch (n) {
@@ -1987,11 +1987,11 @@ int QuicSession::SendStreamData(
       return 0;
 
     if (ndatalen >= 0) {
-      if (fin && static_cast<size_t>(ndatalen) == data.size()) {
+      if (fin && static_cast<size_t>(ndatalen) == data->size()) {
         stream->ResetShouldSendFin();
       }
 
-      data.seek(ndatalen);
+      data->seek(ndatalen);
     }
 
     sendbuf_.push(n);
@@ -2001,7 +2001,7 @@ int QuicSession::SendStreamData(
     if (err != 0)
       return err;
 
-    if (ndatalen >= 0 && data.size() == 0)
+    if (ndatalen >= 0 && data->size() == 0)
       break;
   }
   return 0;
@@ -2231,7 +2231,7 @@ int QuicServerSession::TLSRead() {
         //           << ERR_error_string(ERR_get_error(), nullptr) << std::endl;
         return NGTCP2_ERR_CRYPTO;
       default:
-        //std::cerr << "TLS read error: " << err << std::endl;
+        // std::cerr << "TLS read error: " << err << std::endl;
         return NGTCP2_ERR_CRYPTO;
     }
   }
@@ -2268,7 +2268,7 @@ int QuicSession::UpdateKey() {
           params.key.size(),
           secret.data(),
           secretlen,
-          crypto_ctx_);
+          &crypto_ctx_);
   if (params.keylen < 0)
     return -1;
 
@@ -2278,7 +2278,7 @@ int QuicSession::UpdateKey() {
           params.iv.size(),
           secret.data(),
           secretlen,
-          crypto_ctx_);
+          &crypto_ctx_);
   if (params.ivlen < 0)
     return -1;
 
@@ -2311,7 +2311,7 @@ int QuicSession::UpdateKey() {
           params.key.size(),
           secret.data(),
           secretlen,
-          crypto_ctx_);
+          &crypto_ctx_);
   if (params.keylen < 0)
     return -1;
 
@@ -2321,7 +2321,7 @@ int QuicSession::UpdateKey() {
           params.iv.size(),
           secret.data(),
           secretlen,
-          crypto_ctx_);
+          &crypto_ctx_);
   if (params.ivlen < 0)
     return -1;
 
@@ -2346,14 +2346,14 @@ void QuicSession::WritePeerHandshake(
 }
 
 void QuicSession::WriteHandshake(
-    std::deque<QuicBuffer>& dest,
-    size_t &idx,
+    std::deque<QuicBuffer>* dest,
+    size_t* idx,
     const uint8_t* data,
     size_t datalen) {
   Debug(this, "Writing %d bytes of handshake data.", datalen);
-  dest.emplace_back(data, datalen);
+  dest->emplace_back(data, datalen);
   ++idx;
-  auto& buf = dest.back();
+  auto& buf = dest->back();
   CHECK_EQ(
       ngtcp2_conn_submit_crypto_data(
           connection_,
@@ -2365,7 +2365,7 @@ void QuicSession::WriteHandshake(
     size_t datalen) {
   CHECK(!IsDestroyed());
   WriteHandshake(
-      handshake_, handshake_idx_,
+      &handshake_, &handshake_idx_,
       data, datalen);
 }
 
@@ -2394,13 +2394,13 @@ QuicServerSession::QuicServerSession(
 void QuicServerSession::AssociateCID(
     ngtcp2_cid* cid) {
   QuicCID id(cid);
-  Socket()->AssociateCID(id, this);
+  Socket()->AssociateCID(&id, this);
 }
 
 void QuicServerSession::DisassociateCID(
     const ngtcp2_cid* cid) {
   QuicCID id(cid);
-  Socket()->DisassociateCID(id);
+  Socket()->DisassociateCID(&id);
 }
 
 int QuicServerSession::DoHandshake(
@@ -2587,7 +2587,7 @@ int QuicServerSession::Receive(
       Debug(this, "Error reading packet. Error %d\n", err);
       if (err == NGTCP2_ERR_DRAINING) {
         StartDrainingPeriod();
-        return -1; // Closing
+        return -1;  // Closing
       }
       return HandleError(err);
     }
@@ -2606,18 +2606,18 @@ void QuicServerSession::Remove() {
   CHECK(!IsDestroyed());
   Debug(this, "Remove this QuicServerSession from the QuicSocket.");
   QuicCID rcid(rcid_);
-  Socket()->DisassociateCID(rcid);
+  Socket()->DisassociateCID(&rcid);
 
   std::vector<ngtcp2_cid> cids(ngtcp2_conn_get_num_scid(connection_));
   ngtcp2_conn_get_scid(connection_, cids.data());
 
   for (auto &cid : cids) {
     QuicCID id(&cid);
-    Socket()->DisassociateCID(id);
+    Socket()->DisassociateCID(&id);
   }
 
   QuicCID scid(scid_);
-  Socket()->RemoveSession(scid);
+  Socket()->RemoveSession(&scid);
 }
 
 int QuicServerSession::SendConnectionClose(int error) {
@@ -2888,7 +2888,7 @@ int QuicClientSession::Init(
     return err;
 
   QuicCID cid(scid_);
-  socket_->AddSession(cid, this);
+  socket_->AddSession(&cid, this);
   StartIdleTimer(settings.idle_timeout);
 
   // Zero Round Trip
@@ -2937,14 +2937,14 @@ int QuicClientSession::OnKey(
       return 0;
   }
 
-  if (Negotiated_PRF(crypto_ctx_, ssl()) != 0 ||
-      Negotiated_AEAD(crypto_ctx_, ssl()) != 0) {
+  if (Negotiated_PRF(&crypto_ctx_, ssl()) != 0 ||
+      Negotiated_AEAD(&crypto_ctx_, ssl()) != 0) {
     return -1;
   }
 
   CryptoParams params;
 
-  if (SetupKeys(secret, secretlen, params, crypto_ctx_) != 0)
+  if (SetupKeys(secret, secretlen, &params, crypto_ctx_) != 0)
     return -1;
 
   ngtcp2_conn_set_aead_overhead(
@@ -3023,7 +3023,7 @@ int QuicClientSession::TLSRead() {
         //           << ERR_error_string(ERR_get_error(), nullptr) << std::endl;
         return NGTCP2_ERR_CRYPTO;
       default:
-        //std::cerr << "TLS read error: " << err << std::endl;
+        // std::cerr << "TLS read error: " << err << std::endl;
         return NGTCP2_ERR_CRYPTO;
     }
   }
@@ -3079,7 +3079,7 @@ int QuicClientSession::HandleError(int code) {
   if (code == NGTCP2_ERR_RECV_VERSION_NEGOTIATION)
     return 0;
 
-  //TODO(danbev) Use error code
+  // TODO(danbev) Use error code
   /*
   uint16_t err_code =
       tls_alert_ ?
@@ -3209,7 +3209,7 @@ void QuicClientSession::Remove() {
   CHECK(!IsDestroyed());
   Debug(this, "Remove this QuicClientSession from the QuicSocket.");
   QuicCID scid(scid_);
-  Socket()->RemoveSession(scid);
+  Socket()->RemoveSession(&scid);
 }
 
 int QuicClientSession::SendPendingData(bool retransmit) {
@@ -3242,7 +3242,7 @@ int QuicClientSession::SendPendingData(bool retransmit) {
   if (!IsHandshakeCompleted()) {
     Debug(this, "Handshake is not completed");
     err = DoHandshake(nullptr, nullptr, 0);
-    //ScheduleRetransmit();
+    // ScheduleRetransmit();
     return err;
   }
 
@@ -3282,7 +3282,7 @@ int QuicClientSession::SendPendingData(bool retransmit) {
 
   Debug(this, "Done sending pending client session data");
 
-  //ScheduleRetransmit();
+  // ScheduleRetransmit();
   return 0;
 }
 
@@ -3330,12 +3330,12 @@ int QuicClientSession::SetupInitialCryptoContext() {
 
   const ngtcp2_cid* dcid = ngtcp2_conn_get_dcid(connection_);
 
-  prf_sha256(hs_crypto_ctx_);
-  aead_aes_128_gcm(hs_crypto_ctx_);
+  prf_sha256(&hs_crypto_ctx_);
+  aead_aes_128_gcm(&hs_crypto_ctx_);
 
   err =
       DeriveInitialSecret(
-          params,
+          &params,
           dcid,
           reinterpret_cast<const uint8_t*>(NGTCP2_INITIAL_SALT),
           strsize(NGTCP2_INITIAL_SALT));
@@ -3344,12 +3344,12 @@ int QuicClientSession::SetupInitialCryptoContext() {
     return -1;
   }
 
-  if (SetupClientSecret(params, hs_crypto_ctx_) != 0)
+  if (SetupClientSecret(&params, hs_crypto_ctx_) != 0)
     return -1;
 
   InstallKeys<ngtcp2_conn_install_initial_tx_keys>(connection_, params);
 
-  if (SetupServerSecret(params, hs_crypto_ctx_) != 0)
+  if (SetupServerSecret(&params, hs_crypto_ctx_) != 0)
     return -1;
 
   InstallKeys<ngtcp2_conn_install_initial_rx_keys>(connection_, params);
@@ -3401,11 +3401,11 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
           port);
   CHECK_NOT_NULL(session);
 
-  //socket->SendPendingData();
+  // socket->SendPendingData();
 
   args.GetReturnValue().Set(session->object());
 }
-}
+}  // namespace
 
 void QuicServerSession::Initialize(
     Environment* env,

@@ -17,21 +17,22 @@
 namespace node {
 namespace quic {
 
+/* NOLINTNEXTLINE(build/namespaces) */
 namespace {
 
-constexpr unsigned long long operator"" _k(unsigned long long k) {
+constexpr uint64_t operator"" _k(uint64_t k) {
   return k * 1024;
 }
 
-constexpr unsigned long long operator"" _m(unsigned long long m) {
+constexpr uint64_t operator"" _m(uint64_t m) {
   return m * 1024 * 1024;
 }
 
-constexpr unsigned long long operator"" _g(unsigned long long g) {
+constexpr uint64_t operator"" _g(uint64_t g) {
   return g * 1024 * 1024 * 1024;
 }
 
-}
+}  // namespace
 
 constexpr uint16_t NGTCP2_APP_NOERROR = 0xff00;
 
@@ -43,11 +44,11 @@ constexpr size_t DEFAULT_MAX_STREAM_DATA_BIDI_LOCAL = 256_k;
 
 class SocketAddress {
  public:
-   static bool numeric_host(const char *hostname) {
-     return numeric_host(hostname, AF_INET) || numeric_host(hostname, AF_INET6);
-   }
+  static bool numeric_host(const char* hostname) {
+    return numeric_host(hostname, AF_INET) || numeric_host(hostname, AF_INET6);
+  }
 
-  static bool numeric_host(const char *hostname, int family) {
+  static bool numeric_host(const char* hostname, int family) {
     std::array<uint8_t, sizeof(struct in6_addr)> dst;
     int err = inet_pton(family, hostname, dst.data());
     return err == 1;
@@ -162,29 +163,29 @@ class QuicPath {
 // examples but modified to be a class rather than a struct.
 class QuicBuffer {
  public:
-  static size_t Cancel(std::deque<QuicBuffer>& d, int status = UV_ECANCELED) {
+  static size_t Cancel(std::deque<QuicBuffer>* d, int status = UV_ECANCELED) {
     size_t len = 0;
-    while (!d.empty()) {
-      auto& v = d.front();
+    while (!d->empty()) {
+      auto& v = d->front();
       v.Done(status, v.bufsize());
-      d.pop_front();
+      d->pop_front();
     }
     return len;
   }
 
   static size_t AckData(
-      std::deque<QuicBuffer>& d,
-      size_t& idx,
-      uint64_t& tx_offset,
+      std::deque<QuicBuffer>* d,
+      size_t* idx,
+      uint64_t* tx_offset,
       uint64_t offset) {
     size_t len = 0;
-    for (; !d.empty() && tx_offset + d.front().bufsize() <= offset;) {
+    for (; !d->empty() && *tx_offset + d->front().bufsize() <= offset;) {
       --idx;
-      auto& v = d.front();
+      auto& v = d->front();
       len += v.bufsize();
-      tx_offset += v.bufsize();
+      *tx_offset += v.bufsize();
       v.Done(0, v.bufsize());
-      d.pop_front();
+      d->pop_front();
     }
     return len;
   }
@@ -361,13 +362,13 @@ class QuicCID {
 
 // https://stackoverflow.com/questions/33701430/template-function-to-access-struct-members
 template <typename C, typename T>
-decltype(auto) access(C& cls, T C::*member) {
-  return (cls.*member);
+decltype(auto) access(C* cls, T C::*member) {
+  return (cls->*member);
 }
 
 template <typename C, typename T, typename... Mems>
-decltype(auto) access(C& cls, T C::*member, Mems... rest) {
-  return access((cls.*member), rest...);
+decltype(auto) access(C* cls, T C::*member, Mems... rest) {
+  return access((cls->*member), rest...);
 }
 
 typedef int(*install_fn)(
@@ -382,9 +383,9 @@ typedef int(*install_fn)(
 typedef void(*set_ssl_state_fn)(SSL* ssl);
 
 struct CryptoContext {
-  const EVP_CIPHER *aead;
-  const EVP_CIPHER *hp;
-  const EVP_MD *prf;
+  const EVP_CIPHER* aead;
+  const EVP_CIPHER* hp;
+  const EVP_MD* prf;
   std::array<uint8_t, 64> tx_secret;
   std::array<uint8_t, 64> rx_secret;
   size_t secretlen;
@@ -423,4 +424,4 @@ struct CryptoToken {
 
 #endif  // NOE_WANT_INTERNALS
 
-#endif // SRC_NODE_QUIC_UTIL_H_
+#endif  // SRC_NODE_QUIC_UTIL_H_

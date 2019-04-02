@@ -66,7 +66,7 @@ QuicSocket::QuicSocket(
   CHECK_EQ(uv_udp_init(env->event_loop(), &handle_), 0);
   Debug(this, "New QuicSocket created.");
 
-  QuicSession::SetupTokenContext(token_crypto_ctx_);
+  QuicSession::SetupTokenContext(&token_crypto_ctx_);
   EntropySource(token_secret_.data(), token_secret_.size());
 }
 
@@ -95,19 +95,19 @@ void QuicSocket::MemoryInfo(MemoryTracker* tracker) const {
 }
 
 void QuicSocket::AddSession(
-    QuicCID& cid,
+    QuicCID* cid,
     QuicSession* session) {
-  sessions_.emplace(cid.ToStr(), session);
-  Debug(this, "QuicSession %s added to the QuicSocket.", cid.ToHex().c_str());
+  sessions_.emplace(cid->ToStr(), session);
+  Debug(this, "QuicSession %s added to the QuicSocket.", cid->ToHex().c_str());
 }
 
 void QuicSocket::AssociateCID(
-    QuicCID& cid,
+    QuicCID* cid,
     QuicServerSession* session) {
   QuicCID scid(session->scid());
   Debug(this, "Associating scid %s with cid %s.",
-        scid.ToHex().c_str(), cid.ToHex().c_str());
-  dcid_to_scid_.emplace(cid.ToStr(), scid.ToStr());
+        scid.ToHex().c_str(), cid->ToHex().c_str());
+  dcid_to_scid_.emplace(cid->ToStr(), scid.ToStr());
 }
 
 int QuicSocket::Bind(
@@ -149,9 +149,9 @@ int QuicSocket::Bind(
   return 0;
 }
 
-void QuicSocket::DisassociateCID(QuicCID& cid) {
-  Debug(this, "Removing associations for cid %s", cid.ToHex().c_str());
-  dcid_to_scid_.erase(cid.ToStr());
+void QuicSocket::DisassociateCID(QuicCID* cid) {
+  Debug(this, "Removing associations for cid %s", cid->ToHex().c_str());
+  dcid_to_scid_.erase(cid->ToStr());
 }
 
 SocketAddress* QuicSocket::GetLocalAddress() {
@@ -251,7 +251,7 @@ void QuicSocket::Receive(
         return;
       }
       Debug(this, "Dispatching packet to server.");
-      session = ServerReceive(dcid, &hd, nread, data, addr, flags);
+      session = ServerReceive(&dcid, &hd, nread, data, addr, flags);
       if (session == nullptr) {
         Debug(this, "Could not initialize a new QuicServerSession.");
         // TODO(@jasnell): What should we do here?
@@ -302,9 +302,9 @@ int QuicSocket::ReceiveStop() {
   return uv_udp_recv_stop(&handle_);
 }
 
-void QuicSocket::RemoveSession(QuicCID& cid) {
-  Debug(this, "Removing QuicSession for cid %s.", cid.ToHex().c_str());
-  sessions_.erase(cid.ToStr());
+void QuicSocket::RemoveSession(QuicCID* cid) {
+  Debug(this, "Removing QuicSession for cid %s.", cid->ToHex().c_str());
+  sessions_.erase(cid->ToStr());
 }
 
 void QuicSocket::ReportSendError(int error) {
@@ -369,11 +369,11 @@ int QuicSocket::SendRetry(
   size_t tokenlen = token.size();
 
   if (QuicSession::GenerateToken(
-          token.data(), tokenlen,
+          token.data(), &tokenlen,
           addr,
           &chd->dcid,
-          token_crypto_ctx_,
-          token_secret_) != 0) {
+          &token_crypto_ctx_,
+          &token_secret_) != 0) {
     return -1;
   }
   QuicBuffer buf{NGTCP2_MAX_PKTLEN_IPV4};
@@ -408,7 +408,7 @@ int QuicSocket::SendRetry(
 }
 
 QuicSession* QuicSocket::ServerReceive(
-    QuicCID& dcid,
+    QuicCID* dcid,
     ngtcp2_pkt_hd* hd,
     ssize_t nread,
     const uint8_t* data,
@@ -437,15 +437,15 @@ QuicSession* QuicSocket::ServerReceive(
   }
 
   ngtcp2_cid ocid;
-  ngtcp2_cid *pocid = nullptr;
+  ngtcp2_cid* pocid = nullptr;
   if (validate_addr_ && hd->type == NGTCP2_PKT_INITIAL) {
     Debug(this, "Stateless address validation.");
     if (hd->tokenlen == 0 ||
         QuicSession::VerifyToken(
             env(), &ocid,
             hd, addr,
-            token_crypto_ctx_,
-            token_secret_) != 0) {
+            &token_crypto_ctx_,
+            &token_secret_) != 0) {
       Debug(this, "Invalid token. Sending retry");
       SendRetry(hd, addr);
       return 0;
@@ -476,7 +476,7 @@ QuicSession* QuicSocket::ServerReceive(
   QuicCID scid(session->scid());
   Debug(this, "The new QuicServerSession was created successfully. scid %s",
         scid.ToHex().c_str());
-  AddSession(scid, session);
+  AddSession(&scid, session);
   AssociateCID(dcid, session);
 
   // Notify the JavaScript side that a new server session has been created

@@ -6,7 +6,6 @@
 #include "node.h"
 #include "node_crypto.h"  // SSLWrap
 #include "ngtcp2/ngtcp2.h"
-#include "node.h"
 #include "node_quic_session.h"
 #include "node_quic_util.h"
 #include "env.h"
@@ -43,10 +42,10 @@ class QuicSocket : public HandleWrap {
     const char* address,
     const char* iface);
   void AddSession(
-    QuicCID& cid,
+    QuicCID* cid,
     QuicSession* session);
   void AssociateCID(
-    QuicCID& cid,
+    QuicCID* cid,
     QuicServerSession* session);
   int Bind(
     const char* address,
@@ -54,7 +53,7 @@ class QuicSocket : public HandleWrap {
     uint32_t flags,
     int family);
   void DisassociateCID(
-    QuicCID& cid);
+    QuicCID* cid);
   int DropMembership(
     const char* address,
     const char* iface);
@@ -64,7 +63,7 @@ class QuicSocket : public HandleWrap {
   int ReceiveStart();
   int ReceiveStop();
   void RemoveSession(
-    QuicCID& cid);
+    QuicCID* cid);
   void ReportSendError(
     int error);
   void SendPendingData(
@@ -124,7 +123,7 @@ class QuicSocket : public HandleWrap {
       const sockaddr* addr);
 
   QuicSession* ServerReceive(
-      QuicCID& dcid,
+      QuicCID* dcid,
       ngtcp2_pkt_hd* hd,
       ssize_t nread,
       const uint8_t* data,
@@ -182,14 +181,14 @@ class QuicSocket : public HandleWrap {
     // retransmitted by this QuicSocket instance.
     uint64_t retransmit_count;
   };
-  socket_stats socket_stats_{0,0,0,0,0,0,0};
+  socket_stats socket_stats_{0, 0, 0, 0, 0, 0, 0};
 
   template <typename... Members>
   void IncrementSocketStat(uint64_t amount, socket_stats* a, Members... mems) {
     static uint64_t max = std::numeric_limits<uint64_t>::max();
-    uint64_t current = access(*a, mems...);
+    uint64_t current = access(a, mems...);
     uint64_t delta = std::min(amount, max - current);
-    access(*a, mems...) += delta;
+    access(a, mems...) += delta;
   }
 
   class SendWrap {

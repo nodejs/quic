@@ -16,7 +16,6 @@ namespace node {
 using v8::Context;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
-using v8::Integer;
 using v8::Isolate;
 using v8::Local;
 using v8::Number;
@@ -47,7 +46,7 @@ void QuicStreamListener::OnStreamRead(ssize_t nread, const uv_buf_t& buf) {
   }
 
   AllocatedBuffer buffer(stream->env(), buf);
-  size_t offset = 0; // TODO(@jasnell): Proper offset
+  size_t offset = 0;  // TODO(@jasnell): Proper offset
   stream->CallJSOnreadMethod(nread, buffer.ToArrayBuffer(), offset);
 }
 
@@ -85,7 +84,7 @@ void QuicStream::Close(
 }
 
 void QuicStream::Destroy() {
-  QuicBuffer::Cancel(streambuf_);
+  QuicBuffer::Cancel(&streambuf_);
   session_->RemoveStream(stream_id_);
   session_ = nullptr;
 }
@@ -107,7 +106,7 @@ int QuicStream::DoWrite(
     uv_stream_t* send_handle) {
 
   CHECK_NULL(send_handle);
-  if (IsDestroyed()) { // or !IsWritable
+  if (IsDestroyed()) {  // or !IsWritable
     req_wrap->Done(UV_EOF);
     return 0;
   }
@@ -152,9 +151,9 @@ int QuicStream::AckedDataOffset(
     uint64_t offset,
     size_t datalen) {
   QuicBuffer::AckData(
-      streambuf_,
-      streambuf_idx_,
-      tx_stream_offset_,
+      &streambuf_,
+      &streambuf_idx_,
+      &tx_stream_offset_,
       offset + datalen);
   if (streambuf_.empty() && flags_ & QUIC_STREAM_FLAG_SHUT) {
     if (session_->ShutdownStreamWrite(stream_id_) != 0) {
@@ -171,7 +170,7 @@ int QuicStream::Send0RTTData() {
     auto& v = *it;
     bool fin = should_send_fin_ &&
                it + 1 == std::end(streambuf_);
-    err = session_->Send0RTTStreamData(this, fin, v);
+    err = session_->Send0RTTStreamData(this, fin, &v);
     if (err != 0)
       return err;
     if (v.size() > 0)
@@ -187,7 +186,7 @@ int QuicStream::SendPendingData(bool retransmit) {
   if (streambuf_idx_ == streambuf_.size()) {
     if (should_send_fin_) {
       QuicBuffer buf(static_cast<uint8_t*>(nullptr), 0);
-      if (session_->SendStreamData(this, 1, buf) != 0)
+      if (session_->SendStreamData(this, 1, &buf) != 0)
         return -1;
     }
     return 0;
@@ -198,7 +197,7 @@ int QuicStream::SendPendingData(bool retransmit) {
     auto& v = *it;
     bool fin = should_send_fin_ &&
                streambuf_idx_ == streambuf_.size() - 1;
-    err = session_->SendStreamData(this, fin, v);
+    err = session_->SendStreamData(this, fin, &v);
     if (err != 0)
       return err;
     if (v.size() > 0)
@@ -268,7 +267,7 @@ int QuicStream::ReceiveData(
     // we determine if we can safely switch to a non-allocated mode
     // like we do with http2 streams, we can make this branch more
     // efficient by using the LIKELY optimization
-    //if (LIKELY(buf.base == nullptr))
+    // if (LIKELY(buf.base == nullptr))
     if (buf.base == nullptr)
       buf.base = reinterpret_cast<char*>(const_cast<uint8_t*>(data));
     else

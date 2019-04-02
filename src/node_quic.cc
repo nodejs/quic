@@ -206,7 +206,8 @@ int Client_Transport_Params_Parse_CB(
   }
 
   // TODO(@jasnell): Write the transport params for session resumption later
-  // if (config.tp_file && write_transport_params(config.tp_file, &params) != 0) {
+  // if (config.tp_file && write_transport_params(config.tp_file, &params) != 0)
+  // {
   //   std::cerr << "Could not write transport parameters in " << config.tp_file
   //             << std::endl;
   // }
