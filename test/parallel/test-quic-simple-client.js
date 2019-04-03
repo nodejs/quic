@@ -40,4 +40,3 @@ client.on('stream', (stream) => {
     countdown.dec();
   });
 });
-

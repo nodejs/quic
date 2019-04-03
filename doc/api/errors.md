@@ -1599,6 +1599,31 @@ compiled with ICU support.
 
 A given value is out of the accepted range.
 
+<a id="ERR_QUICSESSION_DESTROYED"></a>
+### ERR_QUICSESSION_DESTROYED
+
+TBD
+
+<a id="ERR_QUICSOCKET_CLOSING"></a>
+### ERR_QUICSOCKET_CLOSING
+
+TBD
+
+<a id="ERR_QUICSOCKET_DESTROYED"></a>
+### ERR_QUICSOCKET_DESTROYED
+
+TBD
+
+<a id="ERR_QUICSOCKET_LISTENING"></a>
+### ERR_QUICSOCKET_LISTENING
+
+TBD
+
+<a id="ERR_QUICSOCKET_UNBOUND"></a>
+### ERR_QUICSOCKET_UNBOUND
+
+TBD
+
 <a id="ERR_REQUIRE_ESM"></a>
 ### ERR_REQUIRE_ESM
 
@@ -2057,6 +2082,16 @@ state, usually after `.close()` has been called.
 
 <a id="ERR_HTTP2_FRAME_ERROR"></a>
 ### ERR_HTTP2_FRAME_ERROR
+<!-- YAML
+added: v9.0.0
+removed: v10.0.0
+-->
+
+Used when a failure occurs sending an individual frame on the HTTP/2
+session.
+
+<a id="ERR_QUIC_TLS13_REQUIRED"></a>
+### ERR_QUIC_TLS13_REQUIRED
 <!-- YAML
 added: v9.0.0
 removed: v10.0.0

@@ -22,7 +22,7 @@ socket.on('session', common.mustCall((session) => {
     // completed.
     // TODO(@jasnell): This will change once we get 0RTT working
     const uni = session.openStream({ halfOpen: true });
-    uni.write("I wonder if it worked.");
+    uni.write('I wonder if it worked.');
     uni.end('test');
   });
 
@@ -32,7 +32,7 @@ socket.on('session', common.mustCall((session) => {
 
     stream.setEncoding('utf8');
     stream.resume();
-    //stream.on('data', console.log);
+    // stream.on('data', console.log);
     stream.on('end', () => console.log('stream ended'));
   }));
 }));
