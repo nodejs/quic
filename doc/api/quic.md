@@ -73,7 +73,8 @@ added: REPLACEME
   * `lookup` {Function}
   * `port` {number} The local port to bind to.
   * `resuseAddr` {boolean}
-  * `type` {string} Either `'udp4'` or `'upd6'` to use either IPv4 or IPv6, respectively.
+  * `type` {string} Either `'udp4'` or `'upd6'` to use either IPv4 or IPv6,
+     respectively.
 
 Creates a new `QuicSocket` instance.
 
@@ -129,7 +130,8 @@ added: REPLACEME
 * `error` {any}
 
 Destroys the `QuicSession` causing the `close` event to be emitted. If `error`
-is not `undefined`, the `error` event will be emitted following the `close` event.
+is not `undefined`, the `error` event will be emitted following the `close`
+event.
 
 ### quicsession.destroyed
 <!-- YAML
@@ -228,7 +230,8 @@ added: REPLACEME
 
 * Type: {boolean}
 
-Will be `true` if the `QuicSocket` has been successfully bound to the local UDP port.
+Will be `true` if the `QuicSocket` has been successfully bound to the local UDP
+port.
 
 ### quicsocket.close([callback])
 <!-- YAML
