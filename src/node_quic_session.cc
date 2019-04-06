@@ -1486,7 +1486,7 @@ int QuicSession::AckedStreamDataOffset(
   Debug(this,
         "Received acknowledgement for stream %llu data. Offset %llu, Length %d",
         stream_id, offset, datalen);
-  QuicStream* stream = static_cast<QuicStream*>(FindStream(stream_id));
+  QuicStream* stream = FindStream(stream_id);
   if (stream != nullptr)
     stream->AckedDataOffset(offset, datalen);
   return 0;
@@ -1876,7 +1876,7 @@ int QuicSession::ReceiveStreamData(
   HandleScope scope(env()->isolate());
   Local<Context> context = env()->context();
   Context::Scope context_scope(context);
-  QuicStream* stream = static_cast<QuicStream*>(FindStream(stream_id));
+  QuicStream* stream = FindStream(stream_id);
   if (stream == nullptr)
     stream = CreateStream(stream_id);
 
@@ -2086,8 +2086,7 @@ int QuicSession::StreamOpen(
   HandleScope scope(env()->isolate());
   Local<Context> context = env()->context();
   Context::Scope context_scope(context);
-  QuicStream* stream =
-      static_cast<QuicStream*>(FindStream(stream_id));
+  QuicStream* stream = FindStream(stream_id);
   if (stream != nullptr)
     return NGTCP2_STREAM_STATE_ERROR;
   CreateStream(stream_id);

@@ -95,7 +95,7 @@ int ALPN_Select_Proto_CB(SSL* ssl,
     }
   }
 
-  *out = reinterpret_cast<const uint8_t*>(alpn + 1);
+  *out = alpn + 1;
   *outlen = alpn[0];
 
   return SSL_TLSEXT_ERR_OK;
