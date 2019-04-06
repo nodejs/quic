@@ -8,7 +8,7 @@
 #include "node_quic_state.h"
 #include "node_quic_util.h"
 
-#include <limits.h>
+#include <climits>
 #include <algorithm>
 
 namespace node {
