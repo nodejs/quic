@@ -185,7 +185,7 @@ int QuicStream::SendPendingData(bool retransmit) {
   int err;
   if (streambuf_idx_ == streambuf_.size()) {
     if (should_send_fin_) {
-      QuicBuffer buf(static_cast<uint8_t*>(nullptr), 0);
+      QuicBuffer buf(static_cast<uint8_t*>(nullptr), nullptr);
       if (session_->SendStreamData(this, 1, &buf) != 0)
         return -1;
     }

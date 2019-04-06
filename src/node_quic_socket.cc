@@ -448,7 +448,7 @@ QuicSession* QuicSocket::ServerReceive(
             &token_secret_) != 0) {
       Debug(this, "Invalid token. Sending retry");
       SendRetry(hd, addr);
-      return 0;
+      return nullptr;
     }
     pocid = &ocid;
   }
