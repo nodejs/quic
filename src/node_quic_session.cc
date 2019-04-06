@@ -1353,7 +1353,6 @@ int QuicSession::VerifyToken(
           env->event_loop(),
           &info, nullptr,
           addr, NI_NUMERICSERV) == 0) {
-    host = info.host;
     DCHECK_EQ(SocketAddress::GetPort(addr), std::stoi(info.service));
   } else {
     SocketAddress::GetAddress(addr, &host);
