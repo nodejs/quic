@@ -340,7 +340,7 @@ void Initialize(Local<Object> target,
               FIXED_ONE_BYTE_STRING(isolate, (name)), \
               (field)).FromJust()
   SET_STATE_TYPEDARRAY(
-    "socketConfig", state->quicsessionconfig_buffer.GetJSArray());
+    "sessionConfig", state->quicsessionconfig_buffer.GetJSArray());
 #undef SET_STATE_TYPEDARRAY
 
   env->set_quic_state(std::move(state));
@@ -379,6 +379,25 @@ void Initialize(Local<Object> target,
   NODE_DEFINE_CONSTANT(constants, UV_EBADF);
   NODE_DEFINE_CONSTANT(constants, DEFAULT_MAX_STREAM_DATA_BIDI_LOCAL);
   NODE_DEFINE_CONSTANT(constants, TLS1_3_VERSION);
+
+  NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_MAX_STREAM_DATA_BIDI_LOCAL);
+  NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_MAX_STREAM_DATA_BIDI_REMOTE);
+  NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_MAX_STREAM_DATA_UNI);
+  NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_MAX_DATA);
+  NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_MAX_STREAMS_BIDI);
+  NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_MAX_STREAMS_UNI);
+  NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_IDLE_TIMEOUT);
+  NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_MAX_PACKET_SIZE);
+  NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_ACK_DELAY_EXPONENT);
+  NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_DISABLE_MIGRATION);
+  NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_MAX_ACK_DELAY);
+  NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_CONFIG_COUNT);
+
+#define V(idx, name, def)                                                      \
+  NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_## idx ##_DEFAULT);
+  QUICSESSION_CONFIG(V)
+#undef V
+
   target->Set(context,
               env->constants_string(),
               constants).FromJust();

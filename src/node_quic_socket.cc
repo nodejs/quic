@@ -479,6 +479,11 @@ QuicSession* QuicSocket::ServerReceive(
   AddSession(&scid, session);
   AssociateCID(dcid, session);
 
+  if (session->pscid()->datalen) {
+    QuicCID pscid(session->pscid());
+    AssociateCID(&pscid, session);
+  }
+
   // Notify the JavaScript side that a new server session has been created
   Debug(this, "Notifying JavaScript about QuicServerSession creation.");
   Local<Value> arg = session->object();
@@ -663,7 +668,11 @@ void QuicSocketBind(const FunctionCallbackInfo<Value>& args) {
   args.GetReturnValue().Set(socket->Bind(*address, port, flags, type));
 }
 
-void QuicSocketDestroy(const FunctionCallbackInfo<Value>& args) {}
+void QuicSocketDestroy(const FunctionCallbackInfo<Value>& args) {
+  QuicSocket* socket;
+  ASSIGN_OR_RETURN_UNWRAP(&socket, args.Holder());
+  delete socket;
+}
 
 void QuicSocketDropMembership(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);

@@ -163,7 +163,9 @@ class QuicPath {
 // examples but modified to be a class rather than a struct.
 class QuicBuffer {
  public:
-  static size_t Cancel(std::deque<QuicBuffer>* d, int status = UV_ECANCELED) {
+  static inline size_t Cancel(
+      std::deque<QuicBuffer>* d,
+      int status = UV_ECANCELED) {
     size_t len = 0;
     while (!d->empty()) {
       auto& v = d->front();
@@ -173,7 +175,7 @@ class QuicBuffer {
     return len;
   }
 
-  static size_t AckData(
+  static inline size_t AckData(
       std::deque<QuicBuffer>* d,
       size_t* idx,
       uint64_t* tx_offset,
