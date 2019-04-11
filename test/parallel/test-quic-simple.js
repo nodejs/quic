@@ -4,6 +4,7 @@ const common = require('../common');
 if (!common.hasCrypto)
   common.skip('missing crypto');
 
+const assert = require('assert');
 const fs = require('fs');
 const fixtures = require('../common/fixtures');
 const key = fixtures.readKey('agent8-key.pem', 'binary');
@@ -18,7 +19,10 @@ socket.listen({ key, cert, ca });
 
 socket.on('session', common.mustCall((session) => {
 
-  session.on('secure', () => {
+  session.on('secure', (servername, alpn) => {
+    console.log(servername, alpn);
+    assert.strictEqual(session.servername, servername);
+    assert.strictEqual(session.alpnProtocol, alpn);
     // We can only open a unidirectional stream after the handshake has
     // completed.
     // TODO(@jasnell): This will change once we get 0RTT working

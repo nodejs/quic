@@ -1761,7 +1761,41 @@ void QuicSession::HandshakeCompleted() {
   HandleScope scope(env()->isolate());
   Local<Context> context = env()->context();
   Context::Scope context_scope(context);
-  MakeCallback(env()->quic_on_session_handshake_function(), 0, nullptr);
+
+  Local<Value> servername;
+  Local<Value> alpn;
+
+  // Get the SNI hostname requested by the client for the session
+  const char* host_name =
+      SSL_get_servername(
+          ssl_.get(),
+          TLSEXT_NAMETYPE_host_name);
+  if (host_name != nullptr) {
+    servername = String::NewFromUtf8(
+        env()->isolate(),
+        host_name,
+        v8::NewStringType::kNormal).ToLocalChecked();
+  }
+
+  const unsigned char* alpn_buf = nullptr;
+  unsigned int alpnlen;
+
+  SSL_get0_alpn_selected(ssl_.get(), &alpn_buf, &alpnlen);
+  if (alpnlen == sizeof(NGTCP2_ALPN_D19) - 2 &&
+      memcmp(alpn_buf, NGTCP2_ALPN_D19 + 1, sizeof(NGTCP2_ALPN_D19) - 2) == 0) {
+    alpn = env()->quic_alpn_string();
+  } else {
+    alpn = OneByteString(env()->isolate(), alpn_buf, alpnlen);
+  }
+
+  Local<Value> argv[] = {
+    servername,
+    alpn
+  };
+
+  MakeCallback(env()->quic_on_session_handshake_function(),
+               arraysize(argv),
+               argv);
 }
 
 // Serialize and send a chunk of TLS Handshake data to the peer.
@@ -2966,8 +3000,9 @@ void QuicClientSession::InitTLS_Post() {
   size_t alpnlen = strsize(NGTCP2_ALPN_D19);
   SSL_set_alpn_protos(ssl(), alpn, alpnlen);
 
+  // If the hostname is an IP address and we have no additional
+  // information, use localhost.
   if (SocketAddress::numeric_host(hostname_)) {
-    // TODO(@jasnell): Proper SNI hostname
     SSL_set_tlsext_host_name(ssl(), "localhost");
   } else {
     SSL_set_tlsext_host_name(ssl(), hostname_);
@@ -3392,6 +3427,8 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
   SecureContext* sc;
   ASSIGN_OR_RETURN_UNWRAP(&sc, args[5].As<Object>());
 
+  node::Utf8Value servername(args.GetIsolate(), args[6]);
+
   sockaddr_storage addr;
   int err = SocketAddress::ToSockAddr(family, *address, port, &addr);
   if (err != 0)
@@ -3405,7 +3442,7 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
           socket,
           const_cast<const sockaddr*>(reinterpret_cast<sockaddr*>(&addr)),
           NGTCP2_PROTO_VER_D19, sc,
-          *address,
+          *servername,
           port);
   CHECK_NOT_NULL(session);
 

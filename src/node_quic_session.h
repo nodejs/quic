@@ -689,7 +689,7 @@ class QuicClientSession : public QuicSession {
 
   bool resumption_;
   const char* hostname_;
-  // uint32_t port_;
+  uint32_t port_;
 
   const ngtcp2_conn_callbacks callbacks_ = {
       OnClientInitial,

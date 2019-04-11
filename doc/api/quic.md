@@ -106,12 +106,29 @@ added: REPLACEME
 
 Emitted after the TLS handshake has been completed.
 
+The callback will be invoked with two arguments:
+
+* `servername` {string} The SNI servername requested by the client.
+* `alpnProtocol` {string} The negotiated ALPN protocol.
+
+These will also be available using the `quicsession.servername` and
+`quicsession.alpnProtocol` properties.
+
 ### Event: `'stream'`
 <!-- YAML
 added: REPLACEME
 -->
 
 Emitted when a new `QuicStream` has been initiated by the connected peer.
+
+### quicsession.alpnProtocol
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {string}
+
+The ALPN protocol identifier negotiated for this session.
 
 ### quicsession.close([callback])
 <!-- YAML
@@ -153,6 +170,15 @@ added: REPLACEME
 * Returns: {QuicStream}
 
 Returns a new `QuicStream`.
+
+### quicsession.servername
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {string}
+
+The SNI servername requested for this session by the client.
 
 ### quicsession.socket
 <!-- YAML

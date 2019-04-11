@@ -4,6 +4,7 @@ const common = require('../common');
 if (!common.hasCrypto)
   common.skip('missing crypto');
 
+const assert = require('assert');
 const fs = require('fs');
 const Countdown = require('../common/countdown');
 const createSocket = require('quic');
@@ -19,10 +20,17 @@ const client = socket.connect({
   address: '192.168.86.31',
   port: 1234,
   rejectUnauthorized: false,
-  maxStreamsUni: 1000
+  maxStreamsUni: 1000,
+  servername: 'test'
 });
 
-client.on('secure', () => {
+assert.strictEqual(client.servername, 'test');
+
+client.on('secure', (servername, alpn) => {
+  assert.strictEqual('test', servername);
+  assert.strictEqual('h3-19', alpn);
+  assert.strictEqual('test', client.servername);
+  assert.strictEqual('h3-19', client.alpnProtocol);
   console.log('secure!');
   const file = fs.createReadStream(__filename);
   const stream = client.openStream();
