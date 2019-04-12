@@ -2,6 +2,7 @@
 #include "node.h"
 #include "env-inl.h"
 #include "node_crypto.h"  // SecureContext
+#include "node_process.h"
 #include "node_quic_session.h"
 #include "node_quic_socket.h"
 #include "node_quic_stream.h"
@@ -252,6 +253,46 @@ int Server_Transport_Params_Parse_CB(
   return 1;
 }
 
+void InitKeylog(Environment* env, SecureContext* sc) {
+  static constexpr const char* LF = "\n";
+  if (env->options()->has_quic_keylog) {
+    if (env->options()->quic_keylog_file.empty()) {
+      DiagnosticFilename filename(env, "quic", "keylog");
+      env->options()->quic_keylog_file = *filename;
+    }
+
+    // Emitting keylog entries is inherently insecure. Warn the user.
+    ProcessEmitWarning(
+      env,
+      "Emitting QUIC TLS secrets to file: %s",
+      env->options()->quic_keylog_file.c_str());
+
+    SSL_CTX_set_keylog_callback(**sc, [](const SSL* ssl, const char* line) {
+      QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
+      Environment* env = session->env();
+      uv_fs_t req;
+      int fd =
+          uv_fs_open(
+              env->event_loop(),
+              &req,
+              env->options()->quic_keylog_file.c_str(),
+              O_CREAT | O_APPEND, 0644, nullptr);
+      uv_fs_req_cleanup(&req);
+      CHECK_GE(fd, 0);
+
+      uv_buf_t buf = uv_buf_init(const_cast<char*>(line), strlen(line));
+      CHECK_GE(
+        uv_fs_write(env->event_loop(), &req, fd, &buf, 1, -1, nullptr), 0);
+      buf = uv_buf_init(const_cast<char*>(LF), strlen(LF));
+      CHECK_GE(
+        uv_fs_write(env->event_loop(), &req, fd, &buf, 1, -1, nullptr), 0);
+
+      CHECK_EQ(uv_fs_close(env->event_loop(), &req, fd, nullptr), 0);
+      uv_fs_req_cleanup(&req);
+    });
+  }
+}
+
 // Sets QUIC specific configuration options for the SecureContext.
 // It's entirely likely that there's a better way to do this, but
 // for now this works.
@@ -290,6 +331,8 @@ void QuicInitSecureContext(const FunctionCallbackInfo<Value>& args) {
       return env->ThrowError("Failed to set groups");
     return crypto::ThrowCryptoError(env, err);
   }
+
+  InitKeylog(env, sc);
 }
 
 void QuicInitSecureContextClient(const FunctionCallbackInfo<Value>& args) {
@@ -331,6 +374,8 @@ void QuicInitSecureContextClient(const FunctionCallbackInfo<Value>& args) {
             SSL_get_app_data(ssl));
     return s->SetSession(session);
   });
+
+  InitKeylog(env, sc);
 }
 }  // namespace
 
