@@ -31,6 +31,7 @@ namespace node {
 using crypto::EntropySource;
 using crypto::SecureContext;
 
+using v8::ArrayBufferView;
 using v8::Context;
 using v8::Float64Array;
 using v8::FunctionCallbackInfo;
@@ -3465,6 +3466,26 @@ int QuicClientSession::SetupInitialCryptoContext() {
   return 0;
 }
 
+int QuicClientSession::SetEarlyTransportParams(Local<Value> buffer) {
+  ArrayBufferViewContents<uint8_t> sbuf(buffer.As<ArrayBufferView>());
+  ngtcp2_transport_params params;
+  if (sbuf.length() != sizeof(ngtcp2_transport_params))
+    return ERR_INVALID_REMOTE_TRANSPORT_PARAMS;
+  memcpy(&params, sbuf.data(), sizeof(ngtcp2_transport_params));
+  ngtcp2_conn_set_early_remote_transport_params(connection_, &params);
+  return 0;
+}
+
+int QuicClientSession::SetSession(Local<Value> buffer) {
+  ArrayBufferViewContents<unsigned char> sbuf(buffer.As<ArrayBufferView>());
+  const unsigned char* p = sbuf.data();
+  crypto::SSLSessionPointer s(d2i_SSL_SESSION(nullptr, &p, sbuf.length()));
+  if (s == nullptr)
+    return ERR_INVALID_TLS_SESSION_TICKET;
+  if (SSL_set_session(ssl_.get(), s.get()) != 1)
+    return ERR_INVALID_TLS_SESSION_TICKET;
+}
+
 // JavaScript API
 namespace {
 void QuicSessionDestroy(const FunctionCallbackInfo<Value>& args) {
@@ -3632,6 +3653,20 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
           *servername,
           port);
   CHECK_NOT_NULL(session);
+
+  // Remote Transport Params
+  if (args[7]->IsArrayBufferView()) {
+    err = session->SetEarlyTransportParams(args[7]);
+    if (err != 0)
+      return args.GetReturnValue().Set(err);
+  }
+
+  // Session Ticket
+  if (args[8]->IsArrayBufferView()) {
+    err = session->SetSession(args[8]);
+    if (err != 0)
+      return args.GetReturnValue().Set(err);
+  }
 
   // socket->SendPendingData();
 

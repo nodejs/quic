@@ -17,11 +17,11 @@ const countdown = new Countdown(2, () => {
 
 const client = socket.connect({
   type: 'udp4',
-  address: '192.168.86.31',
+  address: 'localhost',
   port: 1234,
   rejectUnauthorized: false,
   maxStreamsUni: 1000,
-  servername: 'test'
+  servername: 'test',
 });
 
 assert.strictEqual(client.servername, 'test');

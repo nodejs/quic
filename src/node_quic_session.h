@@ -27,6 +27,9 @@ class QuicServerSession;
 class QuicSocket;
 class QuicStream;
 
+constexpr int ERR_INVALID_REMOTE_TRANSPORT_PARAMS = -1;
+constexpr int ERR_INVALID_TLS_SESSION_TICKET = -2;
+
 #define QUICSESSION_CONFIG(V)                                                 \
   V(MAX_STREAM_DATA_BIDI_LOCAL, max_stream_data_bidi_local, 256_k)            \
   V(MAX_STREAM_DATA_BIDI_REMOTE, max_stream_data_bidi_remote, 256_k)          \
@@ -690,6 +693,8 @@ class QuicClientSession : public QuicSession {
   int SetSession(SSL_SESSION* session);
   v8::MaybeLocal<v8::Object> GetRemoteTransportParamsBuffer();
   v8::MaybeLocal<v8::Object> GetSessionTicketBuffer();
+  int SetEarlyTransportParams(v8::Local<v8::Value> buffer);
+  int SetSession(v8::Local<v8::Value> buffer);
 
  private:
   int ExtendMaxStreams(

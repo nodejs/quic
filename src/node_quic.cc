@@ -402,6 +402,9 @@ void Initialize(Local<Object> target,
   NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_MAX_ACK_DELAY);
   NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_CONFIG_COUNT);
 
+  NODE_DEFINE_CONSTANT(constants, ERR_INVALID_REMOTE_TRANSPORT_PARAMS);
+  NODE_DEFINE_CONSTANT(constants, ERR_INVALID_TLS_SESSION_TICKET);
+
 #define V(idx, name, def)                                                      \
   NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_## idx ##_DEFAULT);
   QUICSESSION_CONFIG(V)

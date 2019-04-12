@@ -210,6 +210,20 @@ added: REPLACEME
 
 TBD
 
+#### Event: `'sessionTicket'`
+
+The `'sessionTicket'` event is emitted when a new TLS session ticket has been
+generated for the current `QuicClientSession`. The callback is invoked with
+three arguments:
+
+* `sessionID` {Buffer} The serialized session ticket identifier.
+* `sessionTicket` {Buffer} The serialized session ticket.
+* `remoteTransportParams` {Buffer} The serialized remote transport parameters
+  provided by the QUIC server.
+
+The `sessionTicket` and `remoteTransportParams` are useful when creating a new
+`QuicClientSession` to more quickly resume an existing session.
+
 #### quicclientsession.ephemeralKeyInfo
 <!-- YAML
 added: REPLACEME
@@ -291,6 +305,7 @@ added: REPLACEME
 -->
 
 * `options` {Object}
+  * `address` {string} The domain name or IP address of the QUIC server endpoint.
   * `ca` {string|string[]|Buffer|Buffer[]} Optionally override the trusted CA
     certificates. Default is to trust the well-known CAs curated by Mozilla.
     Mozilla's CAs are completely replaced when CAs are explicitly specified
@@ -342,6 +357,7 @@ added: REPLACEME
     preferences instead of the client's. When `true`, causes
     `SSL_OP_CIPHER_SERVER_PREFERENCE` to be set in `secureOptions`, see
     [OpenSSL Options][] for more information.
+  * `ipv6Only` {boolean}
   * `key` {string|string[]|Buffer|Buffer[]|Object[]} Private keys in PEM format.
     PEM allows the option of private keys being encrypted. Encrypted keys will
     be decrypted with `options.passphrase`. Multiple keys using different
@@ -361,12 +377,24 @@ added: REPLACEME
     occur in an array. `object.passphrase` is optional. Encrypted PFX will be
     decrypted with `object.passphrase` if provided, or `options.passphrase` if
     it is not.
+  * `port` {number} The IP port of the remote QUIC server.
+  * `remoteTransportParams` {Buffer|TypedArray|DataView} The serialized remote
+    transport parameters from a previously established session. These would
+    have been provided as part of the `'sessionTicket'` event on a previous
+    `QuicClientSession` object.
   * `secureOptions` {number} Optionally affect the OpenSSL protocol behavior,
     which is not usually necessary. This should be used carefully if at all!
     Value is a numeric bitmask of the `SSL_OP_*` options from
     [OpenSSL Options][].
   * `sessionIdContext` {string} Opaque identifier used by servers to ensure
     session state is not shared between applications. Unused by clients.
+  * `sessionTicket`: {Buffer|TypedArray|DataView} The serialized TSL Session
+    Ticket from a previously established session. These would have been
+    provided as part of the `'sessionTicket`' event on a previous
+    `QuicClientSession` object.
+  * `type`: {string} Identifies the type of UDP socket. The value must either
+    be `'udp4'`, indicating UDP over IPv4, or `'udp6'`, indicating UDP over
+    IPv6. Defaults to `'udp4'`.
 
 Create a new `QuicClientSession`.
 
