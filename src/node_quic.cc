@@ -50,6 +50,7 @@ void QuicSetCallbacks(const FunctionCallbackInfo<Value>& args) {
   SETFUNCTION("onSessionError", session_error);
   SETFUNCTION("onSessionExtend", session_extend);
   SETFUNCTION("onSessionHandshake", session_handshake);
+  SETFUNCTION("onSessionTicket", session_ticket);
   SETFUNCTION("onStreamReady", stream_ready);
   SETFUNCTION("onStreamClose", stream_close);
   SETFUNCTION("onStreamError", stream_error);
@@ -321,8 +322,16 @@ void QuicInitSecureContextClient(const FunctionCallbackInfo<Value>& args) {
       return env->ThrowError("Failed to set groups");
     return crypto::ThrowCryptoError(env, err);
   }
-}
 
+  SSL_CTX_set_session_cache_mode(
+    **sc, SSL_SESS_CACHE_CLIENT | SSL_SESS_CACHE_NO_INTERNAL_STORE);
+  SSL_CTX_sess_set_new_cb(**sc, [](SSL* ssl, SSL_SESSION* session) {
+    QuicClientSession* s =
+        static_cast<QuicClientSession*>(
+            SSL_get_app_data(ssl));
+    return s->SetSession(session);
+  });
+}
 }  // namespace
 
 

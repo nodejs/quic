@@ -26,6 +26,12 @@ const client = socket.connect({
 
 assert.strictEqual(client.servername, 'test');
 
+client.on('sessionTicket', (id, ticket, params) => {
+  console.log('session ID: ', id);
+  console.log('session ticket: ', ticket);
+  console.log('transport params: ', params);
+});
+
 client.on('secure', (servername, alpn) => {
   assert.strictEqual('test', servername);
   assert.strictEqual('h3-19', alpn);

@@ -38,6 +38,7 @@ using v8::FunctionTemplate;
 using v8::HandleScope;
 using v8::Integer;
 using v8::Local;
+using v8::MaybeLocal;
 using v8::Number;
 using v8::Object;
 using v8::ObjectTemplate;
@@ -2052,6 +2053,7 @@ int QuicSession::SendPacket() {
 int QuicSession::SetRemoteTransportParams(
     ngtcp2_transport_params* params) {
   CHECK(!IsDestroyed());
+  StoreRemoteTransportParams(params);
   return ngtcp2_conn_set_remote_transport_params(connection_, params);
 }
 
@@ -3006,6 +3008,53 @@ int QuicClientSession::Init(
   }
 
   return DoHandshakeWriteOnce();
+}
+
+void QuicClientSession::StoreRemoteTransportParams(
+    ngtcp2_transport_params* params) {
+  transportParams_.AllocateSufficientStorage(sizeof(ngtcp2_transport_params));
+  memcpy(*transportParams_, params, sizeof(ngtcp2_transport_params));
+}
+
+int QuicClientSession::SetSession(SSL_SESSION* session) {
+  int size = i2d_SSL_SESSION(session, nullptr);
+  if (size > SecureContext::kMaxSessionSize)
+    return 0;
+
+  HandleScope scope(env()->isolate());
+  Context::Scope context_scope(env()->context());
+
+  unsigned int session_id_length;
+  const unsigned char* session_id_data =
+      SSL_SESSION_get_id(session, &session_id_length);
+
+  Local<Value> argv[] = {
+    Buffer::Copy(
+        env(),
+        reinterpret_cast<const char*>(session_id_data),
+        session_id_length).ToLocalChecked(),
+    v8::Undefined(env()->isolate()),
+    v8::Undefined(env()->isolate())
+  };
+
+  AllocatedBuffer sessionTicket = env()->AllocateManaged(size);
+  unsigned char* session_data =
+    reinterpret_cast<unsigned char*>(sessionTicket.data());
+  memset(session_data, 0, size);
+  i2d_SSL_SESSION(session, &session_data);
+  if (!sessionTicket.empty())
+    argv[1] = sessionTicket.ToBuffer().ToLocalChecked();
+
+  if (transportParams_.length() > 0) {
+    AllocatedBuffer transportParams(env(),
+                                    uv_buf_init(
+                                        *transportParams_,
+                                        transportParams_.length()));
+    argv[2] = transportParams.ToBuffer().ToLocalChecked();
+  }
+  MakeCallback(env()->quic_on_session_ticket_function(), arraysize(argv), argv);
+
+  return 1;
 }
 
 void QuicClientSession::InitTLS_Post() {

@@ -931,6 +931,10 @@ inline void AllocatedBuffer::Resize(size_t len) {
   buffer_ = uv_buf_init(new_data, len);
 }
 
+inline bool AllocatedBuffer::empty() {
+  return env_ == nullptr;
+}
+
 inline uv_buf_t AllocatedBuffer::release() {
   uv_buf_t ret = buffer_;
   buffer_ = uv_buf_init(nullptr, 0);

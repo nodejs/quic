@@ -150,6 +150,7 @@ class QuicSession : public AsyncWrap {
     uint64_t max_streams) { return 0; }
   virtual bool IsServer() const { return false; }
   virtual int ReceiveRetry() { return 0; }
+  virtual void StoreRemoteTransportParams(ngtcp2_transport_params* params) {}
 
   // These must be implemented by QuicSession types
   virtual int DoHandshake(
@@ -650,6 +651,9 @@ class QuicClientSession : public QuicSession {
     const uint8_t* secret,
     size_t secretlen) override;
 
+  virtual void StoreRemoteTransportParams(
+    ngtcp2_transport_params* params) override;
+
   virtual int TLSRead() override;
 
   int Init(
@@ -683,6 +687,10 @@ class QuicClientSession : public QuicSession {
   SET_MEMORY_INFO_NAME(QuicClientSession)
   SET_SELF_SIZE(QuicClientSession)
 
+  int SetSession(SSL_SESSION* session);
+  v8::MaybeLocal<v8::Object> GetRemoteTransportParamsBuffer();
+  v8::MaybeLocal<v8::Object> GetSessionTicketBuffer();
+
  private:
   int ExtendMaxStreams(
     bool bidi,
@@ -693,6 +701,8 @@ class QuicClientSession : public QuicSession {
   bool resumption_;
   const char* hostname_;
   uint32_t port_;
+
+  MaybeStackBuffer<char> transportParams_;
 
   const ngtcp2_conn_callbacks callbacks_ = {
       OnClientInitial,
