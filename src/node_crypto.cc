@@ -111,11 +111,6 @@ using v8::Value;
 # define IS_OCB_MODE(mode) ((mode) == EVP_CIPH_OCB_MODE)
 #endif
 
-struct StackOfX509Deleter {
-  void operator()(STACK_OF(X509)* p) const { sk_X509_pop_free(p, X509_free); }
-};
-using StackOfX509 = std::unique_ptr<STACK_OF(X509), StackOfX509Deleter>;
-
 struct StackOfXASN1Deleter {
   void operator()(STACK_OF(ASN1_OBJECT)* p) const {
     sk_ASN1_OBJECT_pop_free(p, ASN1_OBJECT_free);
@@ -1928,7 +1923,7 @@ static MaybeLocal<Object> ECPointToBuffer(Environment* env,
 }
 
 
-static Local<Object> X509ToObject(Environment* env, X509* cert) {
+Local<Object> X509ToObject(Environment* env, X509* cert) {
   EscapableHandleScope scope(env->isolate());
   Local<Context> context = env->context();
   Local<Object> info = Object::New(env->isolate());
@@ -2150,10 +2145,10 @@ static Local<Object> X509ToObject(Environment* env, X509* cert) {
 }
 
 
-static Local<Object> AddIssuerChainToObject(X509Pointer* cert,
-                                            Local<Object> object,
-                                            StackOfX509&& peer_certs,
-                                            Environment* const env) {
+Local<Object> AddIssuerChainToObject(X509Pointer* cert,
+                                     Local<Object> object,
+                                     StackOfX509&& peer_certs,
+                                     Environment* const env) {
   Local<Context> context = env->isolate()->GetCurrentContext();
   cert->reset(sk_X509_delete(peer_certs.get(), 0));
   for (;;) {
@@ -2181,8 +2176,8 @@ static Local<Object> AddIssuerChainToObject(X509Pointer* cert,
 }
 
 
-static StackOfX509 CloneSSLCerts(X509Pointer&& cert,
-                                 const STACK_OF(X509)* const ssl_certs) {
+StackOfX509 CloneSSLCerts(X509Pointer&& cert,
+                          const STACK_OF(X509)* const ssl_certs) {
   StackOfX509 peer_certs(sk_X509_new(nullptr));
   if (cert)
     sk_X509_push(peer_certs.get(), cert.release());
@@ -2197,14 +2192,14 @@ static StackOfX509 CloneSSLCerts(X509Pointer&& cert,
 }
 
 
-static Local<Object> GetLastIssuedCert(X509Pointer* cert,
-                                       const SSLPointer& ssl,
-                                       Local<Object> issuer_chain,
-                                       Environment* const env) {
+Local<Object> GetLastIssuedCert(X509Pointer* cert,
+                                SSL* ssl,
+                                Local<Object> issuer_chain,
+                                Environment* const env) {
   Local<Context> context = env->isolate()->GetCurrentContext();
   while (X509_check_issued(cert->get(), cert->get()) != X509_V_OK) {
     X509* ca;
-    if (SSL_CTX_get_issuer(SSL_get_SSL_CTX(ssl.get()), cert->get(), &ca) <= 0)
+    if (SSL_CTX_get_issuer(SSL_get_SSL_CTX(ssl), cert->get(), &ca) <= 0)
       break;
 
     Local<Object> ca_info = X509ToObject(env, ca);
@@ -2253,7 +2248,7 @@ void SSLWrap<Base>::GetPeerCertificate(
 
     issuer_chain =
         AddIssuerChainToObject(&cert, result, std::move(peer_certs), env);
-    issuer_chain = GetLastIssuedCert(&cert, w->ssl_, issuer_chain, env);
+    issuer_chain = GetLastIssuedCert(&cert, w->ssl_.get(), issuer_chain, env);
     // Last certificate should be self-signed.
     if (X509_check_issued(cert.get(), cert.get()) == X509_V_OK)
       issuer_chain->Set(env->context(),

@@ -159,6 +159,18 @@ added: REPLACEME
 
 Set to `true` if the `QuicSession` has been destroyed.
 
+### quicsession.getCertificate()
+<!-- YAML
+added: REPLACEME
+-->
+
+### quicsession.getPeerCertificate([detailed])
+<!-- YAML
+added: REPLACEME
+-->
+
+* `detailed` {boolean} Defaults to `false`
+
 ### quicsession.openStream([options])
 <!-- YAML
 added: REPLACEME

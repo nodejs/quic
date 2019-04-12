@@ -3424,6 +3424,7 @@ void QuicSessionDestroy(const FunctionCallbackInfo<Value>& args) {
   session->Destroy();
 }
 
+// TODO(@jasnell): Consolidate shared code with node_crypto
 void QuicSessionGetEphemeralKeyInfo(const FunctionCallbackInfo<Value>& args) {
   QuicClientSession* session;
   ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
@@ -3477,6 +3478,75 @@ void QuicSessionGetEphemeralKeyInfo(const FunctionCallbackInfo<Value>& args) {
   return args.GetReturnValue().Set(info);
 }
 
+// TODO(@jasnell): Consolidate with shared code in node_crypto
+void QuicSessionGetPeerCertificate(const FunctionCallbackInfo<Value>& args) {
+  QuicSession* session;
+  ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
+  Environment* env = session->env();
+
+  crypto::ClearErrorOnReturn clear_error_on_return;
+
+  Local<Object> result;
+  // Used to build the issuer certificate chain.
+  Local<Object> issuer_chain;
+
+  // NOTE: This is because of the odd OpenSSL behavior. On client `cert_chain`
+  // contains the `peer_certificate`, but on server it doesn't.
+  crypto::X509Pointer cert(
+      session->IsServer() ? SSL_get_peer_certificate(session->ssl()) : nullptr);
+  STACK_OF(X509)* ssl_certs = SSL_get_peer_cert_chain(session->ssl());
+  if (!cert && (ssl_certs == nullptr || sk_X509_num(ssl_certs) == 0))
+    goto done;
+
+  // Short result requested.
+  if (args.Length() < 1 || !args[0]->IsTrue()) {
+    result = crypto::X509ToObject(env, cert ? cert.get() : sk_X509_value(ssl_certs, 0));
+    goto done;
+  }
+
+  if (auto peer_certs = crypto::CloneSSLCerts(std::move(cert), ssl_certs)) {
+    // First and main certificate.
+    crypto::X509Pointer cert(sk_X509_value(peer_certs.get(), 0));
+    CHECK(cert);
+    result = crypto::X509ToObject(env, cert.release());
+
+    issuer_chain =
+        crypto::AddIssuerChainToObject(
+            &cert, result,
+            std::move(peer_certs), env);
+    issuer_chain = crypto::GetLastIssuedCert(&cert,
+                                             session->ssl(),
+                                             issuer_chain, env);
+    // Last certificate should be self-signed.
+    if (X509_check_issued(cert.get(), cert.get()) == X509_V_OK)
+      issuer_chain->Set(env->context(),
+                        env->issuercert_string(),
+                        issuer_chain).FromJust();
+  }
+
+ done:
+  args.GetReturnValue().Set(result);
+}
+
+// TODO(@jasnell): Reconcile with shared code in node_crypto
+void QuicSessionGetCertificate(
+    const FunctionCallbackInfo<Value>& args) {
+  QuicSession* session;
+  ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
+  Environment* env = session->env();
+
+  crypto::ClearErrorOnReturn clear_error_on_return;
+
+  Local<Object> result;
+
+  X509* cert = SSL_get_certificate(session->ssl());
+
+  if (cert != nullptr)
+    result = crypto::X509ToObject(env, cert);
+
+  args.GetReturnValue().Set(result);
+}
+
 void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   CHECK(args[0]->IsObject());
@@ -3518,6 +3588,18 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
 
   args.GetReturnValue().Set(session->object());
 }
+
+void AddMethods(Environment* env, Local<FunctionTemplate> session) {
+  env->SetProtoMethod(session,
+                      "destroy",
+                      QuicSessionDestroy);
+  env->SetProtoMethod(session,
+                      "getCertificate",
+                      QuicSessionGetCertificate);
+  env->SetProtoMethod(session,
+                      "getPeerCertificate",
+                      QuicSessionGetPeerCertificate);
+}
 }  // namespace
 
 void QuicServerSession::Initialize(
@@ -3532,9 +3614,7 @@ void QuicServerSession::Initialize(
   Local<ObjectTemplate> sessiont = session->InstanceTemplate();
   sessiont->SetInternalFieldCount(1);
   sessiont->Set(env->owner_symbol(), Null(env->isolate()));
-  env->SetProtoMethod(session,
-                      "destroy",
-                      QuicSessionDestroy);
+  AddMethods(env, session);
   env->set_quicserversession_constructor_template(sessiont);
 }
 
@@ -3550,9 +3630,7 @@ void QuicClientSession::Initialize(
   Local<ObjectTemplate> sessiont = session->InstanceTemplate();
   sessiont->SetInternalFieldCount(1);
   sessiont->Set(env->owner_symbol(), Null(env->isolate()));
-  env->SetProtoMethod(session,
-                      "destroy",
-                      QuicSessionDestroy);
+  AddMethods(env, session);
   env->SetProtoMethod(session,
                       "getEphemeralKeyInfo",
                       QuicSessionGetEphemeralKeyInfo);

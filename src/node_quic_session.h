@@ -148,6 +148,7 @@ class QuicSession : public AsyncWrap {
     uint64_t max_streams) { return 0; }
   virtual int ExtendMaxStreamsBidi(
     uint64_t max_streams) { return 0; }
+  virtual bool IsServer() const { return false; }
   virtual int ReceiveRetry() { return 0; }
 
   // These must be implemented by QuicSession types
@@ -523,6 +524,8 @@ class QuicServerSession : public QuicSession {
 
   virtual int HandleError(
     int code) override;
+
+  virtual bool IsServer() const override { return true; }
 
   virtual int OnKey(
     int name,

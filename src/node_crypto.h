@@ -825,6 +825,27 @@ void ThrowCryptoError(Environment* env,
                       unsigned long err,  // NOLINT(runtime/int)
                       const char* message = nullptr);
 
+struct StackOfX509Deleter {
+  void operator()(STACK_OF(X509)* p) const { sk_X509_pop_free(p, X509_free); }
+};
+using StackOfX509 = std::unique_ptr<STACK_OF(X509), StackOfX509Deleter>;
+
+v8::Local<v8::Object> X509ToObject(
+  Environment* env,
+  X509* cert);
+StackOfX509 CloneSSLCerts(
+  X509Pointer&& cert,
+  const STACK_OF(X509)* const ssl_certs);
+v8::Local<v8::Object> AddIssuerChainToObject(
+  X509Pointer* cert,
+  v8::Local<v8::Object> object,
+  StackOfX509&& peer_certs,
+  Environment* const env);
+v8::Local<v8::Object> GetLastIssuedCert(
+  X509Pointer* cert,
+  SSL* ssl,
+  v8::Local<v8::Object> issuer_chain,
+  Environment* const env);
 }  // namespace crypto
 }  // namespace node
 
