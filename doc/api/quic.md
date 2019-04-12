@@ -198,6 +198,11 @@ added: REPLACEME
 
 TBD
 
+#### quicclientsession.ephemeralKeyInfo
+<!-- YAML
+added: REPLACEME
+-->
+
 ### Class: QuicServerSession
 <!-- YAML
 added: REPLACEME

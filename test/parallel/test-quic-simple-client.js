@@ -31,6 +31,7 @@ client.on('secure', (servername, alpn) => {
   assert.strictEqual('h3-19', alpn);
   assert.strictEqual('test', client.servername);
   assert.strictEqual('h3-19', client.alpnProtocol);
+  console.log(client.ephemeralKeyInfo);
   console.log('secure!');
   const file = fs.createReadStream(__filename);
   const stream = client.openStream();

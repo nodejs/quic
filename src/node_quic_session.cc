@@ -36,6 +36,7 @@ using v8::Float64Array;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
 using v8::HandleScope;
+using v8::Integer;
 using v8::Local;
 using v8::Number;
 using v8::Object;
@@ -1764,6 +1765,8 @@ void QuicSession::HandshakeCompleted() {
 
   Local<Value> servername;
   Local<Value> alpn;
+  Local<Value> cipher;
+  Local<Value> version;
 
   // Get the SNI hostname requested by the client for the session
   const char* host_name =
@@ -1777,6 +1780,7 @@ void QuicSession::HandshakeCompleted() {
         v8::NewStringType::kNormal).ToLocalChecked();
   }
 
+  // Get the ALPN protocol identifier that was negotiated for the session
   const unsigned char* alpn_buf = nullptr;
   unsigned int alpnlen;
 
@@ -1788,9 +1792,20 @@ void QuicSession::HandshakeCompleted() {
     alpn = OneByteString(env()->isolate(), alpn_buf, alpnlen);
   }
 
+  // Get the cipher and version
+  const SSL_CIPHER* c = SSL_get_current_cipher(ssl_.get());
+  if (c != nullptr) {
+    const char* cipher_name = SSL_CIPHER_get_name(c);
+    const char* cipher_version = SSL_CIPHER_get_version(c);
+    cipher = OneByteString(env()->isolate(), cipher_name);
+    version = OneByteString(env()->isolate(), cipher_version);
+  }
+
   Local<Value> argv[] = {
     servername,
-    alpn
+    alpn,
+    cipher,
+    version
   };
 
   MakeCallback(env()->quic_on_session_handshake_function(),
@@ -3409,6 +3424,59 @@ void QuicSessionDestroy(const FunctionCallbackInfo<Value>& args) {
   session->Destroy();
 }
 
+void QuicSessionGetEphemeralKeyInfo(const FunctionCallbackInfo<Value>& args) {
+  QuicClientSession* session;
+  ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
+  Environment* env = Environment::GetCurrent(args);
+  Local<Context> context = env->context();
+
+  CHECK(session->ssl());
+
+  Local<Object> info = Object::New(env->isolate());
+
+  EVP_PKEY* raw_key;
+  if (SSL_get_server_tmp_key(session->ssl(), &raw_key)) {
+    crypto::EVPKeyPointer key(raw_key);
+    int kid = EVP_PKEY_id(key.get());
+    switch (kid) {
+      case EVP_PKEY_DH:
+        info->Set(context, env->type_string(),
+                  FIXED_ONE_BYTE_STRING(env->isolate(), "DH")).FromJust();
+        info->Set(context, env->size_string(),
+                  Integer::New(env->isolate(), EVP_PKEY_bits(key.get())))
+            .FromJust();
+        break;
+      case EVP_PKEY_EC:
+      case EVP_PKEY_X25519:
+      case EVP_PKEY_X448:
+        {
+          const char* curve_name;
+          if (kid == EVP_PKEY_EC) {
+            EC_KEY* ec = EVP_PKEY_get1_EC_KEY(key.get());
+            int nid = EC_GROUP_get_curve_name(EC_KEY_get0_group(ec));
+            curve_name = OBJ_nid2sn(nid);
+            EC_KEY_free(ec);
+          } else {
+            curve_name = OBJ_nid2sn(kid);
+          }
+          info->Set(context, env->type_string(),
+                    FIXED_ONE_BYTE_STRING(env->isolate(), "ECDH")).FromJust();
+          info->Set(context, env->name_string(),
+                    OneByteString(args.GetIsolate(),
+                                  curve_name)).FromJust();
+          info->Set(context, env->size_string(),
+                    Integer::New(env->isolate(),
+                                 EVP_PKEY_bits(key.get()))).FromJust();
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  return args.GetReturnValue().Set(info);
+}
+
 void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   CHECK(args[0]->IsObject());
@@ -3485,6 +3553,9 @@ void QuicClientSession::Initialize(
   env->SetProtoMethod(session,
                       "destroy",
                       QuicSessionDestroy);
+  env->SetProtoMethod(session,
+                      "getEphemeralKeyInfo",
+                      QuicSessionGetEphemeralKeyInfo);
   env->set_quicclientsession_constructor_template(sessiont);
 
   env->SetMethod(target, "createClientSession", NewQuicClientSession);

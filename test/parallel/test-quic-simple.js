@@ -19,8 +19,8 @@ socket.listen({ key, cert, ca });
 
 socket.on('session', common.mustCall((session) => {
 
-  session.on('secure', (servername, alpn) => {
-    console.log(servername, alpn);
+  session.on('secure', (servername, alpn, cipher) => {
+    console.log(servername, alpn, cipher);
     assert.strictEqual(session.servername, servername);
     assert.strictEqual(session.alpnProtocol, alpn);
     // We can only open a unidirectional stream after the handshake has
