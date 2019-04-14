@@ -103,7 +103,7 @@ void QuicSocket::AddSession(
 
 void QuicSocket::AssociateCID(
     QuicCID* cid,
-    QuicServerSession* session) {
+    QuicSession* session) {
   QuicCID scid(session->scid());
   Debug(this, "Associating scid %s with cid %s.",
         scid.ToHex().c_str(), cid->ToHex().c_str());

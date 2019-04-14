@@ -869,6 +869,7 @@ void QuicSessionConfig::ToSettings(ngtcp2_settings* settings,
 
   settings->log_printf = QuicSession::DebugLog;
   settings->initial_ts = uv_hrtime();
+  settings->disable_migration = 0;
 
   if (stateless_reset_token) {
     settings->stateless_reset_token_present = 1;
@@ -1406,6 +1407,12 @@ QuicSession::~QuicSession() {
   CHECK(!ssl_);
 }
 
+void QuicSession::AssociateCID(
+    ngtcp2_cid* cid) {
+  QuicCID id(cid);
+  Socket()->AssociateCID(&id, this);
+}
+
 // Because of the fire-and-forget nature of UDP, the QuicSession must retain
 // the data sent as packets until the recipient has acknowledged that data.
 // This applies to TLS Handshake data as well as stream data. Once acknowledged,
@@ -1877,6 +1884,10 @@ int QuicSession::ReceiveCryptoData(
   // It's possible that not all of the data was consumed. Anything
   // that's remaining needs to be read but it not used.
   return TLSRead();
+}
+
+const ngtcp2_cid* QuicSession::scid() const {
+  return &scid_;
 }
 
 // Called by ngtcp2 when a chunk of stream data has been received. If
@@ -2468,12 +2479,6 @@ QuicServerSession::QuicServerSession(
     draining_(false) {
 }
 
-void QuicServerSession::AssociateCID(
-    ngtcp2_cid* cid) {
-  QuicCID id(cid);
-  Socket()->AssociateCID(&id, this);
-}
-
 void QuicServerSession::DisassociateCID(
     const ngtcp2_cid* cid) {
   QuicCID id(cid);
@@ -2684,6 +2689,7 @@ int QuicServerSession::Receive(
     return 0;
   }
 
+  remote_address_.Update(addr);
   QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
 
   if (IsHandshakeCompleted()) {
@@ -2905,10 +2911,6 @@ const ngtcp2_cid* QuicServerSession::rcid() const {
   return &rcid_;
 }
 
-const ngtcp2_cid* QuicServerSession::scid() const {
-  return &scid_;
-}
-
 
 // The QuicClientSession class provides a specialization of QuicSession that
 // implements client-specific behaviors. Most of the client-specific stuff is
@@ -3009,6 +3011,44 @@ int QuicClientSession::Init(
   }
 
   return DoHandshakeWriteOnce();
+}
+
+int QuicClientSession::SetSocket(
+    QuicSocket* socket,
+    bool nat_rebinding) {
+  if (socket == nullptr || socket == socket_)
+    return 0;
+
+  // Step 1: Remove this Session from the current Socket
+  Remove();
+
+  // Step 2: Add this Session to the given Socket
+  std::vector<ngtcp2_cid> cids(ngtcp2_conn_get_num_scid(connection_));
+  ngtcp2_conn_get_scid(connection_, cids.data());
+
+  QuicCID scid(&scid_);
+  socket->AddSession(&scid, this);
+  for (auto &cid : cids) {
+    QuicCID id(&cid);
+    socket->AssociateCID(&id, this);
+  }
+
+  // Step 3: Update the internal references
+  socket_ = socket;
+  socket->ReceiveStart();
+
+  // Step 4: Update ngtcp2
+  SocketAddress* local_address = socket->GetLocalAddress();
+  if (nat_rebinding) {
+    ngtcp2_conn_set_local_addr(connection_, &local_address->ToAddr());
+  } else {
+    QuicPath path(local_address, &remote_address_);
+    RETURN_IF_FAIL(
+       ngtcp2_conn_initiate_migration(connection_, *path, uv_hrtime()),
+       0, -1)
+  }
+
+  return SendPendingData();
 }
 
 void QuicClientSession::StoreRemoteTransportParams(
@@ -3270,6 +3310,7 @@ int QuicClientSession::Receive(
   Debug(this, "Received packet. nread = %d bytes", nread);
   int err;
 
+  remote_address_.Update(addr);
   QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
 
   if (IsHandshakeCompleted()) {
@@ -3488,6 +3529,15 @@ int QuicClientSession::SetSession(Local<Value> buffer) {
 
 // JavaScript API
 namespace {
+void QuicSessionSetSocket(const FunctionCallbackInfo<Value>& args) {
+  QuicClientSession* session;
+  ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
+  CHECK(args[0]->IsObject());
+  QuicSocket* socket;
+  ASSIGN_OR_RETURN_UNWRAP(&socket, args[0].As<Object>());
+  args.GetReturnValue().Set(session->SetSocket(socket));
+}
+
 void QuicSessionDestroy(const FunctionCallbackInfo<Value>& args) {
   QuicSession* session;
   ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
@@ -3718,6 +3768,9 @@ void QuicClientSession::Initialize(
   env->SetProtoMethod(session,
                       "getEphemeralKeyInfo",
                       QuicSessionGetEphemeralKeyInfo);
+  env->SetProtoMethod(session,
+                      "setSocket",
+                      QuicSessionSetSocket);
   env->set_quicclientsession_constructor_template(sessiont);
 
   env->SetMethod(target, "createClientSession", NewQuicClientSession);

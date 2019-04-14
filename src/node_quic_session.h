@@ -79,6 +79,8 @@ class QuicSession : public AsyncWrap {
     size_t datalen);
   void AddStream(
     QuicStream* stream);
+  void AssociateCID(
+    ngtcp2_cid* cid);
   void Close();
   void Destroy();
   QuicStream* FindStream(
@@ -141,9 +143,9 @@ class QuicSession : public AsyncWrap {
     const uint8_t* data,
     size_t datalen);
 
+  const ngtcp2_cid* scid() const;
+
   // These may be implemented by QuicSession types
-  virtual void AssociateCID(
-    ngtcp2_cid* cid) {}
   virtual void Cleanup() {}
   virtual void DisassociateCID(
     const ngtcp2_cid* cid) {}
@@ -513,9 +515,6 @@ class QuicServerSession : public QuicSession {
     QuicSocket* socket,
     const ngtcp2_cid* rcid);
 
-  virtual void AssociateCID(
-    ngtcp2_cid* cid) override;
-
   virtual void Cleanup() override;
 
   virtual void DisassociateCID(
@@ -562,7 +561,6 @@ class QuicServerSession : public QuicSession {
   virtual int TLSHandshake_Initial() override;
 
   const ngtcp2_cid* rcid() const;
-  const ngtcp2_cid* scid() const;
   const ngtcp2_cid* pscid() const;
 
   void MemoryInfo(MemoryTracker* tracker) const override {}
@@ -653,6 +651,8 @@ class QuicClientSession : public QuicSession {
     int name,
     const uint8_t* secret,
     size_t secretlen) override;
+
+  int SetSocket(QuicSocket* socket, bool nat_rebinding = false);
 
   virtual void StoreRemoteTransportParams(
     ngtcp2_transport_params* params) override;

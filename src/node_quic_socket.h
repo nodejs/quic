@@ -46,7 +46,7 @@ class QuicSocket : public HandleWrap {
     QuicSession* session);
   void AssociateCID(
     QuicCID* cid,
-    QuicServerSession* session);
+    QuicSession* session);
   int Bind(
     const char* address,
     uint32_t port,

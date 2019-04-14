@@ -20,10 +20,8 @@ socket.listen({ key, cert, ca });
 socket.on('session', common.mustCall((session) => {
 
   session.on('secure', (servername, alpn, cipher) => {
-    console.log(servername, alpn, cipher);
     assert.strictEqual(session.servername, servername);
     assert.strictEqual(session.alpnProtocol, alpn);
-    console.log(session.getPeerCertificate());
     // We can only open a unidirectional stream after the handshake has
     // completed.
     // TODO(@jasnell): This will change once we get 0RTT working

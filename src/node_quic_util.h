@@ -127,7 +127,11 @@ class SocketAddress {
   }
 
   void Update(const ngtcp2_addr* addr) {
-    memcpy(&address_, addr->addr, sizeof(addr->addrlen));
+    memcpy(&address_, addr->addr, addr->addrlen);
+  }
+
+  void Update(const sockaddr* addr) {
+    memcpy(&address_, addr, sizeof(addr));
   }
 
   const sockaddr* operator*() {
