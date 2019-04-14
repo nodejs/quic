@@ -2689,7 +2689,7 @@ int QuicServerSession::Receive(
     return 0;
   }
 
-  remote_address_.Update(addr);
+  remote_address_.Copy(addr);
   QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
 
   if (IsHandshakeCompleted()) {
@@ -3040,7 +3040,8 @@ int QuicClientSession::SetSocket(
   // Step 4: Update ngtcp2
   SocketAddress* local_address = socket->GetLocalAddress();
   if (nat_rebinding) {
-    ngtcp2_conn_set_local_addr(connection_, &local_address->ToAddr());
+    ngtcp2_addr addr = local_address->ToAddr();
+    ngtcp2_conn_set_local_addr(connection_, &addr);
   } else {
     QuicPath path(local_address, &remote_address_);
     RETURN_IF_FAIL(
@@ -3087,11 +3088,11 @@ int QuicClientSession::SetSession(SSL_SESSION* session) {
     argv[1] = sessionTicket.ToBuffer().ToLocalChecked();
 
   if (transportParams_.length() > 0) {
-    AllocatedBuffer transportParams(env(),
-                                    uv_buf_init(
-                                        *transportParams_,
-                                        transportParams_.length()));
-    argv[2] = transportParams.ToBuffer().ToLocalChecked();
+    argv[2] = Buffer::New(
+        env(),
+        *transportParams_,
+        transportParams_.length(),
+        [](char* data, void* hint) {}, nullptr).ToLocalChecked();
   }
   MakeCallback(env()->quic_on_session_ticket_function(), arraysize(argv), argv);
 
@@ -3310,7 +3311,7 @@ int QuicClientSession::Receive(
   Debug(this, "Received packet. nread = %d bytes", nread);
   int err;
 
-  remote_address_.Update(addr);
+  remote_address_.Copy(addr);
   QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
 
   if (IsHandshakeCompleted()) {
@@ -3371,6 +3372,14 @@ void QuicClientSession::Remove() {
   Debug(this, "Remove this QuicClientSession from the QuicSocket.");
   QuicCID scid(scid_);
   Socket()->RemoveSession(&scid);
+
+  std::vector<ngtcp2_cid> cids(ngtcp2_conn_get_num_scid(connection_));
+  ngtcp2_conn_get_scid(connection_, cids.data());
+
+  for (auto &cid : cids) {
+    QuicCID id(&cid);
+    Socket()->DisassociateCID(&id);
+  }
 }
 
 int QuicClientSession::SendPendingData(bool retransmit) {
@@ -3525,6 +3534,7 @@ int QuicClientSession::SetSession(Local<Value> buffer) {
     return ERR_INVALID_TLS_SESSION_TICKET;
   if (SSL_set_session(ssl_.get(), s.get()) != 1)
     return ERR_INVALID_TLS_SESSION_TICKET;
+  return 0;
 }
 
 // JavaScript API

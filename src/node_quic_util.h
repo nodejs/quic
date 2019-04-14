@@ -20,15 +20,15 @@ namespace quic {
 /* NOLINTNEXTLINE(build/namespaces) */
 namespace {
 
-constexpr uint64_t operator"" _k(uint64_t k) {
+constexpr unsigned long long operator"" _k(unsigned long long k) {
   return k * 1024;
 }
 
-constexpr uint64_t operator"" _m(uint64_t m) {
+constexpr unsigned long long operator"" _m(unsigned long long m) {
   return m * 1024 * 1024;
 }
 
-constexpr uint64_t operator"" _g(uint64_t g) {
+constexpr unsigned long long operator"" _g(unsigned long long g) {
   return g * 1024 * 1024 * 1024;
 }
 
@@ -128,10 +128,6 @@ class SocketAddress {
 
   void Update(const ngtcp2_addr* addr) {
     memcpy(&address_, addr->addr, addr->addrlen);
-  }
-
-  void Update(const sockaddr* addr) {
-    memcpy(&address_, addr, sizeof(addr));
   }
 
   const sockaddr* operator*() {
