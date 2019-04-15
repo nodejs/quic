@@ -2014,24 +2014,29 @@ int QuicSession::Send0RTTStreamData(
 // Sends buffered stream data.
 int QuicSession::SendStreamData(
     QuicStream* stream,
-    int fin,
+    int should_send_fin,
     QuicBuffer* data) {
   CHECK(!IsDestroyed());
-  ssize_t ndatalen;
+  ssize_t ndatalen = 0;
   QuicPathStorage path;
+
+  CHECK_NOT_NULL(connection_);
+  int fin = 0;
 
   // Called repeatedly until there is no more data
   for (;;) {
-    auto n = ngtcp2_conn_write_stream(connection_,
-                                      &path.path,
-                                      sendbuf_.wpos(),
-                                      max_pktlen_,
-                                      &ndatalen,
-                                      stream->GetID(),
-                                      fin,
-                                      data->rpos(),
-                                      data->size(),
-                                      uv_hrtime());
+    ngtcp2_vec vec = data->ToVec();
+    if (should_send_fin && vec.len == 0)
+      fin = 1;
+    auto n = ngtcp2_conn_writev_stream(connection_,
+                                       &path.path,
+                                       sendbuf_.wpos(),
+                                       max_pktlen_,
+                                       &ndatalen,
+                                       stream->GetID(),
+                                       fin,
+                                       &vec, 1,
+                                       uv_hrtime());
     if (n < 0) {
       switch (n) {
         case NGTCP2_ERR_STREAM_DATA_BLOCKED:

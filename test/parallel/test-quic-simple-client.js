@@ -43,20 +43,23 @@ client.on('secure', (servername, alpn) => {
   const file = fs.createReadStream(__filename);
   const stream = client.openStream();
   file.pipe(stream);
-
+  console.log(`client stream is ${stream.id}`);
   stream.setEncoding('utf8');
   stream.on('data', console.log);
   stream.on('close', () => {
+    console.log(1);
     countdown.dec();
   });
 });
 
 
 client.on('stream', (stream) => {
+  console.log(`server stream is ${stream.id}`);
   stream.setEncoding('utf8');
   stream.on('data', console.log);
   stream.on('end', console.log);
   stream.on('close', () => {
+    console.log(2);
     countdown.dec();
   });
 });

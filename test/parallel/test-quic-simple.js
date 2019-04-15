@@ -26,8 +26,8 @@ socket.on('session', common.mustCall((session) => {
     // completed.
     // TODO(@jasnell): This will change once we get 0RTT working
     const uni = session.openStream({ halfOpen: true });
-    uni.write('I wonder if it worked.');
-    uni.end('test');
+    uni.end('I wonder if it worked.');
+    //uni.end('test');
   });
 
   session.on('stream', common.mustCall((stream) => {

@@ -280,7 +280,11 @@ class QuicBuffer {
     return !done_;
   }
 
-  size_t size() const { return tail_ - head_; }
+  size_t size() const {
+    if (tail_ == nullptr || head_ == nullptr)
+      return 0;
+    return tail_ - head_;
+  }
 
   size_t left() const { return buf_.data() + buf_.size() - tail_; }
 
@@ -303,7 +307,18 @@ class QuicBuffer {
     done_ = done;
   }
 
-  size_t bufsize() const { return tail_ - begin_; }
+  ngtcp2_vec ToVec() {
+    ngtcp2_vec vec;
+    vec.base = head_;
+    vec.len = size();
+    return vec;
+  }
+
+  size_t bufsize() const {
+    if (tail_ == nullptr || begin_ == nullptr)
+      return 0;
+    return tail_ - begin_;
+  }
 
   uv_buf_t toBuffer() {
     return uv_buf_init(reinterpret_cast<char*>(begin_), bufsize());

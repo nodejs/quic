@@ -92,9 +92,9 @@ void QuicStream::Destroy() {
 int QuicStream::DoShutdown(ShutdownWrap* req_wrap) {
   if (IsDestroyed())
     return UV_EPIPE;
-
   Debug(this, "Writable side shutdown");
   flags_ |= QUIC_STREAM_FLAG_SHUT;
+  should_send_fin_ = true;
 
   return 1;
 }
@@ -165,6 +165,8 @@ int QuicStream::AckedDataOffset(
 
 int QuicStream::Send0RTTData() {
   int err;
+  if (streambuf_.empty())
+    return 0;
   for (auto it = std::begin(streambuf_) + streambuf_idx_;
        it != std::end(streambuf_); ++it) {
     auto& v = *it;
@@ -185,15 +187,19 @@ int QuicStream::SendPendingData(bool retransmit) {
   int err;
   if (streambuf_idx_ == streambuf_.size()) {
     if (should_send_fin_) {
-      QuicBuffer buf(static_cast<uint8_t*>(nullptr), nullptr);
+      QuicBuffer buf(static_cast<uint8_t*>(nullptr), 0);
       if (session_->SendStreamData(this, 1, &buf) != 0)
         return -1;
+      buf.Done(0, 0);
     }
     return 0;
   }
 
+  if (streambuf_.empty())
+    return 0;
   for (auto it = std::begin(streambuf_) + streambuf_idx_;
        it != std::end(streambuf_); ++it) {
+    CHECK_NE(it, std::end(streambuf_));
     auto& v = *it;
     bool fin = should_send_fin_ &&
                streambuf_idx_ == streambuf_.size() - 1;
