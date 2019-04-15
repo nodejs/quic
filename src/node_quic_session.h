@@ -3,6 +3,7 @@
 
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
+#include "aliased_buffer.h"
 #include "async_wrap.h"
 #include "env.h"
 #include "handle_wrap.h"
@@ -58,6 +59,11 @@ class QuicSessionConfig {
 #define V(idx, name, def) uint64_t name##_ = def;
   QUICSESSION_CONFIG(V)
 #undef V
+};
+
+enum QuicSessionState {
+  IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT,
+  IDX_QUIC_SESSION_STATE_COUNT
 };
 
 class QuicSession : public AsyncWrap {
@@ -500,6 +506,8 @@ class QuicSession : public AsyncWrap {
   uint64_t tx_crypto_offset_;
 
   std::map<int64_t, QuicStream*> streams_;
+
+  AliasedBuffer<double, v8::Float64Array> state_;
 
   friend class QuicServerSession;
   friend class QuicClientSession;

@@ -1390,9 +1390,17 @@ QuicSession::QuicSession(
     sendbuf_{NGTCP2_MAX_PKTLEN_IPV4},
     handshake_idx_(0),
     ncread_(0),
-    tx_crypto_offset_(0) {
+    tx_crypto_offset_(0),
+    state_(env()->isolate(), IDX_QUIC_SESSION_STATE_COUNT) {
   ssl_.reset(SSL_new(ctx->ctx_.get()));
   CHECK(ssl_);
+
+  wrap->DefineOwnProperty(
+    env()->context(),
+    env()->state_string(),
+    state_.GetJSArray(),
+    v8::PropertyAttribute::ReadOnly);
+
   // TODO(@jasnell): memory accounting
   // env_->isolate()->AdjustAmountOfExternalAllocatedMemory(kExternalSize);
 }
@@ -1652,6 +1660,10 @@ int QuicSession::GetNewConnectionID(
   EntropySource(cid->data, cidlen);
   EntropySource(token, NGTCP2_STATELESS_RESET_TOKENLEN);
   AssociateCID(cid);
+
+  state_[IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT] =
+    state_[IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT] + 1;
+
   return 0;
 }
 
@@ -1930,6 +1942,9 @@ int QuicSession::ReceiveStreamData(
 void QuicSession::RemoveConnectionID(
     const ngtcp2_cid* cid) {
   CHECK(!IsDestroyed());
+  state_[IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT] =
+    state_[IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT] - 1;
+  CHECK_GE(state_[IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT], 0);
   DisassociateCID(cid);
 }
 
