@@ -388,7 +388,7 @@ added: REPLACEME
     [OpenSSL Options][].
   * `sessionIdContext` {string} Opaque identifier used by servers to ensure
     session state is not shared between applications. Unused by clients.
-  * `sessionTicket`: {Buffer|TypedArray|DataView} The serialized TSL Session
+  * `sessionTicket`: {Buffer|TypedArray|DataView} The serialized TLS Session
     Ticket from a previously established session. These would have been
     provided as part of the `'sessionTicket`' event on a previous
     `QuicClientSession` object.

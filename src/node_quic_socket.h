@@ -16,6 +16,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 namespace node {
 
@@ -30,64 +31,66 @@ namespace quic {
 class QuicSocket : public HandleWrap {
  public:
   static void Initialize(
-    Environment* env,
-    Local<Object> target,
-    Local<Context> context);
+      Environment* env,
+      Local<Object> target,
+      Local<Context> context);
 
   QuicSocket(
-    Environment* env,
-    Local<Object> wrap);
+      Environment* env,
+      Local<Object> wrap);
   ~QuicSocket() override;
 
   int AddMembership(
-    const char* address,
-    const char* iface);
+      const char* address,
+      const char* iface);
   void AddSession(
-    QuicCID* cid,
-    QuicSession* session);
+      QuicCID* cid,
+      QuicSession* session);
   void AssociateCID(
-    QuicCID* cid,
-    QuicSession* session);
+      QuicCID* cid,
+      QuicSession* session);
   int Bind(
-    const char* address,
-    uint32_t port,
-    uint32_t flags,
-    int family);
+      const char* address,
+      uint32_t port,
+      uint32_t flags,
+      int family);
   void DisassociateCID(
-    QuicCID* cid);
+      QuicCID* cid);
   int DropMembership(
-    const char* address,
-    const char* iface);
+      const char* address,
+      const char* iface);
   SocketAddress* GetLocalAddress();
   void Listen(
-    crypto::SecureContext* context);
+      crypto::SecureContext* context);
   int ReceiveStart();
   int ReceiveStop();
   void RemoveSession(
-    QuicCID* cid);
+      QuicCID* cid);
   void ReportSendError(
-    int error);
+      int error);
   void SendPendingData(
-    bool retransmit = false);
+      bool retransmit = false);
   int SetBroadcast(
-    bool on);
+      bool on);
   int SetMulticastInterface(
-    const char* iface);
+      const char* iface);
   int SetMulticastLoopback(
-    bool on);
+      bool on);
   int SetMulticastTTL(
-    int ttl);
+      int ttl);
   int SetTTL(
-    int ttl);
+      int ttl);
   int SendPacket(
-    SocketAddress* dest,
-    QuicBuffer* buf);
+      SocketAddress* dest,
+      std::shared_ptr<QuicBuffer> buf,
+      QuicBuffer::drain_from drain_from = QuicBuffer::DRAIN_FROM_HEAD);
   int SendPacket(
-    const sockaddr* dest,
-    QuicBuffer* buf);
+      const sockaddr* dest,
+      std::shared_ptr<QuicBuffer> buf,
+      QuicBuffer::drain_from drain_from = QuicBuffer::DRAIN_FROM_HEAD);
   void SetServerSessionSettings(
-    QuicSession* session,
-    ngtcp2_settings* settings);
+      QuicSession* session,
+      ngtcp2_settings* settings);
 
   crypto::SecureContext* GetServerSecureContext() {
     return server_secure_context_;
@@ -112,7 +115,6 @@ class QuicSocket : public HandleWrap {
       const struct sockaddr* addr,
       unsigned int flags);
 
-  // Receives packets from the uv_udt_t handle as they arrive.
   void Receive(
       ssize_t nread,
       const uv_buf_t* buf,
@@ -131,8 +133,8 @@ class QuicSocket : public HandleWrap {
       const struct sockaddr* addr,
       unsigned int flags);
   int SendRetry(
-    const ngtcp2_pkt_hd* chd,
-    const sockaddr* addr);
+      const ngtcp2_pkt_hd* chd,
+      const sockaddr* addr);
 
   template <typename T,
             int (*F)(const typename T::HandleType*, sockaddr*, int*)>
@@ -185,25 +187,58 @@ class QuicSocket : public HandleWrap {
   socket_stats socket_stats_{0, 0, 0, 0, 0, 0, 0};
 
   template <typename... Members>
-  void IncrementSocketStat(uint64_t amount, socket_stats* a, Members... mems) {
+  void IncrementSocketStat(
+      uint64_t amount,
+      socket_stats* a,
+      Members... mems) {
     static uint64_t max = std::numeric_limits<uint64_t>::max();
     uint64_t current = access(a, mems...);
     uint64_t delta = std::min(amount, max - current);
     access(a, mems...) += delta;
   }
 
+  // The SendWrap drains the given QuicBuffer and sends it to the
+  // uv_udp_t handle. When the async operation completes, the done_cb
+  // is invoked with the status and the user_data forwarded on.
   class SendWrap {
    public:
     SendWrap(
         QuicSocket* socket,
         SocketAddress* dest,
-        QuicBuffer* buffer,
-        int tries = 5);
+        std::shared_ptr<QuicBuffer> buffer,
+        QuicBuffer::drain_from drain_from = QuicBuffer::DRAIN_FROM_HEAD);
+
     SendWrap(
         QuicSocket* socket,
         const sockaddr* dest,
-        QuicBuffer* buffer,
-        int tries = 5);
+        std::shared_ptr<QuicBuffer> buffer,
+        QuicBuffer::drain_from drain_from = QuicBuffer::DRAIN_FROM_HEAD);
+
+    static void OnSend(
+        uv_udp_send_t* req,
+        int status);
+
+    void Done(int status);
+
+    int Send();
+
+    QuicSocket* Socket() const { return socket_; }
+
+   private:
+    uv_udp_send_t req_;
+    QuicSocket* socket_;
+    std::weak_ptr<QuicBuffer> buffer_;
+    QuicBuffer::drain_from drain_from_;
+    uint64_t length_ = 0;
+    SocketAddress address_;
+  };
+
+  class SendWrapStack {
+   public:
+    SendWrapStack(
+        QuicSocket* socket,
+        const sockaddr* dest,
+        size_t len);
 
     static void OnSend(
         uv_udp_send_t* req,
@@ -211,16 +246,22 @@ class QuicSocket : public HandleWrap {
 
     int Send();
 
-    bool ShouldRetry(int error);
+    uint8_t* operator*() { return *buf_; }
+
+    void SetLength(size_t len) {
+      buf_.SetLength(len);
+    }
+
+    size_t Length() {
+      return buf_.length();
+    }
 
     QuicSocket* Socket() const { return socket_; }
-
    private:
     uv_udp_send_t req_;
     QuicSocket* socket_;
-    MaybeStackBuffer<char> buf_;
+    MaybeStackBuffer<uint8_t> buf_;
     SocketAddress address_;
-    int tries_;
   };
 };
 

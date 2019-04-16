@@ -41,40 +41,43 @@ class QuicStream : public AsyncWrap,
                    public StreamBase {
  public:
   static void Initialize(
-    Environment* env,
-    v8::Local<v8::Object> target,
-    v8::Local<v8::Context> context);
+      Environment* env,
+      v8::Local<v8::Object> target,
+      v8::Local<v8::Context> context);
 
   static QuicStream* New(
-    QuicSession* session,
-    uint64_t stream_id);
+      QuicSession* session,
+      uint64_t stream_id);
 
   QuicStream(
-    QuicSession* session,
-    v8::Local<v8::Object> target,
-    uint64_t stream_id);
+      QuicSession* session,
+      v8::Local<v8::Object> target,
+      uint64_t stream_id);
 
-  virtual ~QuicStream();
+  virtual ~QuicStream() override;
 
   uint64_t GetID() const;
   QuicSession* Session();
 
   virtual int AckedDataOffset(
-    uint64_t offset,
-    size_t datalen);
+      uint64_t offset,
+      size_t datalen);
 
   virtual void Close(
-    uint16_t app_error_code);
+      uint16_t app_error_code);
 
   virtual void Destroy();
 
-  int DoWrite(WriteWrap* req_wrap,
-              uv_buf_t* bufs,
-              size_t nbufs,
-              uv_stream_t* send_handle) override;
+  int DoWrite(
+      WriteWrap* req_wrap,
+      uv_buf_t* bufs,
+      size_t nbufs,
+      uv_stream_t* send_handle) override;
 
-  inline void IncrementAvailableOutboundLength(size_t amount);
-  inline void DecrementAvailableOutboundLength(size_t amount);
+  inline void IncrementAvailableOutboundLength(
+      size_t amount);
+  inline void DecrementAvailableOutboundLength(
+      size_t amount);
 
   bool IsAlive() override {
     return !IsDestroyed() && !IsShutdown() && !IsClosing();
@@ -101,16 +104,22 @@ class QuicStream : public AsyncWrap,
   int ReadStop() override;
 
   // Required for StreamBase
-  int DoShutdown(ShutdownWrap* req_wrap) override;
-
-  void ResetShouldSendFin();
+  int DoShutdown(
+      ShutdownWrap* req_wrap) override;
 
   int Send0RTTData();
-  int SendPendingData(bool retransmit = false);
+  int SendPendingData(
+      bool retransmit = false);
 
   AsyncWrap* GetAsyncWrap() override { return this; }
 
-  void MemoryInfo(MemoryTracker* tracker) const override {}
+  void MemoryInfo(MemoryTracker* tracker) const override {
+    // TODO(@jasnell): Verify that we're tracking the right things here.
+    tracker->TrackFieldWithSize(
+      "buffer",
+      available_outbound_length_,
+      "QuicBuffer");
+  }
 
   SET_MEMORY_INFO_NAME(QuicStream)
   SET_SELF_SIZE(QuicStream)
@@ -121,12 +130,9 @@ class QuicStream : public AsyncWrap,
   uint32_t flags_;
   uint64_t stream_id_;
 
-  std::deque<QuicBuffer> streambuf_;
-  size_t available_outbound_length_;
-
-  size_t streambuf_idx_;
-  uint64_t tx_stream_offset_;
+  QuicBuffer streambuf_;
   bool should_send_fin_;
+  size_t available_outbound_length_;
 };
 
 }  // namespace quic

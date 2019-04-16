@@ -254,7 +254,7 @@ int Server_Transport_Params_Parse_CB(
 }
 
 void InitKeylog(Environment* env, SecureContext* sc) {
-  static constexpr const char* LF = "\n";
+  static const char LF = '\n';
   if (env->options()->has_quic_keylog) {
     if (env->options()->quic_keylog_file.empty()) {
       DiagnosticFilename filename(env, "quic", "keylog");
@@ -278,12 +278,13 @@ void InitKeylog(Environment* env, SecureContext* sc) {
               env->options()->quic_keylog_file.c_str(),
               O_CREAT | O_APPEND, 0644, nullptr);
       uv_fs_req_cleanup(&req);
+      // TODO(@jasnell): Error handling
       CHECK_GE(fd, 0);
 
       uv_buf_t buf = uv_buf_init(const_cast<char*>(line), strlen(line));
       CHECK_GE(
         uv_fs_write(env->event_loop(), &req, fd, &buf, 1, -1, nullptr), 0);
-      buf = uv_buf_init(const_cast<char*>(LF), strlen(LF));
+      buf = uv_buf_init(const_cast<char*>(&LF), 1);
       CHECK_GE(
         uv_fs_write(env->event_loop(), &req, fd, &buf, 1, -1, nullptr), 0);
 

@@ -237,7 +237,7 @@ void QuicSocket::Receive(
   QuicCID dcid(hd.dcid);
   auto dcid_hex = dcid.ToHex();
   auto dcid_str = dcid.ToStr();
-  Debug(this, "Received a QUIC packet for dcid %s", dcid.ToHex().c_str());
+  Debug(this, "Received a QUIC packet for dcid %s", dcid_hex.c_str());
 
   QuicSession* session = nullptr;
 
@@ -336,9 +336,10 @@ int QuicSocket::SendVersionNegotiation(
     const ngtcp2_pkt_hd* chd,
     const sockaddr* addr) {
   Debug(this, "Sending version negotiation packet.");
-  QuicBuffer buf{NGTCP2_MAX_PKTLEN_IPV4};
-  std::array<uint32_t, 2> sv;
 
+  SendWrapStack* req = new SendWrapStack(this, addr, NGTCP2_MAX_PKTLEN_IPV6);
+
+  std::array<uint32_t, 2> sv;
   sv[0] = GenerateReservedVersion(addr, chd->version);
   sv[1] = NGTCP2_PROTO_VER_D19;
 
@@ -346,8 +347,8 @@ int QuicSocket::SendVersionNegotiation(
   EntropySource(&unused_random, 1);
 
   ssize_t nwrite = ngtcp2_pkt_write_version_negotiation(
-      buf.wpos(),
-      buf.left(),
+      **req,
+      NGTCP2_MAX_PKTLEN_IPV6,
       unused_random,
       &chd->scid,
       &chd->dcid,
@@ -357,14 +358,16 @@ int QuicSocket::SendVersionNegotiation(
     Debug(this, "Error writing version negotiation packet. Error %d", nwrite);
     return -1;
   }
-  buf.push(nwrite);
+  req->SetLength(nwrite);
 
-  return SendPacket(addr, &buf);
+  return req->Send();
 }
 
 int QuicSocket::SendRetry(
     const ngtcp2_pkt_hd* chd,
     const sockaddr* addr) {
+
+  SendWrapStack* req = new SendWrapStack(this, addr, NGTCP2_MAX_PKTLEN_IPV6);
 
   std::array<uint8_t, 256> token;
   size_t tokenlen = token.size();
@@ -377,9 +380,8 @@ int QuicSocket::SendRetry(
           &token_secret_) != 0) {
     return -1;
   }
-  QuicBuffer buf{NGTCP2_MAX_PKTLEN_IPV4};
-  ngtcp2_pkt_hd hd;
 
+  ngtcp2_pkt_hd hd;
   hd.version = chd->version;
   hd.flags = NGTCP2_PKT_FLAG_LONG_FORM;
   hd.type = NGTCP2_PKT_RETRY;
@@ -394,18 +396,16 @@ int QuicSocket::SendRetry(
 
   ssize_t nwrite =
       ngtcp2_pkt_write_retry(
-          buf.wpos(), buf.left(),
-          &hd, &chd->dcid,
-          token.data(), tokenlen);
-  if (nwrite < 0)
-    return -1;
+          **req,
+          NGTCP2_MAX_PKTLEN_IPV6,
+          &hd,
+          &chd->dcid,
+          token.data(),
+          tokenlen);
+  if (nwrite <= 0)
+    return nwrite;
 
-  buf.push(nwrite);
-
-  if (SendPacket(addr, &buf) != 0)
-    return -1;
-
-  return 0;
+  return req->Send();
 }
 
 QuicSession* QuicSocket::ServerReceive(
@@ -530,24 +530,16 @@ int QuicSocket::DropMembership(const char* address, const char* iface) {
 
 int QuicSocket::SendPacket(
     SocketAddress* dest,
-    QuicBuffer* buf) {
-  // TODO(@jasnell): For now, QuicSocket::SendWrap copies the data from
-  // the QuicBuffer. QuicBuffer should be updated so that doing so is
-  // not required.
-  QuicSocket::SendWrap* wrap = new QuicSocket::SendWrap(this, dest, buf, 5);
-  buf->reset();
-  return wrap->Send();
+    std::shared_ptr<QuicBuffer> buffer,
+    QuicBuffer::drain_from drain_from) {
+  return (new QuicSocket::SendWrap(this, dest, buffer, drain_from))->Send();
 }
 
 int QuicSocket::SendPacket(
     const sockaddr* dest,
-    QuicBuffer* buf) {
-  // TODO(@jasnell): For now, QuicSocket::SendWrap copies the data from
-  // the QuicBuffer. QuicBuffer should be updated so that doing so is
-  // not required.
-  QuicSocket::SendWrap* wrap = new QuicSocket::SendWrap(this, dest, buf, 5);
-  buf->reset();
-  return wrap->Send();
+    std::shared_ptr<QuicBuffer> buffer,
+    QuicBuffer::drain_from drain_from) {
+  return (new QuicSocket::SendWrap(this, dest, buffer, drain_from))->Send();
 }
 
 void QuicSocket::SetServerSessionSettings(
@@ -556,75 +548,124 @@ void QuicSocket::SetServerSessionSettings(
   server_session_config_.ToSettings(settings, true);
 }
 
+QuicSocket::SendWrapStack::SendWrapStack(
+    QuicSocket* socket,
+    const sockaddr* dest,
+    size_t len) :
+    socket_(socket) {
+  req_.data = this;
+  buf_.AllocateSufficientStorage(len);
+  address_.Copy(dest);
+}
+
+void QuicSocket::SendWrapStack::OnSend(
+    uv_udp_send_t* req,
+    int status) {
+  std::unique_ptr<QuicSocket::SendWrapStack> wrap(
+      static_cast<QuicSocket::SendWrapStack*>(req->data));
+
+  wrap->Socket()->IncrementSocketStat(
+    wrap->Length(),
+    &wrap->socket_->socket_stats_,
+    &QuicSocket::socket_stats::bytes_sent);
+  wrap->socket_->IncrementSocketStat(
+    1,
+    &wrap->socket_->socket_stats_,
+    &QuicSocket::socket_stats::packets_sent);
+}
+
+int QuicSocket::SendWrapStack::Send() {
+  if (buf_.length() == 0)
+    return 0;
+  uv_buf_t buf =
+      uv_buf_init(
+          reinterpret_cast<char*>(*buf_),
+          buf_.length());
+  return uv_udp_send(
+      &req_,
+      &socket_->handle_,
+      &buf, 1,
+      *address_,
+      OnSend
+  );
+}
+
+// The QuicSocket::SendWrap will maintain a std::weak_ref
+// pointer to the buffer given to it.
 QuicSocket::SendWrap::SendWrap(
     QuicSocket* socket,
     SocketAddress* dest,
-    QuicBuffer* buf,
-    int tries) :
+    std::shared_ptr<QuicBuffer> buffer,
+    QuicBuffer::drain_from drain_from) :
     socket_(socket),
-    buf_(buf->size()),
-    tries_(tries) {
+    buffer_(buffer),
+    drain_from_(drain_from) {
   req_.data = this;
-  memcpy(*buf_, buf->rpos(), buf->size());
   address_.Copy(dest);
 }
 
 QuicSocket::SendWrap::SendWrap(
     QuicSocket* socket,
     const sockaddr* dest,
-    QuicBuffer* buf,
-    int tries) :
+    std::shared_ptr<QuicBuffer> buffer,
+    QuicBuffer::drain_from drain_from) :
     socket_(socket),
-    buf_(buf->size()),
-    tries_(tries) {
+    buffer_(buffer),
+    drain_from_(drain_from) {
   req_.data = this;
-  memcpy(*buf_, buf->rpos(), buf->size());
   address_.Copy(dest);
+}
+
+void QuicSocket::SendWrap::Done(int status) {
+  // If the weak_ref to the QuicBuffer is still valid
+  // consume the data, otherwise, do nothing
+  if (auto buf = buffer_.lock()) {
+    if (status == 0)
+      buf->Consume(length_);
+    else
+      buf->Cancel(status);
+  }
 }
 
 void QuicSocket::SendWrap::OnSend(
     uv_udp_send_t* req,
     int status) {
-  // If sending was not successful, check to see if we should
-  // try again. The wrap should only be deleted if we are not
-  // resending.
-  QuicSocket::SendWrap* wrap = static_cast<QuicSocket::SendWrap*>(req->data);
-  if (wrap->ShouldRetry(status)) {
-    wrap->Socket()->IncrementSocketStat(
-      1,
-      &wrap->Socket()->socket_stats_,
-      &socket_stats::retransmit_count);
-    status = wrap->Send();
-    if (status == 0) return;
-  }
-  if (status != 0) {
-    wrap->Socket()->ReportSendError(status);
-  } else {
-    wrap->Socket()->IncrementSocketStat(
-      wrap->buf_.length(),
-      &wrap->Socket()->socket_stats_,
-      &socket_stats::bytes_sent);
-    wrap->Socket()->IncrementSocketStat(
-      1,
-      &wrap->Socket()->socket_stats_,
-      &socket_stats::packets_sent);
-  }
-  delete wrap;
+  std::unique_ptr<QuicSocket::SendWrap> wrap(
+      static_cast<QuicSocket::SendWrap*>(req->data));
+  wrap->Done(status);
+
+  wrap->Socket()->IncrementSocketStat(
+    wrap->length_,
+    &wrap->socket_->socket_stats_,
+    &QuicSocket::socket_stats::bytes_sent);
+  wrap->socket_->IncrementSocketStat(
+    1,
+    &wrap->socket_->socket_stats_,
+    &QuicSocket::socket_stats::packets_sent);
 }
 
-bool QuicSocket::SendWrap::ShouldRetry(int error) {
-  return (error == EAGAIN || error == EINTR) && tries_ > 0;
-}
-
+// Sending will take the current content of the QuicBuffer
+// and forward it off to the uv_udp_t handle.
 int QuicSocket::SendWrap::Send() {
-  tries_--;
-  uv_buf_t buf = uv_buf_init(*buf_, buf_.length());
-  return uv_udp_send(
-      &req_,
-      &socket_->handle_,
-      &buf, 1,
-      *address_,
-      OnSend);
+  std::vector<uv_buf_t> vec;
+  if (auto buf = buffer_.lock()) {
+    size_t len = buf->DrainInto(&vec, drain_from_, &length_);
+    Debug(socket_, "Sending %llu bytes (%d buffers of %d remaining)",
+          length_, len, buf->ReadRemaining());
+    if (len == 0) return 0;
+    int err = uv_udp_send(
+        &req_,
+        &socket_->handle_,
+        vec.data(),
+        vec.size(),
+        *address_,
+        OnSend);
+    // If sending was successful, advance the read head
+    if (err == 0)
+      buf->SeekHead(len);
+    return err;
+  }
+  return -1;
 }
 
 // JavaScript API

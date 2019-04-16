@@ -46,8 +46,7 @@ void QuicStreamListener::OnStreamRead(ssize_t nread, const uv_buf_t& buf) {
   }
 
   AllocatedBuffer buffer(stream->env(), buf);
-  size_t offset = 0;  // TODO(@jasnell): Proper offset
-  stream->CallJSOnreadMethod(nread, buffer.ToArrayBuffer(), offset);
+  stream->CallJSOnreadMethod(nread, buffer.ToArrayBuffer());
 }
 
 QuicStream::QuicStream(
@@ -59,10 +58,8 @@ QuicStream::QuicStream(
     session_(session),
     flags_(0),
     stream_id_(stream_id),
-    available_outbound_length_(0),
-    streambuf_idx_(0),
-    tx_stream_offset_(0),
-    should_send_fin_(false) {
+    should_send_fin_(false),
+    available_outbound_length_(0) {
   CHECK_NOT_NULL(session);
   StreamBase::AttachToObject(GetObject());
   PushStreamListener(&stream_listener_);
@@ -72,6 +69,7 @@ QuicStream::QuicStream(
 QuicStream::~QuicStream() {
   // Check that Destroy() has been called
   CHECK_NULL(session_);
+  CHECK_EQ(0, streambuf_.Length());
 }
 
 void QuicStream::Close(
@@ -84,7 +82,7 @@ void QuicStream::Close(
 }
 
 void QuicStream::Destroy() {
-  QuicBuffer::Cancel(&streambuf_);
+  streambuf_.Cancel();
   session_->RemoveStream(stream_id_);
   session_ = nullptr;
 }
@@ -111,7 +109,7 @@ int QuicStream::DoWrite(
     return 0;
   }
   // Buffers written must be held on to until acked. The callback
-  // passed in here will be callled when the ack is received.
+  // passed in here will be called when the ack is received.
   // TODO(@jasnell): For now, the data will be held onto for
   // pretty much eternity, and the implementation will retry an
   // unlimited number of times. We need to constrain that to
@@ -119,23 +117,22 @@ int QuicStream::DoWrite(
   // Specifically, we need to ensure that all of the data is
   // cleaned up when the stream is destroyed, even if it hasn't
   // been acknowledged.
-  for (size_t i = 0; i < nbufs; ++i) {
-    streambuf_.emplace_back(
-        reinterpret_cast<uint8_t*>(bufs[i].base),
-        bufs[i].len,
-        [&](int status, void* user_data, size_t len) {
-          // TODO(@jasnell): Do we need any async magic happening here.
-          WriteWrap* wrap = static_cast<WriteWrap*>(user_data);
-          CHECK_NOT_NULL(wrap);
-          DecrementAvailableOutboundLength(len);
-          wrap->Done(status);
-        },
-        // Persist references to the WriteWrap so it is not GC'd
-        // while we are waiting for the ack to arrive.
-        req_wrap,
-        req_wrap->object());
-    IncrementAvailableOutboundLength(bufs[i].len);
-  }
+  //
+  // When more than one buffer is passed in, the callback will
+  // only be invoked when the final buffer in the set is consumed.
+  uint64_t len =
+      streambuf_.Push(
+          bufs,
+          nbufs,
+          [&](int status, void* user_data) {
+              DecrementAvailableOutboundLength(len);
+              WriteWrap* wrap = static_cast<WriteWrap*>(user_data);
+              CHECK_NOT_NULL(wrap);
+              DecrementAvailableOutboundLength(len);
+              wrap->Done(status);
+            }, req_wrap, req_wrap->object());
+
+  IncrementAvailableOutboundLength(len);
   return 0;
 }
 
@@ -150,67 +147,20 @@ QuicSession* QuicStream::Session() {
 int QuicStream::AckedDataOffset(
     uint64_t offset,
     size_t datalen) {
-  QuicBuffer::AckData(
-      &streambuf_,
-      &streambuf_idx_,
-      &tx_stream_offset_,
-      offset + datalen);
-  if (streambuf_.empty() && flags_ & QUIC_STREAM_FLAG_SHUT) {
-    if (session_->ShutdownStreamWrite(stream_id_) != 0) {
-      return -1;
-    }
-  }
+  streambuf_.Consume(datalen);
   return 0;
 }
 
 int QuicStream::Send0RTTData() {
-  int err;
-  if (streambuf_.empty())
-    return 0;
-  for (auto it = std::begin(streambuf_) + streambuf_idx_;
-       it != std::end(streambuf_); ++it) {
-    auto& v = *it;
-    bool fin = should_send_fin_ &&
-               it + 1 == std::end(streambuf_);
-    err = session_->Send0RTTStreamData(this, fin, &v);
-    if (err != 0)
-      return err;
-    if (v.size() > 0)
-      break;
-    ++streambuf_idx_;
-  }
-
-  return 0;
+  return session_->Send0RTTStreamData(this, should_send_fin_, &streambuf_);
 }
 
 int QuicStream::SendPendingData(bool retransmit) {
-  int err;
-  if (streambuf_idx_ == streambuf_.size()) {
-    if (should_send_fin_) {
-      QuicBuffer buf(static_cast<uint8_t*>(nullptr), 0);
-      if (session_->SendStreamData(this, 1, &buf) != 0)
-        return -1;
-      buf.Done(0, 0);
-    }
-    return 0;
-  }
-
-  if (streambuf_.empty())
-    return 0;
-  for (auto it = std::begin(streambuf_) + streambuf_idx_;
-       it != std::end(streambuf_); ++it) {
-    CHECK_NE(it, std::end(streambuf_));
-    auto& v = *it;
-    bool fin = should_send_fin_ &&
-               streambuf_idx_ == streambuf_.size() - 1;
-    err = session_->SendStreamData(this, fin, &v);
-    if (err != 0)
-      return err;
-    if (v.size() > 0)
-      break;
-    ++streambuf_idx_;
-  }
-  return 0;
+  return session_->SendStreamData(
+      this,
+      should_send_fin_,
+      &streambuf_,
+      retransmit ? QuicBuffer::DRAIN_FROM_ROOT : QuicBuffer::DRAIN_FROM_HEAD);
 }
 
 inline void QuicStream::IncrementAvailableOutboundLength(size_t amount) {
@@ -231,10 +181,6 @@ QuicStream* QuicStream::New(
     return nullptr;
   }
   return new QuicStream(session, obj, stream_id);
-}
-
-void QuicStream::ResetShouldSendFin() {
-  should_send_fin_ = false;
 }
 
 int QuicStream::ReadStart() {

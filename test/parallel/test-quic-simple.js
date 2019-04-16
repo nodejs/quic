@@ -35,7 +35,7 @@ socket.on('session', common.mustCall((session) => {
     file.pipe(stream);
 
     stream.setEncoding('utf8');
-    stream.on('data', console.log);
+    stream.resume();
     stream.on('end', () => console.log('stream ended'));
   }));
 }));

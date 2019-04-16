@@ -47,7 +47,7 @@ client.on('secure', (servername, alpn) => {
   stream.setEncoding('utf8');
   stream.on('data', console.log);
   stream.on('close', () => {
-    console.log(1);
+    console.log(1, stream.id);
     countdown.dec();
   });
 });
@@ -59,7 +59,7 @@ client.on('stream', (stream) => {
   stream.on('data', console.log);
   stream.on('end', console.log);
   stream.on('close', () => {
-    console.log(2);
+    console.log(2, stream.id);
     countdown.dec();
   });
 });

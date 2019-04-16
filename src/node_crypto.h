@@ -831,21 +831,21 @@ struct StackOfX509Deleter {
 using StackOfX509 = std::unique_ptr<STACK_OF(X509), StackOfX509Deleter>;
 
 v8::Local<v8::Object> X509ToObject(
-  Environment* env,
-  X509* cert);
+    Environment* env,
+    X509* cert);
 StackOfX509 CloneSSLCerts(
-  X509Pointer&& cert,
-  const STACK_OF(X509)* const ssl_certs);
+    X509Pointer&& cert,
+    const STACK_OF(X509)* const ssl_certs);
 v8::Local<v8::Object> AddIssuerChainToObject(
-  X509Pointer* cert,
-  v8::Local<v8::Object> object,
-  StackOfX509&& peer_certs,
-  Environment* const env);
+    X509Pointer* cert,
+    v8::Local<v8::Object> object,
+    StackOfX509&& peer_certs,
+    Environment* const env);
 v8::Local<v8::Object> GetLastIssuedCert(
-  X509Pointer* cert,
-  SSL* ssl,
-  v8::Local<v8::Object> issuer_chain,
-  Environment* const env);
+    X509Pointer* cert,
+    SSL* ssl,
+    v8::Local<v8::Object> issuer_chain,
+    Environment* const env);
 }  // namespace crypto
 }  // namespace node
 
