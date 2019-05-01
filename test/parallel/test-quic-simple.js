@@ -15,7 +15,7 @@ const createSocket = require('quic');
 
 const socket = createSocket({ type: 'udp4', port: 1234 });
 
-socket.listen({ key, cert, ca });
+socket.listen({ key, cert, /*ca*/ });
 
 socket.on('session', common.mustCall((session) => {
 

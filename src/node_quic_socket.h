@@ -5,6 +5,7 @@
 
 #include "node.h"
 #include "node_crypto.h"  // SSLWrap
+#include "node_internals.h"
 #include "ngtcp2/ngtcp2.h"
 #include "node_quic_session.h"
 #include "node_quic_util.h"
