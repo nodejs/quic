@@ -395,6 +395,10 @@ constexpr size_t kFsStatsBufferLength =
   V(message_port_constructor_template, v8::FunctionTemplate)                   \
   V(pipe_constructor_template, v8::FunctionTemplate)                           \
   V(promise_wrap_template, v8::ObjectTemplate)                                 \
+  V(quicclientsession_constructor_template, v8::ObjectTemplate)                \
+  V(quicserversession_constructor_template, v8::ObjectTemplate)                \
+  V(quicserverstream_constructor_template, v8::ObjectTemplate)                 \
+  V(quicsocketsendwrap_constructor_template, v8::ObjectTemplate)               \
   V(sab_lifetimepartner_constructor_template, v8::FunctionTemplate)            \
   V(script_context_constructor_template, v8::FunctionTemplate)                 \
   V(secure_context_constructor_template, v8::FunctionTemplate)                 \
@@ -443,7 +447,6 @@ constexpr size_t kFsStatsBufferLength =
   V(process_object, v8::Object)                                                \
   V(primordials, v8::Object)                                                   \
   V(promise_reject_callback, v8::Function)                                     \
-  V(promise_wrap_template, v8::ObjectTemplate)                                 \
   V(quic_on_socket_ready_function, v8::Function)                               \
   V(quic_on_socket_close_function, v8::Function)                               \
   V(quic_on_socket_error_function, v8::Function)                               \
@@ -456,12 +459,6 @@ constexpr size_t kFsStatsBufferLength =
   V(quic_on_stream_ready_function, v8::Function)                               \
   V(quic_on_stream_close_function, v8::Function)                               \
   V(quic_on_stream_error_function, v8::Function)                               \
-  V(quicclientsession_constructor_template, v8::ObjectTemplate)                \
-  V(quicserversession_constructor_template, v8::ObjectTemplate)                \
-  V(quicserverstream_constructor_template, v8::ObjectTemplate)                 \
-  V(quicsocketsendwrap_constructor_template, v8::ObjectTemplate)               \
-  V(sab_lifetimepartner_constructor_template, v8::FunctionTemplate)            \
-  V(script_context_constructor_template, v8::FunctionTemplate)                 \
   V(script_data_constructor_function, v8::Function)                            \
   V(tick_callback_function, v8::Function)                                      \
   V(timers_callback_function, v8::Function)                                    \

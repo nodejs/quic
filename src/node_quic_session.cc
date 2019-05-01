@@ -19,6 +19,7 @@
 #include <openssl/evp.h>
 #include <openssl/kdf.h>
 #include <openssl/ssl.h>
+#include <openssl/x509v3.h>
 
 #include <array>
 #include <functional>
@@ -848,7 +849,7 @@ void QuicSessionConfig::ResetToDefaults() {
 // Sets the QuicSessionConfig using an AliasedBuffer for efficiency.
 void QuicSessionConfig::Set(Environment* env) {
   ResetToDefaults();
-  AliasedBuffer<double, Float64Array>& buffer =
+  AliasedFloat64Array& buffer =
       env->quic_state()->quicsessionconfig_buffer;
   uint64_t flags = buffer[IDX_QUIC_SESSION_CONFIG_COUNT];
 
@@ -2678,13 +2679,13 @@ void QuicServerSession::OnRetransmitTimeout() {
       Close();
       return;
     }
-    SendPendingData(true);
+    //SendPendingData(true);
     return;
   }
 
   if (ngtcp2_conn_ack_delay_expiry(connection_) <= now) {
     Debug(this, "Connection ack delay...");
-    SendPendingData();
+    //SendPendingData();
   }
 }
 
@@ -3307,17 +3308,17 @@ void QuicClientSession::OnRetransmitTimeout() {
 
   if (ngtcp2_conn_loss_detection_expiry(connection_) <= now) {
     Debug(this, "Connection loss detection...");
-    int err = SendPendingData(true);
-    if (err != 0)
-      HandleError(err);
+    // int err = SendPendingData(true);
+    // if (err != 0)
+    //   HandleError(err);
     return;
   }
 
   if (ngtcp2_conn_ack_delay_expiry(connection_) <= now) {
     Debug(this, "Connection ack delay...");
-    int err = SendPendingData();
-    if (err != 0)
-      HandleError(err);
+    // int err = SendPendingData();
+    // if (err != 0)
+    //   HandleError(err);
   }
 }
 

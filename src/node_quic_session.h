@@ -507,7 +507,7 @@ class QuicSession : public AsyncWrap {
 
   std::map<int64_t, QuicStream*> streams_;
 
-  AliasedBuffer<double, v8::Float64Array> state_;
+  AliasedFloat64Array state_;
 
   friend class QuicServerSession;
   friend class QuicClientSession;

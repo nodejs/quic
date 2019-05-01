@@ -1,3 +1,4 @@
+#include "async_wrap-inl.h"
 #include "debug_utils.h"
 #include "env-inl.h"
 #include "nghttp2/nghttp2.h"

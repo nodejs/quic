@@ -35,8 +35,8 @@ class QuicState {
       root_buffer) {
   }
 
-  AliasedBuffer<uint8_t, v8::Uint8Array> root_buffer;
-  AliasedBuffer<double, v8::Float64Array> quicsessionconfig_buffer;
+  AliasedUint8Array root_buffer;
+  AliasedFloat64Array quicsessionconfig_buffer;
 
  private:
   struct quic_state_internal {

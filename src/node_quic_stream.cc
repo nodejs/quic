@@ -353,7 +353,7 @@ void QuicStream::Initialize(
   stream->Inherit(AsyncWrap::GetConstructorTemplate(env));
   StreamBase::AddMethods(env, stream);
   Local<ObjectTemplate> streamt = stream->InstanceTemplate();
-  streamt->SetInternalFieldCount(StreamBase::kStreamBaseField + 1);
+  streamt->SetInternalFieldCount(StreamBase::kStreamBaseFieldCount);
   streamt->Set(env->owner_symbol(), Null(env->isolate()));
   env->SetProtoMethod(stream,
                       "destroy",
