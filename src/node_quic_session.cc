@@ -854,7 +854,9 @@ void QuicSessionConfig::ResetToDefaults() {
 }
 
 // Sets the QuicSessionConfig using an AliasedBuffer for efficiency.
-void QuicSessionConfig::Set(Environment* env) {
+void QuicSessionConfig::Set(
+    Environment* env,
+    const sockaddr* preferred_addr) {
   ResetToDefaults();
   AliasedFloat64Array& buffer =
       env->quic_state()->quicsessionconfig_buffer;
@@ -865,10 +867,16 @@ void QuicSessionConfig::Set(Environment* env) {
     name##_ = static_cast<uint64_t>(buffer[IDX_QUIC_SESSION_##idx]);
   QUICSESSION_CONFIG(V)
 #undef V
+
+  if (preferred_addr != nullptr) {
+    preferred_address_set_ = true;
+    preferred_address_.Copy(preferred_addr);
+  }
 }
 
 // Copies the QuicSessionConfig into a ngtcp2_settings object
 void QuicSessionConfig::ToSettings(ngtcp2_settings* settings,
+                                   ngtcp2_cid* pscid,
                                    bool stateless_reset_token) {
   ngtcp2_settings_default(settings);
 #define V(idx, name, def) settings->name = name##_;
@@ -883,6 +891,41 @@ void QuicSessionConfig::ToSettings(ngtcp2_settings* settings,
     settings->stateless_reset_token_present = 1;
     EntropySource(settings->stateless_reset_token,
                   arraysize(settings->stateless_reset_token));
+  }
+
+  if (pscid != nullptr && preferred_address_set_) {
+    settings->preferred_address_present = 1;
+    char* host = nullptr;
+    int port;
+    const sockaddr* addr = *preferred_address_;
+    switch (addr->sa_family) {
+      case AF_INET: {
+        SocketAddress::GetAddress(addr, &host);
+        port = SocketAddress::GetPort(addr);
+        auto& dest = settings->preferred_address.ipv4_addr;
+        memcpy(&dest, host, sizeof(dest));
+        settings->preferred_address.ipv4_port = port;
+        break;
+      }
+      case AF_INET6: {
+        SocketAddress::GetAddress(addr, &host);
+        port = SocketAddress::GetPort(addr);
+        auto& dest = settings->preferred_address.ipv6_addr;
+        memcpy(&dest, host, sizeof(dest));
+        settings->preferred_address.ipv6_port = port;
+        break;
+      }
+      default:
+        UNREACHABLE();
+    }
+
+    EntropySource(
+        settings->preferred_address.stateless_reset_token,
+        arraysize(settings->preferred_address.stateless_reset_token));
+
+    pscid->datalen = NGTCP2_SV_SCIDLEN;
+    EntropySource(pscid->data, pscid->datalen);
+    settings->preferred_address.cid = *pscid;
   }
 }
 
@@ -1156,6 +1199,15 @@ int QuicSession::OnAckedStreamDataOffset(
   RETURN_IF_FAIL(
       session->AckedStreamDataOffset(stream_id, offset, datalen), 0,
       NGTCP2_ERR_CALLBACK_FAILURE);
+  return 0;
+}
+
+int QuicSession::OnSelectPreferredAddress(
+    ngtcp2_conn* conn,
+    ngtcp2_addr* dest,
+    const ngtcp2_preferred_addr* paddr,
+    void* user_data) {
+  // TODO(@jasnell): Implement preferred address selection.
   return 0;
 }
 
@@ -2762,8 +2814,10 @@ void QuicServerSession::Remove() {
   QuicCID rcid(rcid_);
   Socket()->DisassociateCID(&rcid);
 
-  QuicCID pscid(pscid_);
-  Socket()->DisassociateCID(&pscid);
+  if (pscid_.datalen > 0) {
+    QuicCID pscid(pscid_);
+    Socket()->DisassociateCID(&pscid);
+  }
 
   std::vector<ngtcp2_cid> cids(ngtcp2_conn_get_num_scid(connection_));
   ngtcp2_conn_get_scid(connection_, cids.data());
@@ -2937,7 +2991,7 @@ int QuicServerSession::TLSHandshake_Complete() {
   return 0;
 }
 
-const ngtcp2_cid* QuicServerSession::pscid() const {
+ngtcp2_cid* QuicServerSession::pscid() {
   return &pscid_;
 }
 
@@ -3010,7 +3064,7 @@ int QuicClientSession::Init(
   ngtcp2_settings settings{};
   QuicSessionConfig client_session_config;
   client_session_config.Set(env());
-  client_session_config.ToSettings(&settings);
+  client_session_config.ToSettings(&settings, nullptr);
 
   QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
 

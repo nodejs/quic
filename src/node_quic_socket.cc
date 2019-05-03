@@ -159,14 +159,16 @@ SocketAddress* QuicSocket::GetLocalAddress() {
   return &local_address_;
 }
 
-void QuicSocket::Listen(SecureContext* sc) {
+void QuicSocket::Listen(
+    SecureContext* sc,
+    const sockaddr* preferred_address) {
   // TODO(@jasnell): Should we allow calling listen multiple times?
   // For now, we guard against it, but we may want to allow it later.
   CHECK_NOT_NULL(sc);
   CHECK_NULL(server_secure_context_);
   CHECK(!server_listening_);
   Debug(this, "Starting to listen.");
-  server_session_config_.Set(env());
+  server_session_config_.Set(env(), preferred_address);
   server_secure_context_ = sc;
   server_listening_ = true;
   ReceiveStart();
@@ -545,7 +547,13 @@ int QuicSocket::SendPacket(
 void QuicSocket::SetServerSessionSettings(
     QuicSession* session,
     ngtcp2_settings* settings) {
-  server_session_config_.ToSettings(settings, true);
+  ngtcp2_cid* pscid = nullptr;
+  if (session->IsServer()) {
+    QuicServerSession* server_session =
+        static_cast<QuicServerSession*>(session);
+    pscid = server_session->pscid();
+  }
+  server_session_config_.ToSettings(settings, pscid, true);
 }
 
 QuicSocket::SendWrapStack::SendWrapStack(
@@ -731,6 +739,7 @@ void QuicSocketDropMembership(const FunctionCallbackInfo<Value>& args) {
 }
 
 void QuicSocketListen(const FunctionCallbackInfo<Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
   QuicSocket* socket;
   ASSIGN_OR_RETURN_UNWRAP(&socket, args.Holder(),
                           args.GetReturnValue().Set(UV_EBADF));
@@ -738,7 +747,27 @@ void QuicSocketListen(const FunctionCallbackInfo<Value>& args) {
   SecureContext* sc;
   ASSIGN_OR_RETURN_UNWRAP(&sc, args[0].As<Object>(),
                           args.GetReturnValue().Set(UV_EBADF));
-  socket->Listen(sc);
+
+  SocketAddress* local = socket->GetLocalAddress();
+  sockaddr_storage preferred_address_storage;
+  const sockaddr* preferred_address = local != nullptr ? **local : nullptr;
+  if (args[1]->IsString()) {
+    node::Utf8Value preferred_address_host(args.GetIsolate(), args[1]);
+    int32_t preferred_address_family;
+    uint32_t preferred_address_port;
+    if (args[2]->Int32Value(env->context()).To(&preferred_address_family) &&
+        args[3]->Uint32Value(env->context()).To(&preferred_address_port) &&
+        SocketAddress::ToSockAddr(
+            preferred_address_family,
+            *preferred_address_host,
+            preferred_address_port,
+            &preferred_address_storage) == 0) {
+      preferred_address =
+          reinterpret_cast<const sockaddr*>(&preferred_address_storage);
+    }
+  }
+
+  socket->Listen(sc, preferred_address);
 }
 
 void QuicSocketReceiveStart(const FunctionCallbackInfo<Value>& args) {

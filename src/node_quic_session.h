@@ -48,19 +48,23 @@ constexpr int ERR_INVALID_TLS_SESSION_TICKET = -2;
 
 class QuicSessionConfig {
  public:
-  QuicSessionConfig() = default;
+  explicit QuicSessionConfig() = default;
 
   void ResetToDefaults();
   void Set(
-      Environment* env);
+      Environment* env,
+      const struct sockaddr* preferred_addr = nullptr);
   void ToSettings(
       ngtcp2_settings* settings,
+      ngtcp2_cid* pscid,
       bool stateless_reset_token = false);
 
  private:
 #define V(idx, name, def) uint64_t name##_ = def;
   QUICSESSION_CONFIG(V)
 #undef V
+  bool preferred_address_set_ = false;
+  SocketAddress preferred_address_;
 };
 
 enum QuicSessionState {
@@ -342,6 +346,11 @@ class QuicSession : public AsyncWrap {
       size_t datalen,
       void* user_data,
       void* stream_user_data);
+  static int OnSelectPreferredAddress(
+      ngtcp2_conn* conn,
+      ngtcp2_addr* dest,
+      const ngtcp2_preferred_addr* paddr,
+      void* user_data);
   static int OnStreamClose(
       ngtcp2_conn* conn,
       int64_t stream_id,
@@ -555,7 +564,7 @@ class QuicServerSession : public QuicSession {
 
 
   const ngtcp2_cid* rcid() const;
-  const ngtcp2_cid* pscid() const;
+  ngtcp2_cid* pscid();
 
   void MemoryInfo(MemoryTracker* tracker) const override {}
   SET_MEMORY_INFO_NAME(QuicServerSession)
@@ -758,7 +767,7 @@ class QuicClientSession : public QuicSession {
     OnRemoveConnectionID,
     OnUpdateKey,
     OnPathValidation,
-    nullptr,  // select_preferred_addr;
+    OnSelectPreferredAddress,  // select_preferred_addr;
     nullptr,  // stream_reset;
     nullptr,  // extend_max_remote_streams_bidi;
     nullptr   // extend_max_remote_streams_uni;

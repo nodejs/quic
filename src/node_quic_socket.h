@@ -61,7 +61,8 @@ class QuicSocket : public HandleWrap {
       const char* iface);
   SocketAddress* GetLocalAddress();
   void Listen(
-      crypto::SecureContext* context);
+      crypto::SecureContext* context,
+      const sockaddr* preferred_address = nullptr);
   int ReceiveStart();
   int ReceiveStop();
   void RemoveSession(
