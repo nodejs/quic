@@ -30,6 +30,7 @@
 #endif
 #include <assert.h>
 #include <errno.h>
+#include <string.h>
 
 #include "ngtcp2_str.h"
 #include "ngtcp2_vec.h"
@@ -127,8 +128,6 @@ static const char *strerrorcode(uint16_t error_code) {
     return "FRAME_ENCODING_ERROR";
   case NGTCP2_TRANSPORT_PARAMETER_ERROR:
     return "TRANSPORT_PARAMETER_ERROR";
-  case NGTCP2_VERSION_NEGOTIATION_ERROR:
-    return "VERSION_NEGOTIATION_ERROR";
   case NGTCP2_PROTOCOL_VIOLATION:
     return "PROTOCOL_VIOLATION";
   case NGTCP2_INVALID_MIGRATION:
@@ -521,13 +520,16 @@ void ngtcp2_log_rx_vn(ngtcp2_log *log, const ngtcp2_pkt_hd *hd,
   }
 }
 
-void ngtcp2_log_rx_sr(ngtcp2_log *log, const ngtcp2_pkt_hd *hd,
-                      const ngtcp2_pkt_stateless_reset *sr) {
+void ngtcp2_log_rx_sr(ngtcp2_log *log, const ngtcp2_pkt_stateless_reset *sr) {
   uint8_t buf[sizeof(sr->stateless_reset_token) * 2 + 1];
+  ngtcp2_pkt_hd shd;
+  ngtcp2_pkt_hd *hd = &shd;
 
   if (!log->log_printf) {
     return;
   }
+
+  memset(&shd, 0, sizeof(shd));
 
   log->log_printf(
       log->user_data, (NGTCP2_LOG_PKT " token=0x%s randlen=%zu\n"),

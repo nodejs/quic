@@ -63,15 +63,16 @@ typedef enum {
 } ngtcp2_conn_state;
 
 /* NGTCP2_MAX_STREAMS is the maximum number of streams. */
-#define NGTCP2_MAX_STREAMS (((1LL << 60) - 1) << 2)
+#define NGTCP2_MAX_STREAMS (1LL << 60)
 
 /* NGTCP2_MAX_NUM_BUFFED_RX_PKTS is the maximum number of buffered
    reordered packets. */
 #define NGTCP2_MAX_NUM_BUFFED_RX_PKTS 16
 
-/* NGTCP2_STRM0_MAX_STREAM_DATA is the maximum stream offset that an
-   endpoint can send initially. */
-#define NGTCP2_STRM0_MAX_STREAM_DATA 65535
+/* NGTCP2_MAX_REORDERED_CRYPTO_DATA is the maximum offset of crypto
+   data which is not continuous.  In other words, there is a gap of
+   unreceived data. */
+#define NGTCP2_MAX_REORDERED_CRYPTO_DATA 65536
 
 /* NGTCP2_PACKET_THRESHOLD is kPacketThreshold described in
    draft-ietf-quic-recovery-17. */
@@ -81,7 +82,7 @@ typedef enum {
    draft-ietf-quic-recovery-17. */
 #define NGTCP2_GRANULARITY NGTCP2_MILLISECONDS
 
-#define NGTCP2_DEFAULT_INITIAL_RTT (100 * NGTCP2_MILLISECONDS)
+#define NGTCP2_DEFAULT_INITIAL_RTT (500 * NGTCP2_MILLISECONDS)
 
 /* NGTCP2_MAX_RX_INITIAL_CRYPTO_DATA is the maximum offset of received
    crypto stream in Initial packet.  We set this hard limit here
@@ -172,9 +173,10 @@ typedef enum {
   /* NGTCP2_CONN_FLAG_HANDSHAKE_COMPLETED_HANDLED is set when the
      library transitions its state to "post handshake". */
   NGTCP2_CONN_FLAG_HANDSHAKE_COMPLETED_HANDLED = 0x0100,
-  /* NGTCP2_CONN_FLAG_FORCE_SEND_INITIAL is set when client has to
-     send Initial packets even if it has nothing to send. */
-  NGTCP2_CONN_FLAG_FORCE_SEND_INITIAL = 0x0200,
+  /* NGTCP2_CONN_FLAG_FORCE_SEND_HANDSHAKE is set when client has to
+     send Initial or Handshake packets even if it has nothing to
+     send. */
+  NGTCP2_CONN_FLAG_FORCE_SEND_HANDSHAKE = 0x0200,
   /* NGTCP2_CONN_FLAG_INITIAL_KEY_DISCARDED is set when Initial keys
      have been discarded. */
   NGTCP2_CONN_FLAG_INITIAL_KEY_DISCARDED = 0x0400,
@@ -261,16 +263,14 @@ typedef struct {
     } tx;
 
     struct {
-      /* offset_base is the offset of crypto stream in the global TLS
-         stream and it specifies the offset where the crypto stream in
-         this encryption level starts. */
-      uint64_t offset_base;
       /* ckm is a cryptographic key, and iv to decrypt incoming
          packets. */
       ngtcp2_crypto_km *ckm;
       /* hp is header protection key. */
       ngtcp2_vec *hp;
     } rx;
+
+    ngtcp2_strm strm;
   } crypto;
 
   ngtcp2_acktr acktr;
@@ -418,7 +418,6 @@ struct ngtcp2_conn {
       ngtcp2_crypto_km *old_rx_ckm;
     } key_update;
 
-    ngtcp2_strm strm;
     size_t aead_overhead;
     /* decrypt_buf is a buffer which is used to write decrypted data. */
     ngtcp2_array decrypt_buf;
@@ -440,7 +439,7 @@ struct ngtcp2_conn {
      This field is only used by server to ensure "3 times received
      data" rule. */
   size_t hs_sent;
-  ngtcp2_mem *mem;
+  const ngtcp2_mem *mem;
   void *user_data;
   uint32_t version;
   /* flags is bitwise OR of zero or more of ngtcp2_conn_flag. */

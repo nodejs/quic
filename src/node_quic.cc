@@ -60,12 +60,12 @@ void QuicSetCallbacks(const FunctionCallbackInfo<Value>& args) {
 }
 
 void QuicProtocolVersion(const FunctionCallbackInfo<Value>& args) {
-  args.GetReturnValue().Set(NGTCP2_PROTO_VER_D19);
+  args.GetReturnValue().Set(NGTCP2_PROTO_VER);
 }
 
 void QuicALPNVersion(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
-  args.GetReturnValue().Set(OneByteString(env->isolate(), NGTCP2_ALPN_D19));
+  args.GetReturnValue().Set(OneByteString(env->isolate(), NGTCP2_ALPN_H3));
 }
 
 int ALPN_Select_Proto_CB(SSL* ssl,
@@ -80,9 +80,9 @@ int ALPN_Select_Proto_CB(SSL* ssl,
   uint32_t version = session->GetNegotiatedVersion();
 
   switch (version) {
-  case NGTCP2_PROTO_VER_D19:
-    alpn = reinterpret_cast<const uint8_t*>(NGTCP2_ALPN_D19);
-    alpnlen = strsize(NGTCP2_ALPN_D19);
+  case NGTCP2_PROTO_VER:
+    alpn = reinterpret_cast<const uint8_t*>(NGTCP2_ALPN_H3);
+    alpnlen = strsize(NGTCP2_ALPN_H3);
     break;
   default:
     // Unexpected QUIC protocol version

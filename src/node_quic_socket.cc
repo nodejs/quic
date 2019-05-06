@@ -343,7 +343,7 @@ int QuicSocket::SendVersionNegotiation(
 
   std::array<uint32_t, 2> sv;
   sv[0] = GenerateReservedVersion(addr, chd->version);
-  sv[1] = NGTCP2_PROTO_VER_D19;
+  sv[1] = NGTCP2_PROTO_VER;
 
   uint8_t unused_random;
   EntropySource(&unused_random, 1);

@@ -29,7 +29,7 @@
 
 #include "ngtcp2_macro.h"
 
-int ngtcp2_gaptr_init(ngtcp2_gaptr *gaptr, ngtcp2_mem *mem) {
+int ngtcp2_gaptr_init(ngtcp2_gaptr *gaptr, const ngtcp2_mem *mem) {
   int rv;
   ngtcp2_range key = {0, UINT64_MAX};
   rv = ngtcp2_psl_init(&gaptr->gap, mem);
@@ -99,6 +99,12 @@ uint64_t ngtcp2_gaptr_first_gap_offset(ngtcp2_gaptr *gaptr) {
   ngtcp2_psl_it it = ngtcp2_psl_begin(&gaptr->gap);
   ngtcp2_range r = ngtcp2_psl_it_range(&it);
   return r.begin;
+}
+
+ngtcp2_psl_it ngtcp2_gaptr_get_first_gap_after(ngtcp2_gaptr *gaptr,
+                                               uint64_t offset) {
+  ngtcp2_range q = {offset, offset + 1};
+  return ngtcp2_psl_lower_bound(&gaptr->gap, &q);
 }
 
 int ngtcp2_gaptr_is_pushed(ngtcp2_gaptr *gaptr, uint64_t offset,

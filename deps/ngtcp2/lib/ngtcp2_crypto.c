@@ -30,10 +30,11 @@
 #include "ngtcp2_str.h"
 #include "ngtcp2_conv.h"
 #include "ngtcp2_net.h"
+#include "ngtcp2_conn.h"
 
 int ngtcp2_crypto_km_new(ngtcp2_crypto_km **pckm, const uint8_t *key,
                          size_t keylen, const uint8_t *iv, size_t ivlen,
-                         ngtcp2_mem *mem) {
+                         const ngtcp2_mem *mem) {
   size_t len;
   uint8_t *p;
 
@@ -57,7 +58,7 @@ int ngtcp2_crypto_km_new(ngtcp2_crypto_km **pckm, const uint8_t *key,
   return 0;
 }
 
-void ngtcp2_crypto_km_del(ngtcp2_crypto_km *ckm, ngtcp2_mem *mem) {
+void ngtcp2_crypto_km_del(ngtcp2_crypto_km *ckm, const ngtcp2_mem *mem) {
   if (ckm == NULL) {
     return;
   }
@@ -82,7 +83,7 @@ ssize_t ngtcp2_encode_transport_params(uint8_t *dest, size_t destlen,
                                        uint8_t exttype,
                                        const ngtcp2_transport_params *params) {
   uint8_t *p;
-  size_t len = 0;
+  size_t len = sizeof(uint16_t);
   /* For some reason, gcc 7.3.0 requires this initialization. */
   size_t preferred_addrlen = 0;
 
@@ -142,7 +143,8 @@ ssize_t ngtcp2_encode_transport_params(uint8_t *dest, size_t destlen,
     len += 4;
   }
   if (params->max_ack_delay != NGTCP2_DEFAULT_MAX_ACK_DELAY) {
-    len += 4 + ngtcp2_put_varint_len(params->max_ack_delay);
+    len +=
+        4 + ngtcp2_put_varint_len(params->max_ack_delay / NGTCP2_MILLISECONDS);
   }
   if (params->idle_timeout) {
     len += 4 + ngtcp2_put_varint_len(params->idle_timeout);
@@ -153,6 +155,7 @@ ssize_t ngtcp2_encode_transport_params(uint8_t *dest, size_t destlen,
   }
 
   p = dest;
+  p = ngtcp2_put_uint16be(p, (uint16_t)(len - sizeof(uint16_t)));
 
   if (exttype == NGTCP2_TRANSPORT_PARAMS_TYPE_ENCRYPTED_EXTENSIONS) {
     if (params->stateless_reset_token_present) {
@@ -258,9 +261,10 @@ ssize_t ngtcp2_encode_transport_params(uint8_t *dest, size_t destlen,
 
   if (params->max_ack_delay != NGTCP2_DEFAULT_MAX_ACK_DELAY) {
     p = ngtcp2_put_uint16be(p, NGTCP2_TRANSPORT_PARAM_MAX_ACK_DELAY);
-    p = ngtcp2_put_uint16be(
-        p, (uint16_t)ngtcp2_put_varint_len(params->max_ack_delay));
-    p = ngtcp2_put_varint(p, params->max_ack_delay);
+    p = ngtcp2_put_uint16be(p,
+                            (uint16_t)ngtcp2_put_varint_len(
+                                params->max_ack_delay / NGTCP2_MILLISECONDS));
+    p = ngtcp2_put_varint(p, params->max_ack_delay / NGTCP2_MILLISECONDS);
   }
 
   if (params->idle_timeout) {
@@ -311,6 +315,7 @@ int ngtcp2_decode_transport_params(ngtcp2_transport_params *params,
                                    size_t datalen) {
   const uint8_t *p, *end;
   size_t len;
+  size_t tplen;
   uint16_t param_type;
   size_t valuelen;
   ssize_t nread;
@@ -318,8 +323,19 @@ int ngtcp2_decode_transport_params(ngtcp2_transport_params *params,
   size_t scb_idx;
   size_t scb_shift;
 
+  if (datalen < sizeof(uint16_t)) {
+    return NGTCP2_ERR_MALFORMED_TRANSPORT_PARAM;
+  }
+
   p = data;
   end = data + datalen;
+
+  tplen = ngtcp2_get_uint16(p);
+  p += sizeof(uint16_t);
+
+  if (sizeof(uint16_t) + tplen != datalen) {
+    return NGTCP2_ERR_MALFORMED_TRANSPORT_PARAM;
+  }
 
   /* Set default values */
   params->initial_max_streams_bidi = 0;
@@ -386,12 +402,18 @@ int ngtcp2_decode_transport_params(ngtcp2_transport_params *params,
       if (nread < 0) {
         return NGTCP2_ERR_MALFORMED_TRANSPORT_PARAM;
       }
+      if (params->initial_max_streams_bidi > NGTCP2_MAX_STREAMS) {
+        return NGTCP2_ERR_STREAM_LIMIT;
+      }
       p += nread;
       break;
     case NGTCP2_TRANSPORT_PARAM_INITIAL_MAX_STREAMS_UNI:
       nread = decode_varint(&params->initial_max_streams_uni, p, end);
       if (nread < 0) {
         return NGTCP2_ERR_MALFORMED_TRANSPORT_PARAM;
+      }
+      if (params->initial_max_streams_uni > NGTCP2_MAX_STREAMS) {
+        return NGTCP2_ERR_STREAM_LIMIT;
       }
       p += nread;
       break;
@@ -508,6 +530,7 @@ int ngtcp2_decode_transport_params(ngtcp2_transport_params *params,
       if (nread < 0 || params->max_ack_delay >= 16384) {
         return NGTCP2_ERR_MALFORMED_TRANSPORT_PARAM;
       }
+      params->max_ack_delay *= NGTCP2_MILLISECONDS;
       p += nread;
       break;
     default:

@@ -962,7 +962,7 @@ int QuicSession::OnReceiveCryptoData(
     size_t datalen,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
-  return session->ReceiveCryptoData(offset, data, datalen);
+  return session->ReceiveCryptoData(crypto_level, offset, data, datalen);
 }
 
 int QuicSession::OnReceiveRetry(
@@ -1180,11 +1180,12 @@ int QuicSession::OnStreamOpen(
 
 int QuicSession::OnAckedCryptoOffset(
     ngtcp2_conn* conn,
+    ngtcp2_crypto_level crypto_level,
     uint64_t offset,
     size_t datalen,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
-  session->AckedCryptoOffset(offset, datalen);
+  session->AckedCryptoOffset(crypto_level, offset, datalen);
   return 0;
 }
 
@@ -1437,6 +1438,8 @@ QuicSession::QuicSession(
     SecureContext* ctx,
     AsyncWrap::ProviderType type) :
     AsyncWrap(socket->env(), wrap, type),
+    rx_crypto_level_(NGTCP2_CRYPTO_LEVEL_INITIAL),
+    tx_crypto_level_(NGTCP2_CRYPTO_LEVEL_INITIAL),
     initial_(true),
     connection_(nullptr),
     tls_alert_(0),
@@ -1485,6 +1488,7 @@ void QuicSession::AssociateCID(
 // the buffered data can be released. This function is called only by the
 // OnAckedCryptoOffset ngtcp2 callback function.
 void QuicSession::AckedCryptoOffset(
+    ngtcp2_crypto_level crypto_level,
     uint64_t offset,
     size_t datalen) {
   Debug(this,
@@ -1817,6 +1821,7 @@ int QuicSession::ReceiveClientInitial(
 // determines that the TLS Handshake is done. The only thing we
 // need to do at this point is let the javascript side know.
 void QuicSession::HandshakeCompleted() {
+  SetLocalCryptoLevel(NGTCP2_CRYPTO_LEVEL_APP);
   HandleScope scope(env()->isolate());
   Local<Context> context = env()->context();
   Context::Scope context_scope(context);
@@ -1843,8 +1848,8 @@ void QuicSession::HandshakeCompleted() {
   unsigned int alpnlen;
 
   SSL_get0_alpn_selected(ssl_.get(), &alpn_buf, &alpnlen);
-  if (alpnlen == sizeof(NGTCP2_ALPN_D19) - 2 &&
-      memcmp(alpn_buf, NGTCP2_ALPN_D19 + 1, sizeof(NGTCP2_ALPN_D19) - 2) == 0) {
+  if (alpnlen == sizeof(NGTCP2_ALPN_H3) - 2 &&
+      memcmp(alpn_buf, NGTCP2_ALPN_H3 + 1, sizeof(NGTCP2_ALPN_H3) - 2) == 0) {
     alpn = env()->quic_alpn_string();
   } else {
     alpn = OneByteString(env()->isolate(), alpn_buf, alpnlen);
@@ -1914,14 +1919,17 @@ int QuicSession::DoHandshakeReadOnce(
 // For every chunk, we move the TLS handshake further along until it
 // is complete.
 int QuicSession::ReceiveCryptoData(
+    ngtcp2_crypto_level crypto_level,
     uint64_t offset,
     const uint8_t* data,
     size_t datalen) {
   CHECK(!IsDestroyed());
   Debug(this, "Receiving %d bytes of crypto data.", datalen);
-  WritePeerHandshake(data, datalen);
+  int err = WritePeerHandshake(crypto_level, data, datalen);
+  if (err != 0)
+    return err;
   if (!IsHandshakeCompleted()) {
-    int err = TLSHandshake();
+    err = TLSHandshake();
     if (err != 0)
       return err;
     return 0;
@@ -2519,12 +2527,16 @@ int QuicSession::UpdateKey() {
 }
 
 // Writes peer handshake data to the internal buffer
-void QuicSession::WritePeerHandshake(
+int QuicSession::WritePeerHandshake(
+    ngtcp2_crypto_level crypto_level,
     const uint8_t* data,
     size_t datalen) {
   CHECK(!IsDestroyed());
+  if (rx_crypto_level_ != crypto_level)
+    return -1;
   Debug(this, "Writing %d bytes of peer handshake data.", datalen);
   std::copy_n(data, datalen, std::back_inserter(peer_handshake_));
+  return 0;
 }
 
 void QuicSession::WriteHandshake(
@@ -2537,6 +2549,7 @@ void QuicSession::WriteHandshake(
   CHECK_EQ(
       ngtcp2_conn_submit_crypto_data(
           connection_,
+          tx_crypto_level_,
           buffer.data, datalen), 0);
   handshake_.Push(std::move(buffer));
 }
@@ -2639,15 +2652,18 @@ int QuicServerSession::OnKey(
       break;
     case SSL_KEY_CLIENT_HANDSHAKE_TRAFFIC:
       InstallKeys<ngtcp2_conn_install_handshake_rx_keys>(connection_, params);
+      SetClientCryptoLevel(NGTCP2_CRYPTO_LEVEL_HANDSHAKE);
       break;
     case SSL_KEY_CLIENT_APPLICATION_TRAFFIC:
       InstallKeys<ngtcp2_conn_install_rx_keys>(connection_, params);
       break;
     case SSL_KEY_SERVER_HANDSHAKE_TRAFFIC:
       InstallKeys<ngtcp2_conn_install_handshake_tx_keys>(connection_, params);
+      SetServerCryptoLevel(NGTCP2_CRYPTO_LEVEL_HANDSHAKE);
       break;
     case SSL_KEY_SERVER_APPLICATION_TRAFFIC:
       InstallKeys<ngtcp2_conn_install_tx_keys>(connection_, params);
+      SetServerCryptoLevel(NGTCP2_CRYPTO_LEVEL_APP);
     break;
   }
 
@@ -2688,6 +2704,7 @@ int QuicServerSession::Init(
           version,
           &callbacks_,
           &settings,
+          nullptr, /* TODO(@jasnell): Implement ngtcp2_mem */
           static_cast<QuicSession*>(this));
   if (err != 0) {
     Debug(this, "There was an error creating the session. Error %d", err);
@@ -3000,6 +3017,46 @@ const ngtcp2_cid* QuicServerSession::rcid() const {
 }
 
 
+inline ngtcp2_crypto_level QuicServerSession::GetServerCryptoLevel() {
+  return tx_crypto_level_;
+}
+
+inline ngtcp2_crypto_level QuicServerSession::GetClientCryptoLevel() {
+  return rx_crypto_level_;
+}
+
+inline void QuicServerSession::SetServerCryptoLevel(ngtcp2_crypto_level level) {
+  tx_crypto_level_ = level;
+}
+
+inline void QuicServerSession::SetClientCryptoLevel(ngtcp2_crypto_level level) {
+  rx_crypto_level_ = level;
+}
+
+inline ngtcp2_crypto_level QuicClientSession::GetServerCryptoLevel() {
+  return rx_crypto_level_;
+}
+
+inline ngtcp2_crypto_level QuicClientSession::GetClientCryptoLevel() {
+  return tx_crypto_level_;
+}
+
+inline void QuicClientSession::SetServerCryptoLevel(ngtcp2_crypto_level level) {
+  rx_crypto_level_ = level;
+}
+
+inline void QuicClientSession::SetClientCryptoLevel(ngtcp2_crypto_level level) {
+  tx_crypto_level_ = level;
+}
+
+inline void QuicServerSession::SetLocalCryptoLevel(ngtcp2_crypto_level level) {
+  SetServerCryptoLevel(level);
+}
+
+inline void QuicClientSession::SetLocalCryptoLevel(ngtcp2_crypto_level level) {
+  SetClientCryptoLevel(level);
+}
+
 // The QuicClientSession class provides a specialization of QuicSession that
 // implements client-specific behaviors. Most of the client-specific stuff is
 // limited to TLS and early data
@@ -3077,6 +3134,7 @@ int QuicClientSession::Init(
           version,
           &callbacks_,
           &settings,
+          nullptr, /* TODO(@jasnell): Implement ngtcp2_mem */
           static_cast<QuicSession*>(this));
   if (err != 0) {
     Debug(this, "There was an error creating the session. Error %d", err);
@@ -3190,8 +3248,8 @@ int QuicClientSession::SetSession(SSL_SESSION* session) {
 void QuicClientSession::InitTLS_Post() {
   SSL_set_connect_state(ssl());
 
-  const uint8_t* alpn = reinterpret_cast<const uint8_t*>(NGTCP2_ALPN_D19);
-  size_t alpnlen = strsize(NGTCP2_ALPN_D19);
+  const uint8_t* alpn = reinterpret_cast<const uint8_t*>(NGTCP2_ALPN_H3);
+  size_t alpnlen = strsize(NGTCP2_ALPN_H3);
   SSL_set_alpn_protos(ssl(), alpn, alpnlen);
 
   // If the hostname is an IP address and we have no additional
@@ -3242,15 +3300,18 @@ int QuicClientSession::OnKey(
       break;
     case SSL_KEY_CLIENT_HANDSHAKE_TRAFFIC:
       InstallKeys<ngtcp2_conn_install_handshake_tx_keys>(connection_, params);
+      SetClientCryptoLevel(NGTCP2_CRYPTO_LEVEL_HANDSHAKE);
       break;
     case SSL_KEY_CLIENT_APPLICATION_TRAFFIC:
       InstallKeys<ngtcp2_conn_install_tx_keys>(connection_, params);
       break;
     case SSL_KEY_SERVER_HANDSHAKE_TRAFFIC:
       InstallKeys<ngtcp2_conn_install_handshake_rx_keys>(connection_, params);
+      SetServerCryptoLevel(NGTCP2_CRYPTO_LEVEL_HANDSHAKE);
       break;
     case SSL_KEY_SERVER_APPLICATION_TRAFFIC:
       InstallKeys<ngtcp2_conn_install_rx_keys>(connection_, params);
+      SetServerCryptoLevel(NGTCP2_CRYPTO_LEVEL_APP);
     break;
   }
 
@@ -3786,7 +3847,7 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
       QuicClientSession::New(
           socket,
           const_cast<const sockaddr*>(reinterpret_cast<sockaddr*>(&addr)),
-          NGTCP2_PROTO_VER_D19, sc,
+          NGTCP2_PROTO_VER, sc,
           *servername,
           port);
   CHECK_NOT_NULL(session);

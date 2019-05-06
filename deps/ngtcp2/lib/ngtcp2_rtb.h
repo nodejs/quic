@@ -46,6 +46,9 @@ typedef struct ngtcp2_log ngtcp2_log;
 struct ngtcp2_default_cc;
 typedef struct ngtcp2_default_cc ngtcp2_default_cc;
 
+struct ngtcp2_strm;
+typedef struct ngtcp2_strm ngtcp2_strm;
+
 /*
  * ngtcp2_frame_chain chains frames in a single packet.
  */
@@ -55,8 +58,8 @@ struct ngtcp2_frame_chain {
 };
 
 /* NGTCP2_MAX_STREAM_DATACNT is the maximum number of ngtcp2_vec that
-   a ngtcp2_crypto can include. */
-#define NGTCP2_MAX_STREAM_DATACNT 8
+   a ngtcp2_stream can include. */
+#define NGTCP2_MAX_STREAM_DATACNT 32
 
 struct ngtcp2_stream_frame_chain;
 typedef struct ngtcp2_stream_frame_chain ngtcp2_stream_frame_chain;
@@ -108,7 +111,7 @@ struct ngtcp2_crypto_frame_chain {
  * NGTCP2_ERR_NOMEM
  *     Out of memory.
  */
-int ngtcp2_frame_chain_new(ngtcp2_frame_chain **pfrc, ngtcp2_mem *mem);
+int ngtcp2_frame_chain_new(ngtcp2_frame_chain **pfrc, const ngtcp2_mem *mem);
 
 /*
  * ngtcp2_frame_chain_extralen_new works like ngtcp2_frame_chain_new,
@@ -116,13 +119,13 @@ int ngtcp2_frame_chain_new(ngtcp2_frame_chain **pfrc, ngtcp2_mem *mem);
  * ngtcp2_frame.
  */
 int ngtcp2_frame_chain_extralen_new(ngtcp2_frame_chain **pfrc, size_t extralen,
-                                    ngtcp2_mem *mem);
+                                    const ngtcp2_mem *mem);
 
 /*
  * ngtcp2_frame_chain_del deallocates |frc|.  It also deallocates the
  * memory pointed by |frc|.
  */
-void ngtcp2_frame_chain_del(ngtcp2_frame_chain *frc, ngtcp2_mem *mem);
+void ngtcp2_frame_chain_del(ngtcp2_frame_chain *frc, const ngtcp2_mem *mem);
 
 /*
  * ngtcp2_frame_chain_init initializes |frc|.
@@ -141,10 +144,10 @@ void ngtcp2_frame_chain_init(ngtcp2_frame_chain *frc);
  *     Out of memory.
  */
 int ngtcp2_stream_frame_chain_new(ngtcp2_stream_frame_chain **pfrc,
-                                  ngtcp2_mem *mem);
+                                  const ngtcp2_mem *mem);
 
 void ngtcp2_stream_frame_chain_del(ngtcp2_stream_frame_chain *frc,
-                                   ngtcp2_mem *mem);
+                                   const ngtcp2_mem *mem);
 
 /*
  * ngtcp2_crypto_frame_chain_new allocates and initializes
@@ -158,16 +161,24 @@ void ngtcp2_stream_frame_chain_del(ngtcp2_stream_frame_chain *frc,
  *     Out of memory.
  */
 int ngtcp2_crypto_frame_chain_new(ngtcp2_crypto_frame_chain **pfrc,
-                                  ngtcp2_mem *mem);
+                                  const ngtcp2_mem *mem);
 
 void ngtcp2_crypto_frame_chain_del(ngtcp2_crypto_frame_chain *frc,
-                                   ngtcp2_mem *mem);
+                                   const ngtcp2_mem *mem);
+
+/*
+ * ngtcp2_crypto_frame_chain_copy copies CRYPTO frame data from |src|
+ * to |dest|.  Other fields are left untouched.
+ */
+void ngtcp2_crypto_frame_chain_copy(ngtcp2_crypto_frame_chain *dest,
+                                    ngtcp2_crypto_frame_chain *src);
 
 /*
  * ngtcp2_frame_chain_list_del deletes |frc|, and all objects
  * connected by next field.
  */
-void ngtcp2_frame_chain_list_del(ngtcp2_frame_chain *frc, ngtcp2_mem *mem);
+void ngtcp2_frame_chain_list_del(ngtcp2_frame_chain *frc,
+                                 const ngtcp2_mem *mem);
 
 typedef enum {
   NGTCP2_RTB_FLAG_NONE = 0x00,
@@ -179,7 +190,10 @@ typedef enum {
   NGTCP2_RTB_FLAG_CRYPTO_PKT = 0x02,
   /* NGTCP2_RTB_FLAG_ACK_ELICITING indicates that the entry elicits
      acknowledgement. */
-  NGTCP2_RTB_FLAG_ACK_ELICITING = 0x4,
+  NGTCP2_RTB_FLAG_ACK_ELICITING = 0x04,
+  /* NGTCP2_RTB_FLAG_CRYPTO_TIMEOUT_RETRANSMITTED indicates that the
+     CRYPTO frames have been retransmitted. */
+  NGTCP2_RTB_FLAG_CRYPTO_TIMEOUT_RETRANSMITTED = 0x08,
 } ngtcp2_rtb_flag;
 
 struct ngtcp2_rtb_entry;
@@ -216,13 +230,13 @@ struct ngtcp2_rtb_entry {
  */
 int ngtcp2_rtb_entry_new(ngtcp2_rtb_entry **pent, const ngtcp2_pkt_hd *hd,
                          ngtcp2_frame_chain *frc, ngtcp2_tstamp ts,
-                         size_t pktlen, uint8_t flags, ngtcp2_mem *mem);
+                         size_t pktlen, uint8_t flags, const ngtcp2_mem *mem);
 
 /*
  * ngtcp2_rtb_entry_del deallocates |ent|.  It also frees memory
  * pointed by |ent|.
  */
-void ngtcp2_rtb_entry_del(ngtcp2_rtb_entry *ent, ngtcp2_mem *mem);
+void ngtcp2_rtb_entry_del(ngtcp2_rtb_entry *ent, const ngtcp2_mem *mem);
 
 /*
  * ngtcp2_rtb tracks sent packets, and its ACK timeout for
@@ -232,20 +246,26 @@ typedef struct {
   /* ents includes ngtcp2_rtb_entry sorted by decreasing order of
      packet number. */
   ngtcp2_ksl ents;
+  /* crypto is CRYPTO stream. */
+  ngtcp2_strm *crypto;
   ngtcp2_default_cc *cc;
   ngtcp2_log *log;
-  ngtcp2_mem *mem;
+  const ngtcp2_mem *mem;
   /* largest_acked_tx_pkt_num is the largest packet number
      acknowledged by the peer. */
   int64_t largest_acked_tx_pkt_num;
   size_t num_ack_eliciting;
+  ngtcp2_tstamp loss_time;
+  /* crypto_level is encryption level which |crypto| belongs to. */
+  ngtcp2_crypto_level crypto_level;
 } ngtcp2_rtb;
 
 /*
  * ngtcp2_rtb_init initializes |rtb|.
  */
-void ngtcp2_rtb_init(ngtcp2_rtb *rtb, ngtcp2_default_cc *cc, ngtcp2_log *log,
-                     ngtcp2_mem *mem);
+void ngtcp2_rtb_init(ngtcp2_rtb *rtb, ngtcp2_crypto_level crypto_level,
+                     ngtcp2_strm *crypto, ngtcp2_default_cc *cc,
+                     ngtcp2_log *log, const ngtcp2_mem *mem);
 
 /*
  * ngtcp2_rtb_free deallocates resources allocated for |rtb|.
@@ -289,7 +309,7 @@ ssize_t ngtcp2_rtb_recv_ack(ngtcp2_rtb *rtb, const ngtcp2_ack *fr,
  * ngtcp2_rtb_detect_lost_pkt detects lost packets and prepends the
  * frames contained them to |*pfrc|.  Even when this function fails,
  * some frames might be prepended to |*pfrc| and the caller should
- * handle them.
+ * handle them.  |pto| is PTO.
  *
  * This function returns 0 if it succeeds, or one of the following
  * negative error codes:
@@ -298,7 +318,8 @@ ssize_t ngtcp2_rtb_recv_ack(ngtcp2_rtb *rtb, const ngtcp2_ack *fr,
  *     Out of memory
  */
 int ngtcp2_rtb_detect_lost_pkt(ngtcp2_rtb *rtb, ngtcp2_frame_chain **pfrc,
-                               ngtcp2_rcvry_stat *rcs, ngtcp2_tstamp ts);
+                               ngtcp2_rcvry_stat *rcs, ngtcp2_duration pto,
+                               ngtcp2_tstamp ts);
 
 /*
  * ngtcp2_rtb_remove_all removes all packets from |rtb| and prepends
@@ -312,6 +333,19 @@ int ngtcp2_rtb_detect_lost_pkt(ngtcp2_rtb *rtb, ngtcp2_frame_chain **pfrc,
  *     Out of memory
  */
 int ngtcp2_rtb_remove_all(ngtcp2_rtb *rtb, ngtcp2_frame_chain **pfrc);
+
+/*
+ * ngtcp2_rtb_on_crypto_timeout copies all unacknowledged CRYPTO
+ * frames and links them to |*pfrc|.  The affected ngtcp2_rtb_entry
+ * will have NGTCP2_RTB_FLAG_CRYPTO_TIMEOUT_RETRANSMITTED set.
+ *
+ * This function returns 0 if it succeeds, or one of the following
+ * negative error codes:
+ *
+ * NGTCP2_ERR_NOMEM
+ *     Out of memory
+ */
+int ngtcp2_rtb_on_crypto_timeout(ngtcp2_rtb *rtb, ngtcp2_frame_chain **pfrc);
 
 /*
  * ngtcp2_rtb_empty returns nonzero if |rtb| have no entry.

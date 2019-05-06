@@ -190,6 +190,7 @@ class QuicSession : public AsyncWrap {
 
  private:
   void AckedCryptoOffset(
+      ngtcp2_crypto_level crypto_level,
       uint64_t offset,
       size_t datalen);
   int AckedStreamDataOffset(
@@ -217,7 +218,8 @@ class QuicSession : public AsyncWrap {
   int StreamOpen(
       int64_t stream_id);
   int TLSHandshake();
-  void WritePeerHandshake(
+  int WritePeerHandshake(
+      ngtcp2_crypto_level crypto_level,
       const uint8_t* data,
       size_t datalen);
 
@@ -336,6 +338,7 @@ class QuicSession : public AsyncWrap {
       void* user_data);
   static int OnAckedCryptoOffset(
       ngtcp2_conn* conn,
+      ngtcp2_crypto_level crypto_level,
       uint64_t offset,
       size_t datalen,
       void* user_data);
@@ -410,6 +413,7 @@ class QuicSession : public AsyncWrap {
   int ReceiveClientInitial(
       const ngtcp2_cid* dcid);
   int ReceiveCryptoData(
+      ngtcp2_crypto_level crypto_level,
       uint64_t offset,
       const uint8_t* data,
       size_t datalen);
@@ -493,6 +497,14 @@ class QuicSession : public AsyncWrap {
   void SetLocalAddress(
       const ngtcp2_addr* addr);
 
+  virtual inline ngtcp2_crypto_level GetServerCryptoLevel() = 0;
+  virtual inline ngtcp2_crypto_level GetClientCryptoLevel() = 0;
+  virtual inline void SetServerCryptoLevel(ngtcp2_crypto_level level) = 0;
+  virtual inline void SetClientCryptoLevel(ngtcp2_crypto_level level) = 0;
+  virtual inline void SetLocalCryptoLevel(ngtcp2_crypto_level level) = 0;
+
+  ngtcp2_crypto_level rx_crypto_level_;
+  ngtcp2_crypto_level tx_crypto_level_;
   bool initial_;
   crypto::SSLPointer ssl_;
   ngtcp2_conn* connection_;
@@ -609,6 +621,11 @@ class QuicServerSession : public QuicSession {
   int StartClosingPeriod(int error);
   void StartDrainingPeriod();
 
+  inline ngtcp2_crypto_level GetServerCryptoLevel() override;
+  inline ngtcp2_crypto_level GetClientCryptoLevel() override;
+  inline void SetServerCryptoLevel(ngtcp2_crypto_level level) override;
+  inline void SetClientCryptoLevel(ngtcp2_crypto_level level) override;
+  inline void SetLocalCryptoLevel(ngtcp2_crypto_level level) override;
 
   ngtcp2_cid pscid_;
   ngtcp2_cid rcid_;
@@ -738,6 +755,12 @@ class QuicClientSession : public QuicSession {
   bool resumption_;
   const char* hostname_;
   uint32_t port_;
+
+  inline ngtcp2_crypto_level GetServerCryptoLevel() override;
+  inline ngtcp2_crypto_level GetClientCryptoLevel() override;
+  inline void SetServerCryptoLevel(ngtcp2_crypto_level level) override;
+  inline void SetClientCryptoLevel(ngtcp2_crypto_level level) override;
+  inline void SetLocalCryptoLevel(ngtcp2_crypto_level level) override;
 
   MaybeStackBuffer<char> transportParams_;
 

@@ -26,6 +26,7 @@
 
 #include <assert.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "ngtcp2_conv.h"
 #include "ngtcp2_str.h"
@@ -35,7 +36,7 @@
 
 int ngtcp2_pkt_chain_new(ngtcp2_pkt_chain **ppc, const ngtcp2_path *path,
                          const uint8_t *pkt, size_t pktlen, ngtcp2_tstamp ts,
-                         ngtcp2_mem *mem) {
+                         const ngtcp2_mem *mem) {
   *ppc = ngtcp2_mem_malloc(mem, sizeof(ngtcp2_pkt_chain) + pktlen);
   if (*ppc == NULL) {
     return NGTCP2_ERR_NOMEM;
@@ -52,7 +53,7 @@ int ngtcp2_pkt_chain_new(ngtcp2_pkt_chain **ppc, const ngtcp2_path *path,
   return 0;
 }
 
-void ngtcp2_pkt_chain_del(ngtcp2_pkt_chain *pc, ngtcp2_mem *mem) {
+void ngtcp2_pkt_chain_del(ngtcp2_pkt_chain *pc, const ngtcp2_mem *mem) {
   ngtcp2_mem_free(mem, pc);
 }
 
@@ -129,7 +130,8 @@ ssize_t ngtcp2_pkt_decode_hd_long(ngtcp2_pkt_hd *dest, const uint8_t *pkt,
       len = NGTCP2_MIN_LONG_HEADERLEN - 1; /* Cut packet number field */
       break;
     default:
-      return NGTCP2_ERR_UNKNOWN_PKT_TYPE;
+      /* Unreachable */
+      assert(0);
     }
   }
 
@@ -1911,8 +1913,8 @@ ssize_t ngtcp2_pkt_write_stateless_reset(uint8_t *dest, size_t destlen,
                                          uint8_t *rand, size_t randlen) {
   uint8_t *p;
 
-  if (destlen < 1 + NGTCP2_MIN_STATELESS_RESET_RANDLEN +
-                    NGTCP2_STATELESS_RESET_TOKENLEN) {
+  if (destlen <
+      NGTCP2_MIN_STATELESS_RESET_RANDLEN + NGTCP2_STATELESS_RESET_TOKENLEN) {
     return NGTCP2_ERR_NOBUF;
   }
 
