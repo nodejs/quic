@@ -40,7 +40,6 @@ using v8::FunctionTemplate;
 using v8::HandleScope;
 using v8::Integer;
 using v8::Local;
-using v8::MaybeLocal;
 using v8::Number;
 using v8::Object;
 using v8::ObjectTemplate;
@@ -108,7 +107,7 @@ int KeyCB(
 #define RETURN_IF_FAIL(test, success, ret)                                     \
   do {                                                                         \
     if ((test) != (success)) return (ret);                                     \
-  } while(0)
+  } while (0)
 
 #define RETURN_IF_FAIL_OPENSSL(test) RETURN_IF_FAIL(test, 1, -1)
 
@@ -1892,9 +1891,7 @@ int QuicSession::DoHandshakeWriteOnce() {
   data.Realloc(nwrite);
   sendbuf_.Push(std::move(data));
 
-  int err = SendPacket();
-  if (err != 0)
-    return err;
+  return SendPacket();
 }
 
 // Reads a chunk of handshake data into the ngtcp2_conn for processing.
@@ -1999,7 +1996,7 @@ void QuicSession::RemoveStream(
 }
 
 namespace {
-void Consume(ngtcp2_vec** pvec, size_t *pcnt, size_t len) {
+void Consume(ngtcp2_vec** pvec, size_t* pcnt, size_t len) {
   ngtcp2_vec* v = *pvec;
   size_t cnt = *pcnt;
 
@@ -2018,13 +2015,10 @@ void Consume(ngtcp2_vec** pvec, size_t *pcnt, size_t len) {
 
 int Empty(const ngtcp2_vec* vec, size_t cnt) {
   size_t i;
-
-  for (i = 0; i < cnt && vec[i].len == 0; ++i)
-    ;
-
+  for (i = 0; i < cnt && vec[i].len == 0; ++i) {}
   return i == cnt;
 }
-}
+}  // namespace
 
 // Sends 0RTT stream data.
 int QuicSession::Send0RTTStreamData(
@@ -2078,7 +2072,7 @@ int QuicSession::Send0RTTStreamData(
     dest.Realloc(nwrite);
     sendbuf_.Push(std::move(dest));
 
-    int err = SendPacket();
+    err = SendPacket();
     if (err != 0)
       return err;
     if (Empty(v, c))
@@ -2147,7 +2141,7 @@ int QuicSession::SendStreamData(
     sendbuf_.Push(std::move(dest));
     remote_address_.Update(&path.path.remote);
 
-    int err = SendPacket();
+    err = SendPacket();
     if (err != 0)
       return err;
     if (Empty(v, c))
@@ -2636,7 +2630,7 @@ int QuicServerSession::OnKey(
   if (Negotiated_PRF(&crypto_ctx_, ssl()) != 0 ||
       Negotiated_AEAD(&crypto_ctx_, ssl()) != 0) {
      return -1;
-   }
+  }
 
   CryptoParams params;
 
@@ -2814,7 +2808,6 @@ int QuicServerSession::Receive(
     }
     Debug(this, "Successfully read packet");
     return 0;
-
   }
 
   Debug(this, "TLS Handshake %s", initial_ ? "starting" : "continuing");
@@ -2851,7 +2844,7 @@ void QuicServerSession::Remove() {
 int QuicServerSession::SendConnectionClose(int error) {
   CHECK(!IsDestroyed());
   Debug(this, "Sending connection close");
-  CHECK(conn_closebuf_.size > 0);
+  CHECK_GT(conn_closebuf_.size, 0);
   sendbuf_.Cancel();
   // We don't use std::move here because we do not want
   // to reset conn_closebuf_.
@@ -3017,43 +3010,43 @@ const ngtcp2_cid* QuicServerSession::rcid() const {
 }
 
 
-inline ngtcp2_crypto_level QuicServerSession::GetServerCryptoLevel() {
+ngtcp2_crypto_level QuicServerSession::GetServerCryptoLevel() {
   return tx_crypto_level_;
 }
 
-inline ngtcp2_crypto_level QuicServerSession::GetClientCryptoLevel() {
+ngtcp2_crypto_level QuicServerSession::GetClientCryptoLevel() {
   return rx_crypto_level_;
 }
 
-inline void QuicServerSession::SetServerCryptoLevel(ngtcp2_crypto_level level) {
+void QuicServerSession::SetServerCryptoLevel(ngtcp2_crypto_level level) {
   tx_crypto_level_ = level;
 }
 
-inline void QuicServerSession::SetClientCryptoLevel(ngtcp2_crypto_level level) {
+void QuicServerSession::SetClientCryptoLevel(ngtcp2_crypto_level level) {
   rx_crypto_level_ = level;
 }
 
-inline ngtcp2_crypto_level QuicClientSession::GetServerCryptoLevel() {
+ngtcp2_crypto_level QuicClientSession::GetServerCryptoLevel() {
   return rx_crypto_level_;
 }
 
-inline ngtcp2_crypto_level QuicClientSession::GetClientCryptoLevel() {
+ngtcp2_crypto_level QuicClientSession::GetClientCryptoLevel() {
   return tx_crypto_level_;
 }
 
-inline void QuicClientSession::SetServerCryptoLevel(ngtcp2_crypto_level level) {
+void QuicClientSession::SetServerCryptoLevel(ngtcp2_crypto_level level) {
   rx_crypto_level_ = level;
 }
 
-inline void QuicClientSession::SetClientCryptoLevel(ngtcp2_crypto_level level) {
+void QuicClientSession::SetClientCryptoLevel(ngtcp2_crypto_level level) {
   tx_crypto_level_ = level;
 }
 
-inline void QuicServerSession::SetLocalCryptoLevel(ngtcp2_crypto_level level) {
+void QuicServerSession::SetLocalCryptoLevel(ngtcp2_crypto_level level) {
   SetServerCryptoLevel(level);
 }
 
-inline void QuicClientSession::SetLocalCryptoLevel(ngtcp2_crypto_level level) {
+void QuicClientSession::SetLocalCryptoLevel(ngtcp2_crypto_level level) {
   SetClientCryptoLevel(level);
 }
 
@@ -3156,7 +3149,7 @@ int QuicClientSession::Init(
       return err;
   }
 
-  DoHandshakeWriteOnce();
+  return DoHandshakeWriteOnce();
 }
 
 int QuicClientSession::SetSocket(
@@ -3769,7 +3762,10 @@ void QuicSessionGetPeerCertificate(const FunctionCallbackInfo<Value>& args) {
 
   // Short result requested.
   if (args.Length() < 1 || !args[0]->IsTrue()) {
-    result = crypto::X509ToObject(env, cert ? cert.get() : sk_X509_value(ssl_certs, 0));
+    result =
+        crypto::X509ToObject(
+            env,
+            cert ? cert.get() : sk_X509_value(ssl_certs, 0));
     goto done;
   }
 

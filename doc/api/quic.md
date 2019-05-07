@@ -305,7 +305,8 @@ added: REPLACEME
 -->
 
 * `options` {Object}
-  * `address` {string} The domain name or IP address of the QUIC server endpoint.
+  * `address` {string} The domain name or IP address of the QUIC server
+    endpoint.
   * `ca` {string|string[]|Buffer|Buffer[]} Optionally override the trusted CA
     certificates. Default is to trust the well-known CAs curated by Mozilla.
     Mozilla's CAs are completely replaced when CAs are explicitly specified

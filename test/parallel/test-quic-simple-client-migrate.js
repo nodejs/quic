@@ -4,7 +4,6 @@ const common = require('../common');
 if (!common.hasCrypto)
   common.skip('missing crypto');
 
-const assert = require('assert');
 const fs = require('fs');
 const Countdown = require('../common/countdown');
 const createSocket = require('quic');
@@ -26,20 +25,18 @@ const client = socket.connect({
 
 client.on('secure', (servername, alpn) => {
   setTimeout(() => {
-  client.setSocket(socket2, (err) => {
-    const file = fs.createReadStream(__filename);
-    const stream = client.openStream();
-    file.pipe(stream);
+    client.setSocket(socket2, (err) => {
+      const file = fs.createReadStream(__filename);
+      const stream = client.openStream();
+      file.pipe(stream);
 
-    stream.setEncoding('utf8');
-    stream.on('data', console.log);
-    stream.on('close', () => {
-      countdown.dec();
+      stream.setEncoding('utf8');
+      stream.on('data', console.log);
+      stream.on('close', () => {
+        countdown.dec();
+      });
     });
-
-  });
   }, 1000);
-
 });
 
 

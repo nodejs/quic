@@ -9,13 +9,12 @@ const fs = require('fs');
 const fixtures = require('../common/fixtures');
 const key = fixtures.readKey('agent8-key.pem', 'binary');
 const cert = fixtures.readKey('agent8-cert.pem', 'binary');
-const ca = fixtures.readKey('fake-startcom-root-cert.pem', 'binary');
 
 const createSocket = require('quic');
 
 const socket = createSocket({ type: 'udp4', port: 1234 });
 
-socket.listen({ key, cert, /*ca*/ });
+socket.listen({ key, cert });
 
 socket.on('session', common.mustCall((session) => {
 
@@ -27,7 +26,7 @@ socket.on('session', common.mustCall((session) => {
     // TODO(@jasnell): This will change once we get 0RTT working
     const uni = session.openStream({ halfOpen: true });
     uni.end('I wonder if it worked.');
-    //uni.end('test');
+    // uni.end('test');
   });
 
   session.on('stream', common.mustCall((stream) => {

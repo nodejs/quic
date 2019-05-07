@@ -179,7 +179,7 @@ static bool extra_root_certs_loaded = false;
 SSLWRAP_TYPES(V)
 #undef V
 
-	static int PasswordCallback(char* buf, int size, int rwflag, void* u) {
+static int PasswordCallback(char* buf, int size, int rwflag, void* u) {
   const char* passphrase = static_cast<char*>(u);
   if (passphrase != nullptr) {
     size_t buflen = static_cast<size_t>(size);

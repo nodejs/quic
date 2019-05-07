@@ -54,7 +54,7 @@ class QuicStream : public AsyncWrap,
       v8::Local<v8::Object> target,
       uint64_t stream_id);
 
-  virtual ~QuicStream() override;
+  ~QuicStream() override;
 
   uint64_t GetID() const;
   QuicSession* Session();

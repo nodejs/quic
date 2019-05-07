@@ -48,7 +48,7 @@ constexpr int ERR_INVALID_TLS_SESSION_TICKET = -2;
 
 class QuicSessionConfig {
  public:
-  explicit QuicSessionConfig() = default;
+  QuicSessionConfig() = default;
 
   void ResetToDefaults();
   void Set(
@@ -81,7 +81,7 @@ class QuicSession : public AsyncWrap {
       v8::Local<v8::Object> wrap,
       crypto::SecureContext* ctx,
       AsyncWrap::ProviderType provider);
-  virtual ~QuicSession() override;
+  ~QuicSession() override;
 
   void AddStream(
       QuicStream* stream);
@@ -497,11 +497,11 @@ class QuicSession : public AsyncWrap {
   void SetLocalAddress(
       const ngtcp2_addr* addr);
 
-  virtual inline ngtcp2_crypto_level GetServerCryptoLevel() = 0;
-  virtual inline ngtcp2_crypto_level GetClientCryptoLevel() = 0;
-  virtual inline void SetServerCryptoLevel(ngtcp2_crypto_level level) = 0;
-  virtual inline void SetClientCryptoLevel(ngtcp2_crypto_level level) = 0;
-  virtual inline void SetLocalCryptoLevel(ngtcp2_crypto_level level) = 0;
+  virtual ngtcp2_crypto_level GetServerCryptoLevel() = 0;
+  virtual ngtcp2_crypto_level GetClientCryptoLevel() = 0;
+  virtual void SetServerCryptoLevel(ngtcp2_crypto_level level) = 0;
+  virtual void SetClientCryptoLevel(ngtcp2_crypto_level level) = 0;
+  virtual void SetLocalCryptoLevel(ngtcp2_crypto_level level) = 0;
 
   ngtcp2_crypto_level rx_crypto_level_;
   ngtcp2_crypto_level tx_crypto_level_;
@@ -572,7 +572,7 @@ class QuicServerSession : public QuicSession {
       uint32_t version);
 
   bool IsDraining();
-  virtual bool IsServer() const override { return true; }
+  bool IsServer() const override { return true; }
 
 
   const ngtcp2_cid* rcid() const;
@@ -588,44 +588,44 @@ class QuicServerSession : public QuicSession {
       v8::Local<v8::Object> wrap,
       const ngtcp2_cid* rcid);
 
-  virtual void DisassociateCID(
+  void DisassociateCID(
       const ngtcp2_cid* cid) override;
-  virtual int DoHandshake(
+  int DoHandshake(
       const ngtcp2_path* path,
       const uint8_t* data,
       size_t datalen) override;
-  virtual int HandleError(
+  int HandleError(
       int code) override;
-  virtual void InitTLS_Post() override;
-  virtual void OnIdleTimeout() override;
-  virtual void OnRetransmitTimeout() override;
-  virtual int OnKey(
+  void InitTLS_Post() override;
+  void OnIdleTimeout() override;
+  void OnRetransmitTimeout() override;
+  int OnKey(
       int name,
       const uint8_t* secret,
       size_t secretlen) override;
-  virtual int Receive(
+  int Receive(
       ngtcp2_pkt_hd* hd,
       ssize_t nread,
       const uint8_t* data,
       const struct sockaddr* addr,
       unsigned int flags) override;
-  virtual void Remove() override;
-  virtual int SendConnectionClose(
+  void Remove() override;
+  int SendConnectionClose(
       int error) override;
-  virtual int SendPendingData(
+  int SendPendingData(
       bool retransmit = false) override;
-  virtual int TLSHandshake_Complete() override;
-  virtual int TLSHandshake_Initial() override;
-  virtual int TLSRead() override;
+  int TLSHandshake_Complete() override;
+  int TLSHandshake_Initial() override;
+  int TLSRead() override;
 
   int StartClosingPeriod(int error);
   void StartDrainingPeriod();
 
-  inline ngtcp2_crypto_level GetServerCryptoLevel() override;
-  inline ngtcp2_crypto_level GetClientCryptoLevel() override;
-  inline void SetServerCryptoLevel(ngtcp2_crypto_level level) override;
-  inline void SetClientCryptoLevel(ngtcp2_crypto_level level) override;
-  inline void SetLocalCryptoLevel(ngtcp2_crypto_level level) override;
+  ngtcp2_crypto_level GetServerCryptoLevel() override;
+  ngtcp2_crypto_level GetClientCryptoLevel() override;
+  void SetServerCryptoLevel(ngtcp2_crypto_level level) override;
+  void SetClientCryptoLevel(ngtcp2_crypto_level level) override;
+  void SetLocalCryptoLevel(ngtcp2_crypto_level level) override;
 
   ngtcp2_cid pscid_;
   ngtcp2_cid rcid_;
@@ -663,7 +663,7 @@ class QuicServerSession : public QuicSession {
     OnStreamReset,
     OnExtendMaxStreamsBidi,
     OnExtendMaxStreamsUni,
-    //  nullptr  // extend_max_stream_data
+    nullptr  // extend_max_stream_data
   };
 
   friend class QuicSession;
@@ -709,40 +709,40 @@ class QuicClientSession : public QuicSession {
   SET_SELF_SIZE(QuicClientSession)
 
  private:
-  virtual int DoHandshake(
+  int DoHandshake(
       const ngtcp2_path* path,
       const uint8_t* data,
       size_t datalen) override;
-  virtual int ExtendMaxStreamsUni(
+  int ExtendMaxStreamsUni(
       uint64_t max_streams) override;
-  virtual int ExtendMaxStreamsBidi(
+  int ExtendMaxStreamsBidi(
       uint64_t max_streams) override;
-  virtual int HandleError(
+  int HandleError(
       int code) override;
-  virtual void InitTLS_Post() override;
-  virtual void OnIdleTimeout() override;
-  virtual int OnKey(
+  void InitTLS_Post() override;
+  void OnIdleTimeout() override;
+  int OnKey(
       int name,
       const uint8_t* secret,
       size_t secretlen) override;
-  virtual void OnRetransmitTimeout() override;
-  virtual int Receive(
+  void OnRetransmitTimeout() override;
+  int Receive(
       ngtcp2_pkt_hd* hd,
       ssize_t nread,
       const uint8_t* data,
       const struct sockaddr* addr,
       unsigned int flags) override;
-  virtual int ReceiveRetry() override;
-  virtual void Remove() override;
-  virtual int SendConnectionClose(
+  int ReceiveRetry() override;
+  void Remove() override;
+  int SendConnectionClose(
       int error) override;
-  virtual int SendPendingData(
+  int SendPendingData(
       bool retransmit = false) override;
-  virtual void StoreRemoteTransportParams(
+  void StoreRemoteTransportParams(
       ngtcp2_transport_params* params) override;
-  virtual int TLSHandshake_Complete() override;
-  virtual int TLSHandshake_Initial() override;
-  virtual int TLSRead() override;
+  int TLSHandshake_Complete() override;
+  int TLSHandshake_Initial() override;
+  int TLSRead() override;
 
   int Init(
       const struct sockaddr* addr,
@@ -756,11 +756,11 @@ class QuicClientSession : public QuicSession {
   const char* hostname_;
   uint32_t port_;
 
-  inline ngtcp2_crypto_level GetServerCryptoLevel() override;
-  inline ngtcp2_crypto_level GetClientCryptoLevel() override;
-  inline void SetServerCryptoLevel(ngtcp2_crypto_level level) override;
-  inline void SetClientCryptoLevel(ngtcp2_crypto_level level) override;
-  inline void SetLocalCryptoLevel(ngtcp2_crypto_level level) override;
+  ngtcp2_crypto_level GetServerCryptoLevel() override;
+  ngtcp2_crypto_level GetClientCryptoLevel() override;
+  void SetServerCryptoLevel(ngtcp2_crypto_level level) override;
+  void SetClientCryptoLevel(ngtcp2_crypto_level level) override;
+  void SetLocalCryptoLevel(ngtcp2_crypto_level level) override;
 
   MaybeStackBuffer<char> transportParams_;
 
@@ -790,24 +790,24 @@ class QuicClientSession : public QuicSession {
     OnRemoveConnectionID,
     OnUpdateKey,
     OnPathValidation,
-    OnSelectPreferredAddress,  // select_preferred_addr;
-    nullptr,  // stream_reset;
-    nullptr,  // extend_max_remote_streams_bidi;
-    nullptr   // extend_max_remote_streams_uni;
+    OnSelectPreferredAddress,  // select_preferred_addr
+    nullptr,  // stream_reset
+    nullptr,  // extend_max_remote_streams_bidi
+    nullptr,  // extend_max_remote_streams_uni
+    nullptr  // extend_max_stream_data
   };
 
   friend class QuicSession;
 };
 
-namespace {
-int BIO_Write(
+inline int BIO_Write(
     BIO* b,
     const char* buf,
     int len) {
   return -1;
 }
 
-int BIO_Read(
+inline int BIO_Read(
     BIO* b,
     char* buf,
     int len) {
@@ -821,39 +821,39 @@ int BIO_Read(
   return len;
 }
 
-int BIO_Puts(
-    BIO*b,
+inline int BIO_Puts(
+    BIO* b,
     const char* str) {
   return BIO_Write(b, str, strlen(str));
 }
 
-int BIO_Gets(
+inline int BIO_Gets(
     BIO* b,
     char* buf,
     int len) {
   return -1;
 }
 
-long BIO_Ctrl(
+inline long BIO_Ctrl(  // NOLINT(runtime/int)
     BIO* b,
     int cmd,
-    long num,
-    void *ptr) {
+    long num,  // NOLINT(runtime/int)
+    void* ptr) {
   return cmd == BIO_CTRL_FLUSH ? 1 : 0;
 }
 
-int BIO_Create(
+inline int BIO_Create(
     BIO* b) {
   BIO_set_init(b, 1);
   return 1;
 }
 
-int BIO_Destroy(
+inline int BIO_Destroy(
     BIO* b) {
   return b == nullptr ? 0 : 1;
 }
 
-BIO_METHOD* CreateBIOMethod() {
+inline BIO_METHOD* CreateBIOMethod() {
   static BIO_METHOD* method = nullptr;
 
   if (method == nullptr) {
@@ -926,8 +926,6 @@ inline int Negotiated_AEAD(CryptoContext* ctx, SSL* ssl) {
       return -1;
   }
 }
-
-}  // namespace
 
 }  // namespace quic
 }  // namespace node

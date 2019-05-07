@@ -342,7 +342,7 @@ TEST(QuicBuffer, DrainInto) {
 
   {
     std::vector<uv_buf_t> vec;
-    size_t len = buffer.DrainInto(&vec, QuicBuffer::DRAIN_FROM_ROOT);
+    buffer.DrainInto(&vec, QuicBuffer::DRAIN_FROM_ROOT);
     CHECK_EQ(3, vec.size());
   }
 
@@ -350,7 +350,7 @@ TEST(QuicBuffer, DrainInto) {
 
   {
     std::vector<uv_buf_t> vec;
-    size_t len = buffer.DrainInto(&vec, QuicBuffer::DRAIN_FROM_ROOT);
+    buffer.DrainInto(&vec, QuicBuffer::DRAIN_FROM_ROOT);
     CHECK_EQ(1, vec.size());
   }
 

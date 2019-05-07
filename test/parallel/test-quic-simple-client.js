@@ -10,6 +10,7 @@ const Countdown = require('../common/countdown');
 const createSocket = require('quic');
 
 const socket = createSocket({ type: 'udp4', port: 1235 });
+const kALPN = 'h3-20';
 
 const countdown = new Countdown(2, () => {
   socket.destroy();
@@ -33,10 +34,10 @@ client.on('sessionTicket', (id, ticket, params) => {
 });
 
 client.on('secure', (servername, alpn) => {
-  assert.strictEqual('test', servername);
-  assert.strictEqual('h3-19', alpn);
-  assert.strictEqual('test', client.servername);
-  assert.strictEqual('h3-19', client.alpnProtocol);
+  assert.strictEqual(servername, 'test');
+  assert.strictEqual(alpn, kALPN);
+  assert.strictEqual(client.servername, 'test');
+  assert.strictEqual(client.alpnProtocol, kALPN);
   console.log(client.ephemeralKeyInfo);
   console.log(client.getPeerCertificate());
   console.log('secure!');

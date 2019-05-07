@@ -594,8 +594,7 @@ int QuicSocket::SendWrapStack::Send() {
       &socket_->handle_,
       &buf, 1,
       *address_,
-      OnSend
-  );
+      OnSend);
 }
 
 // The QuicSocket::SendWrap will maintain a std::weak_ref

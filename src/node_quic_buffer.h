@@ -1,5 +1,5 @@
-#ifndef SRC_NODE_QUIC_BUFFER_H
-#define SRC_NODE_QUIC_BUFFER_H
+#ifndef SRC_NODE_QUIC_BUFFER_H_
+#define SRC_NODE_QUIC_BUFFER_H_
 
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
@@ -427,4 +427,4 @@ class QuicBuffer : public MemoryRetainer {
 
 #endif  // NODE_WANT_INTERNALS
 
-#endif  // SRC_NODE_QUIC_BUFFER_H
+#endif  // SRC_NODE_QUIC_BUFFER_H_

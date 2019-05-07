@@ -258,6 +258,7 @@ class QuicSocket : public HandleWrap {
     }
 
     QuicSocket* Socket() const { return socket_; }
+
    private:
     uv_udp_send_t req_;
     QuicSocket* socket_;

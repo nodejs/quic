@@ -21,15 +21,18 @@ namespace quic {
 /* NOLINTNEXTLINE(build/namespaces) */
 namespace {
 
-constexpr unsigned long long operator"" _k(unsigned long long k) {
+constexpr unsigned long long operator"" _k(  // NOLINT(runtime/int)
+    unsigned long long k) {                  // NOLINT(runtime/int)
   return k * 1024;
 }
 
-constexpr unsigned long long operator"" _m(unsigned long long m) {
+constexpr unsigned long long operator"" _m(  // NOLINT(runtime/int)
+    unsigned long long m) {                  // NOLINT(runtime/int)
   return m * 1024 * 1024;
 }
 
-constexpr unsigned long long operator"" _g(unsigned long long g) {
+constexpr unsigned long long operator"" _g(  // NOLINT(runtime/int)
+    unsigned long long g) {                  // NOLINT(runtime/int)
   return g * 1024 * 1024 * 1024;
 }
 
