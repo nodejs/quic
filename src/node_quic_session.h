@@ -16,14 +16,13 @@
 #include <ngtcp2/ngtcp2.h>
 #include <openssl/ssl.h>
 
-#include <deque>
 #include <map>
-#include <string>
 #include <vector>
 
 namespace node {
 namespace quic {
 
+class QuicClientSession;
 class QuicServerSession;
 class QuicSocket;
 class QuicStream;
@@ -39,7 +38,8 @@ constexpr int ERR_INVALID_TLS_SESSION_TICKET = -2;
   V(MAX_STREAMS_BIDI, max_streams_bidi, 100)                                  \
   V(MAX_STREAMS_UNI, max_streams_uni, 3)                                      \
   V(IDLE_TIMEOUT, idle_timeout, 10 * 1000)                                    \
-  V(MAX_PACKET_SIZE, max_packet_size, NGTCP2_MAX_PKT_SIZE)
+  V(MAX_PACKET_SIZE, max_packet_size, NGTCP2_MAX_PKT_SIZE)                    \
+  V(MAX_ACK_DELAY, max_ack_delay, NGTCP2_DEFAULT_MAX_ACK_DELAY)
 
 #define V(idx, name, def)                                                     \
   constexpr uint64_t IDX_QUIC_SESSION_## idx ##_DEFAULT = def;
@@ -72,7 +72,8 @@ enum QuicSessionState {
   IDX_QUIC_SESSION_STATE_COUNT
 };
 
-class QuicSession : public AsyncWrap {
+class QuicSession : public AsyncWrap,
+                    public std::enable_shared_from_this<QuicSession> {
  public:
   static const int kInitialClientBufferLength = 4096;
 
@@ -83,14 +84,15 @@ class QuicSession : public AsyncWrap {
       AsyncWrap::ProviderType provider);
   ~QuicSession() override;
 
-  void AddStream(
-      QuicStream* stream);
+  void AddStream(QuicStream* stream);
   void Close();
+  void Closing();
   void Destroy();
   void GetLocalTransportParams(
       ngtcp2_transport_params* params);
   uint32_t GetNegotiatedVersion();
   SocketAddress* GetRemoteAddress();
+  bool IsClosing();
   bool IsDestroyed();
   bool IsHandshakeCompleted();
   int OpenBidirectionalStream(
@@ -140,25 +142,26 @@ class QuicSession : public AsyncWrap {
   virtual bool IsServer() const { return false; }
 
   // These must be implemented by QuicSession types
+  virtual void AddToSocket(QuicSocket* socket) = 0;
   virtual int DoHandshake(
       const ngtcp2_path* path,
       const uint8_t* data,
       size_t datalen) = 0;
   virtual int HandleError(
       int code) = 0;
+  virtual bool MaybeTimeout() = 0;
   virtual void OnIdleTimeout() = 0;
   virtual int OnKey(
       int name,
       const uint8_t* secret,
       size_t secretlen) = 0;
-  virtual void OnRetransmitTimeout() = 0;
   virtual int Receive(
       ngtcp2_pkt_hd* hd,
       ssize_t nread,
       const uint8_t* data,
       const struct sockaddr* addr,
       unsigned int flags) = 0;
-  virtual void Remove() = 0;
+  virtual void RemoveFromSocket() = 0;
   virtual int SendConnectionClose(
       int error) = 0;
   virtual int SendPendingData(
@@ -208,7 +211,7 @@ class QuicSession : public AsyncWrap {
       int64_t id);
   void HandshakeCompleted();
   inline bool IsInClosingPeriod();
-  inline void ScheduleRetransmit();
+  inline void ScheduleMonitor();
   inline int SendPacket(bool retransmit = false);
   inline void SetHandshakeCompleted();
   void StartIdleTimer(
@@ -397,8 +400,6 @@ class QuicSession : public AsyncWrap {
       void* user_data);
   static void OnIdleTimeout(
       uv_timer_t* timer);
-  static void OnRetransmitTimeout(
-      uv_timer_t* timer);
   static int OnExtendMaxStreamsUni(
       ngtcp2_conn* conn,
       uint64_t max_streams,
@@ -502,9 +503,12 @@ class QuicSession : public AsyncWrap {
   virtual void SetServerCryptoLevel(ngtcp2_crypto_level level) = 0;
   virtual void SetClientCryptoLevel(ngtcp2_crypto_level level) = 0;
   virtual void SetLocalCryptoLevel(ngtcp2_crypto_level level) = 0;
+  virtual int Start() { return 0; }
 
   ngtcp2_crypto_level rx_crypto_level_;
   ngtcp2_crypto_level tx_crypto_level_;
+  bool closing_;
+  bool destroyed_;
   bool initial_;
   crypto::SSLPointer ssl_;
   ngtcp2_conn* connection_;
@@ -512,7 +516,6 @@ class QuicSession : public AsyncWrap {
   uint8_t tls_alert_;
   size_t max_pktlen_;
   uv_timer_t* idle_timer_;
-  uv_timer_t* retransmit_timer_;
   QuicSocket* socket_;
   size_t nkey_update_;
   CryptoContext hs_crypto_ctx_;
@@ -550,6 +553,9 @@ class QuicSession : public AsyncWrap {
 
   AliasedFloat64Array state_;
 
+  bool monitor_scheduled_;
+  bool allow_retransmit_;
+
   friend class QuicServerSession;
   friend class QuicClientSession;
 };
@@ -561,11 +567,17 @@ class QuicServerSession : public QuicSession {
       v8::Local<v8::Object> target,
       v8::Local<v8::Context> context);
 
-  static QuicServerSession* New(
+  static std::shared_ptr<QuicSession> New(
       QuicSocket* socket,
-      const ngtcp2_cid* rcid);
+      const ngtcp2_cid* rcid,
+      const struct sockaddr* addr,
+      const ngtcp2_cid* dcid,
+      const ngtcp2_cid* ocid,
+      uint32_t version);
 
-  int Init(
+  void AddToSocket(QuicSocket* socket) override;
+
+  void Init(
       const struct sockaddr* addr,
       const ngtcp2_cid* dcid,
       const ngtcp2_cid* ocid,
@@ -574,6 +586,7 @@ class QuicServerSession : public QuicSession {
   bool IsDraining();
   bool IsServer() const override { return true; }
 
+  bool MaybeTimeout() override;
 
   const ngtcp2_cid* rcid() const;
   ngtcp2_cid* pscid();
@@ -586,7 +599,11 @@ class QuicServerSession : public QuicSession {
   QuicServerSession(
       QuicSocket* socket,
       v8::Local<v8::Object> wrap,
-      const ngtcp2_cid* rcid);
+      const ngtcp2_cid* rcid,
+      const struct sockaddr* addr,
+      const ngtcp2_cid* dcid,
+      const ngtcp2_cid* ocid,
+      uint32_t version);
 
   void DisassociateCID(
       const ngtcp2_cid* cid) override;
@@ -598,7 +615,6 @@ class QuicServerSession : public QuicSession {
       int code) override;
   void InitTLS_Post() override;
   void OnIdleTimeout() override;
-  void OnRetransmitTimeout() override;
   int OnKey(
       int name,
       const uint8_t* secret,
@@ -609,7 +625,7 @@ class QuicServerSession : public QuicSession {
       const uint8_t* data,
       const struct sockaddr* addr,
       unsigned int flags) override;
-  void Remove() override;
+  void RemoveFromSocket() override;
   int SendConnectionClose(
       int error) override;
   int SendPendingData(
@@ -676,13 +692,15 @@ class QuicClientSession : public QuicSession {
       v8::Local<v8::Object> target,
       v8::Local<v8::Context> context);
 
-  static QuicClientSession* New(
+  static std::shared_ptr<QuicSession> New(
       QuicSocket* socket,
       const struct sockaddr* addr,
       uint32_t version,
       crypto::SecureContext* context,
       const char* hostname,
-      uint32_t port);
+      uint32_t port,
+      v8::Local<v8::Value> early_transport_params,
+      v8::Local<v8::Value> session_ticket);
 
   QuicClientSession(
       QuicSocket* socket,
@@ -691,7 +709,13 @@ class QuicClientSession : public QuicSession {
       uint32_t version,
       crypto::SecureContext* context,
       const char* hostname,
-      uint32_t port);
+      uint32_t port,
+      v8::Local<v8::Value> early_transport_params,
+      v8::Local<v8::Value> session_ticket);
+
+  void AddToSocket(QuicSocket* socket) override;
+
+  bool MaybeTimeout() override;
 
   int SetSocket(
       QuicSocket* socket,
@@ -725,7 +749,6 @@ class QuicClientSession : public QuicSession {
       int name,
       const uint8_t* secret,
       size_t secretlen) override;
-  void OnRetransmitTimeout() override;
   int Receive(
       ngtcp2_pkt_hd* hd,
       ssize_t nread,
@@ -733,11 +756,12 @@ class QuicClientSession : public QuicSession {
       const struct sockaddr* addr,
       unsigned int flags) override;
   int ReceiveRetry() override;
-  void Remove() override;
+  void RemoveFromSocket() override;
   int SendConnectionClose(
       int error) override;
   int SendPendingData(
       bool retransmit = false) override;
+  int Start() override;
   void StoreRemoteTransportParams(
       ngtcp2_transport_params* params) override;
   int TLSHandshake_Complete() override;
@@ -746,7 +770,9 @@ class QuicClientSession : public QuicSession {
 
   int Init(
       const struct sockaddr* addr,
-      uint32_t version);
+      uint32_t version,
+      v8::Local<v8::Value> early_transport_params,
+      v8::Local<v8::Value> session_ticket);
   int ExtendMaxStreams(
       bool bidi,
       uint64_t max_streams);
@@ -799,133 +825,6 @@ class QuicClientSession : public QuicSession {
 
   friend class QuicSession;
 };
-
-inline int BIO_Write(
-    BIO* b,
-    const char* buf,
-    int len) {
-  return -1;
-}
-
-inline int BIO_Read(
-    BIO* b,
-    char* buf,
-    int len) {
-  BIO_clear_retry_flags(b);
-  QuicSession* session = static_cast<QuicSession*>(BIO_get_data(b));
-  len = session->ReadPeerHandshake(reinterpret_cast<uint8_t*>(buf), len);
-  if (len == 0) {
-    BIO_set_retry_read(b);
-    return -1;
-  }
-  return len;
-}
-
-inline int BIO_Puts(
-    BIO* b,
-    const char* str) {
-  return BIO_Write(b, str, strlen(str));
-}
-
-inline int BIO_Gets(
-    BIO* b,
-    char* buf,
-    int len) {
-  return -1;
-}
-
-inline long BIO_Ctrl(  // NOLINT(runtime/int)
-    BIO* b,
-    int cmd,
-    long num,  // NOLINT(runtime/int)
-    void* ptr) {
-  return cmd == BIO_CTRL_FLUSH ? 1 : 0;
-}
-
-inline int BIO_Create(
-    BIO* b) {
-  BIO_set_init(b, 1);
-  return 1;
-}
-
-inline int BIO_Destroy(
-    BIO* b) {
-  return b == nullptr ? 0 : 1;
-}
-
-inline BIO_METHOD* CreateBIOMethod() {
-  static BIO_METHOD* method = nullptr;
-
-  if (method == nullptr) {
-    method = BIO_meth_new(BIO_TYPE_FD, "bio");
-    BIO_meth_set_write(method, BIO_Write);
-    BIO_meth_set_read(method, BIO_Read);
-    BIO_meth_set_puts(method, BIO_Puts);
-    BIO_meth_set_gets(method, BIO_Gets);
-    BIO_meth_set_ctrl(method, BIO_Ctrl);
-    BIO_meth_set_create(method, BIO_Create);
-    BIO_meth_set_destroy(method, BIO_Destroy);
-  }
-  return method;
-}
-
-inline void prf_sha256(CryptoContext* ctx) { ctx->prf = EVP_sha256(); }
-
-inline void aead_aes_128_gcm(CryptoContext* ctx) {
-  ctx->aead = EVP_aes_128_gcm();
-  ctx->hp = EVP_aes_128_ctr();
-}
-
-inline size_t aead_key_length(const CryptoContext* ctx) {
-  return EVP_CIPHER_key_length(ctx->aead);
-}
-
-inline size_t aead_nonce_length(const CryptoContext* ctx) {
-  return EVP_CIPHER_iv_length(ctx->aead);
-}
-
-inline size_t aead_tag_length(const CryptoContext* ctx) {
-  if (ctx->aead == EVP_aes_128_gcm() || ctx->aead == EVP_aes_256_gcm()) {
-    return EVP_GCM_TLS_TAG_LEN;
-  }
-  if (ctx->aead == EVP_chacha20_poly1305()) {
-    return EVP_CHACHAPOLY_TLS_TAG_LEN;
-  }
-  UNREACHABLE();
-}
-
-inline int Negotiated_PRF(CryptoContext* ctx, SSL* ssl) {
-  switch (SSL_CIPHER_get_id(SSL_get_current_cipher(ssl))) {
-    case 0x03001301u:  // TLS_AES_128_GCM_SHA256
-    case 0x03001303u:  // TLS_CHACHA20_POLY1305_SHA256
-      ctx->prf = EVP_sha256();
-      return 0;
-    case 0x03001302u:  // TLS_AES_256_GCM_SHA384
-      ctx->prf = EVP_sha384();
-      return 0;
-    default:
-      return -1;
-  }
-}
-
-inline int Negotiated_AEAD(CryptoContext* ctx, SSL* ssl) {
-  switch (SSL_CIPHER_get_id(SSL_get_current_cipher(ssl))) {
-    case 0x03001301u:  // TLS_AES_128_GCM_SHA256
-      ctx->aead = EVP_aes_128_gcm();
-      ctx->hp = EVP_aes_128_ctr();
-      return 0;
-    case 0x03001302u:  // TLS_AES_256_GCM_SHA384
-      ctx->aead = EVP_aes_256_gcm();
-      ctx->hp = EVP_aes_256_ctr();
-      return 0;
-    case 0x03001303u:  // TLS_CHACHA20_POLY1305_SHA256
-      ctx->aead = EVP_chacha20_poly1305();
-      ctx->hp = EVP_chacha20();
-      return 0;
-    default:
-      return -1;
-  }
-}
 
 }  // namespace quic
 }  // namespace node

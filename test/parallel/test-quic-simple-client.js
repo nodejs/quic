@@ -7,13 +7,13 @@ if (!common.hasCrypto)
 const assert = require('assert');
 const fs = require('fs');
 const Countdown = require('../common/countdown');
-const createSocket = require('quic');
+const { createSocket } = require('quic');
 
 const socket = createSocket({ type: 'udp4', port: 1235 });
 const kALPN = 'h3-20';
 
 const countdown = new Countdown(2, () => {
-  socket.destroy();
+  socket.close();
 });
 
 const client = socket.connect({

@@ -34,6 +34,7 @@
 #include "node_binding.h"
 #include "node_http2_state.h"
 #include "node_main_instance.h"
+#include "node_quic_monitor.h"
 #include "node_quic_state.h"
 #include "node_options.h"
 #include "req_wrap.h"
@@ -318,7 +319,7 @@ constexpr size_t kFsStatsBufferLength =
   V(promise_string, "promise")                                                 \
   V(pubkey_string, "pubkey")                                                   \
   V(query_string, "query")                                                     \
-  V(quic_alpn_string, "h3-19")                                                 \
+  V(quic_alpn_string, "h3-20")                                                 \
   V(raw_string, "raw")                                                         \
   V(read_host_object_string, "_readHostObject")                                \
   V(readable_string, "readable")                                               \
@@ -1057,6 +1058,8 @@ class Environment : public MemoryRetainer {
   inline QuicState* quic_state() const;
   inline void set_quic_state(std::unique_ptr<QuicState> state);
 
+  inline quic::QuicMonitor* quic_monitor();
+
   inline bool debug_enabled(DebugCategory category) const;
   inline void set_debug_enabled(DebugCategory category, bool enabled);
   void set_debug_categories(const std::string& cats, bool enabled);
@@ -1378,6 +1381,7 @@ class Environment : public MemoryRetainer {
   bool http_parser_buffer_in_use_ = false;
   std::unique_ptr<http2::Http2State> http2_state_;
   std::unique_ptr<QuicState> quic_state_;
+  std::unique_ptr<quic::QuicMonitor> quic_monitor_;
 
   bool debug_enabled_[static_cast<int>(DebugCategory::CATEGORY_COUNT)] = {0};
 

@@ -261,6 +261,14 @@ struct CryptoToken {
   CryptoToken() : keylen(key.size()), ivlen(iv.size()) {}
 };
 
+#define RETURN_IF_FAIL(test, success, ret)                                     \
+  do {                                                                         \
+    if ((test) != (success)) return (ret);                                     \
+  } while (0)
+
+#define RETURN_IF_FAIL_OPENSSL(test) RETURN_IF_FAIL(test, 1, -1)
+
+
 }  // namespace quic
 }  // namespace node
 

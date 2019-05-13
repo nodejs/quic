@@ -128,7 +128,6 @@ int QuicStream::DoWrite(
               DecrementAvailableOutboundLength(len);
               WriteWrap* wrap = static_cast<WriteWrap*>(user_data);
               CHECK_NOT_NULL(wrap);
-              DecrementAvailableOutboundLength(len);
               wrap->Done(status);
             }, req_wrap, req_wrap->object());
 

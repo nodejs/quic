@@ -97,18 +97,14 @@ void QuicSocket::MemoryInfo(MemoryTracker* tracker) const {
 
 void QuicSocket::AddSession(
     QuicCID* cid,
-    QuicSession* session) {
-  sessions_.emplace(cid->ToStr(), session);
-  Debug(this, "QuicSession %s added to the QuicSocket.", cid->ToHex().c_str());
+    std::shared_ptr<QuicSession> session) {
+  sessions_[cid->ToStr()] = session;
 }
 
 void QuicSocket::AssociateCID(
     QuicCID* cid,
-    QuicSession* session) {
-  QuicCID scid(session->scid());
-  Debug(this, "Associating scid %s with cid %s.",
-        scid.ToHex().c_str(), cid->ToHex().c_str());
-  dcid_to_scid_.emplace(cid->ToStr(), scid.ToStr());
+    QuicCID* scid) {
+  dcid_to_scid_.emplace(cid->ToStr(), scid->ToStr());
 }
 
 int QuicSocket::Bind(
@@ -241,7 +237,7 @@ void QuicSocket::Receive(
   auto dcid_str = dcid.ToStr();
   Debug(this, "Received a QUIC packet for dcid %s", dcid_hex.c_str());
 
-  QuicSession* session = nullptr;
+  std::shared_ptr<QuicSession> session;
 
   // Identify the appropriate handler
   auto session_it = sessions_.find(dcid_str);
@@ -255,7 +251,7 @@ void QuicSocket::Receive(
       }
       Debug(this, "Dispatching packet to server.");
       session = ServerReceive(&dcid, &hd, nread, data, addr, flags);
-      if (session == nullptr) {
+      if (!session) {
         Debug(this, "Could not initialize a new QuicServerSession.");
         // TODO(@jasnell): What should we do here?
         return;
@@ -274,15 +270,16 @@ void QuicSocket::Receive(
 
   CHECK_NOT_NULL(session);
   // An appropriate handler was found! Dispatch the data
+  if (session->IsDestroyed()) {
+    // Ignoring packet for destroyed session
+    return;
+  }
   Debug(this, "Dispatching packet to session for dcid %s", dcid_hex.c_str());
   err = session->Receive(&hd, nread, data, addr, flags);
   if (err != 0) {
     Debug(this,
           "The QuicSession failed to process the packet successfully. Error %d",
           err);
-    // TODO(@jasnell): Is removing the right thing to do here?
-    // Probably not
-    session->Remove();
     return;
   }
 
@@ -410,7 +407,7 @@ int QuicSocket::SendRetry(
   return req->Send();
 }
 
-QuicSession* QuicSocket::ServerReceive(
+std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
     QuicCID* dcid,
     ngtcp2_pkt_hd* hd,
     ssize_t nread,
@@ -418,12 +415,13 @@ QuicSession* QuicSocket::ServerReceive(
     const struct sockaddr* addr,
     unsigned int flags) {
 
+  std::shared_ptr<QuicSession> session;
   HandleScope handle_scope(env()->isolate());
   Context::Scope context_scope(env()->context());
 
   if (static_cast<size_t>(nread) < MIN_INITIAL_QUIC_PKT_SIZE) {
     Debug(this, "Ignoring initial packet that is too short");
-    return nullptr;
+    return session;
   }
 
   int err;
@@ -431,12 +429,12 @@ QuicSession* QuicSocket::ServerReceive(
   if (err == -1) {
     // Ignore to prevent malicious senders from accomplishing anything bad.
     Debug(this, "Ignoring unexpected QUIC packet.");
-    return nullptr;
+    return session;
   }
   if (err == 1) {
     Debug(this, "Unexpected QUIC version.");
     SendVersionNegotiation(hd, addr);
-    return nullptr;
+    return session;
   }
 
   ngtcp2_cid ocid;
@@ -451,44 +449,21 @@ QuicSession* QuicSocket::ServerReceive(
             &token_secret_) != 0) {
       Debug(this, "Invalid token. Sending retry");
       SendRetry(hd, addr);
-      return nullptr;
+      return session;
     }
     pocid = &ocid;
   }
 
   Debug(this, "Creating and initializing a new QuicServerSession.");
-  QuicServerSession* session = QuicServerSession::New(this, &hd->dcid);
-  // TODO(@jasnell): Should we assert at this point? Need to determine if there
-  // is a way for an attacker to trigger this. If there is, we likely just want
-  // to gracefully ignore this case. That said, something bad has happened if
-  // we cannot create this so crashing is likely the best option. We'll stick
-  // with that for now.
-  CHECK_NOT_NULL(session);
-  err = session->Init(addr, &hd->scid, pocid, hd->version);
-  if (err < 0) {
-    // TODO(@jasnell): Similar to above, it's not clear what we should do
-    // at this point. The session was created but it can't be used for
-    // some reason. This is most likely because of some bad QUIC packet
-    // so the safest thing to do here is to just ignore and move on as if
-    // nothing happened.
-    Debug(this, "The QuicSession could not be initialized. Error %d", err);
-    delete session;
-    return nullptr;
-  }
+  session =
+      QuicServerSession::New(
+          this,
+          &hd->dcid,
+          addr,
+          &hd->scid,
+          pocid,
+          hd->version);
 
-  QuicCID scid(session->scid());
-  Debug(this, "The new QuicServerSession was created successfully. scid %s",
-        scid.ToHex().c_str());
-  AddSession(&scid, session);
-  AssociateCID(dcid, session);
-
-  if (session->pscid()->datalen) {
-    QuicCID pscid(session->pscid());
-    AssociateCID(&pscid, session);
-  }
-
-  // Notify the JavaScript side that a new server session has been created
-  Debug(this, "Notifying JavaScript about QuicServerSession creation.");
   Local<Value> arg = session->object();
   MakeCallback(env()->quic_on_session_ready_function(), 1, &arg);
 
@@ -545,14 +520,8 @@ int QuicSocket::SendPacket(
 }
 
 void QuicSocket::SetServerSessionSettings(
-    QuicSession* session,
+    ngtcp2_cid* pscid,
     ngtcp2_settings* settings) {
-  ngtcp2_cid* pscid = nullptr;
-  if (session->IsServer()) {
-    QuicServerSession* server_session =
-        static_cast<QuicServerSession*>(session);
-    pscid = server_session->pscid();
-  }
   server_session_config_.ToSettings(settings, pscid, true);
 }
 
@@ -720,7 +689,7 @@ void QuicSocketBind(const FunctionCallbackInfo<Value>& args) {
 void QuicSocketDestroy(const FunctionCallbackInfo<Value>& args) {
   QuicSocket* socket;
   ASSIGN_OR_RETURN_UNWRAP(&socket, args.Holder());
-  delete socket;
+  socket->ReceiveStop();
 }
 
 void QuicSocketDropMembership(const FunctionCallbackInfo<Value>& args) {

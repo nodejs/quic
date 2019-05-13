@@ -6,7 +6,7 @@ if (!common.hasCrypto)
 
 const fs = require('fs');
 const Countdown = require('../common/countdown');
-const createSocket = require('quic');
+const { createSocket } = require('quic');
 
 const socket = createSocket({ type: 'udp4', port: 1235 });
 const socket2 = createSocket({ type: 'udp4', port: 1236 });

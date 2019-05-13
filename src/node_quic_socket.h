@@ -45,10 +45,10 @@ class QuicSocket : public HandleWrap {
       const char* iface);
   void AddSession(
       QuicCID* cid,
-      QuicSession* session);
+      std::shared_ptr<QuicSession> session);
   void AssociateCID(
       QuicCID* cid,
-      QuicSession* session);
+      QuicCID* scid);
   int Bind(
       const char* address,
       uint32_t port,
@@ -90,7 +90,7 @@ class QuicSocket : public HandleWrap {
       std::shared_ptr<QuicBuffer> buf,
       QuicBuffer::drain_from drain_from = QuicBuffer::DRAIN_FROM_HEAD);
   void SetServerSessionSettings(
-      QuicSession* session,
+      ngtcp2_cid* pscid,
       ngtcp2_settings* settings);
 
   crypto::SecureContext* GetServerSecureContext() {
@@ -126,7 +126,7 @@ class QuicSocket : public HandleWrap {
       const ngtcp2_pkt_hd* chd,
       const sockaddr* addr);
 
-  QuicSession* ServerReceive(
+  std::shared_ptr<QuicSession> ServerReceive(
       QuicCID* dcid,
       ngtcp2_pkt_hd* hd,
       ssize_t nread,
@@ -151,7 +151,7 @@ class QuicSocket : public HandleWrap {
   bool validate_addr_;
   QuicSessionConfig server_session_config_;
   crypto::SecureContext* server_secure_context_;
-  std::unordered_map<std::string, QuicSession*> sessions_;
+  std::unordered_map<std::string, std::shared_ptr<QuicSession>> sessions_;
   std::unordered_map<std::string, std::string> dcid_to_scid_;
   CryptoContext token_crypto_ctx_;
   std::array<uint8_t, TOKEN_SECRETLEN> token_secret_;

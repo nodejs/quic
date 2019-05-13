@@ -10,7 +10,7 @@ const fixtures = require('../common/fixtures');
 const key = fixtures.readKey('agent8-key.pem', 'binary');
 const cert = fixtures.readKey('agent8-cert.pem', 'binary');
 
-const createSocket = require('quic');
+const { createSocket } = require('quic');
 
 const socket = createSocket({ type: 'udp4', port: 1234 });
 
@@ -37,6 +37,8 @@ socket.on('session', common.mustCall((session) => {
     stream.resume();
     stream.on('end', () => console.log('stream ended'));
   }));
+
+  session.on('close', () => console.log('session closed'));
 }));
 
 socket.on('ready', common.mustCall(() => {
