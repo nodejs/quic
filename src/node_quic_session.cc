@@ -130,6 +130,18 @@ void QuicSessionConfig::ToSettings(ngtcp2_settings* settings,
   }
 }
 
+void QuicSession::CheckAllocatedSize(size_t previous_size) {
+  //CHECK_GE(current_ngtcp2_memory_, previous_size);
+}
+
+void QuicSession::IncrementAllocatedSize(size_t size) {
+  //current_ngtcp2_memory_ += size;
+}
+
+void QuicSession::DecrementAllocatedSize(size_t size) {
+  //current_ngtcp2_memory_ -= size;
+}
+
 // Static ngtcp2 callbacks are registered when ngtcp2 when a new ngtcp2_conn is
 // created. These are static functions that, for the most part, simply defer to
 // a QuicSession instance that is passed through as user_data.
@@ -704,7 +716,9 @@ QuicSession::QuicSession(
     ncread_(0),
     state_(env()->isolate(), IDX_QUIC_SESSION_STATE_COUNT),
     monitor_scheduled_(false),
-    allow_retransmit_(false) {
+    allow_retransmit_(false),
+    current_ngtcp2_memory_(0),
+    allocator_(this) {
   ssl_.reset(SSL_new(ctx->ctx_.get()));
   CHECK(ssl_);
 
@@ -1983,7 +1997,7 @@ void QuicServerSession::Init(
           version,
           &callbacks_,
           &settings,
-          nullptr, /* TODO(@jasnell): Implement ngtcp2_mem */
+          *allocator_,
           static_cast<QuicSession*>(this)), 0);
   // TODO(@jasnell): Handle out of memory response from ngtcp2
 
@@ -2447,7 +2461,7 @@ int QuicClientSession::Init(
           version,
           &callbacks_,
           &settings,
-          nullptr, /* TODO(@jasnell): Implement ngtcp2_mem */
+          *allocator_,
           static_cast<QuicSession*>(this));
   if (err != 0) {
     Debug(this, "There was an error creating the session. Error %d", err);

@@ -1,3 +1,4 @@
+#include "base_object-inl.h"
 #include "env.h"
 #include "env-inl.h"
 #include "node_quic_monitor.h"

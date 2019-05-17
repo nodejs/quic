@@ -9,6 +9,7 @@
 #include "handle_wrap.h"
 #include "node.h"
 #include "node_crypto.h"
+#include "node_mem.h"
 #include "node_quic_util.h"
 #include "v8.h"
 #include "uv.h"
@@ -73,7 +74,8 @@ enum QuicSessionState {
 };
 
 class QuicSession : public AsyncWrap,
-                    public std::enable_shared_from_this<QuicSession> {
+                    public std::enable_shared_from_this<QuicSession>,
+                    public mem::Tracker {
  public:
   static const int kInitialClientBufferLength = 4096;
 
@@ -190,6 +192,10 @@ class QuicSession : public AsyncWrap,
   static void DebugLog(
       void* user_data,
       const char* fmt, ...);
+
+  void CheckAllocatedSize(size_t previous_size) override;
+  void IncrementAllocatedSize(size_t size) override;
+  void DecrementAllocatedSize(size_t size) override;
 
  private:
   void AckedCryptoOffset(
@@ -555,6 +561,11 @@ class QuicSession : public AsyncWrap,
 
   bool monitor_scheduled_;
   bool allow_retransmit_;
+
+  // The amount of memory allocated by ngtcp2 internals
+  uint64_t current_ngtcp2_memory_;
+
+  mem::Allocator<ngtcp2_mem> allocator_;
 
   friend class QuicServerSession;
   friend class QuicClientSession;
