@@ -173,6 +173,7 @@
       'lib/internal/querystring.js',
       'lib/internal/readline/utils.js',
       'lib/internal/quic/core.js',
+      'lib/internal/quic/util.js',
       'lib/internal/repl.js',
       'lib/internal/repl/await.js',
       'lib/internal/repl/history.js',

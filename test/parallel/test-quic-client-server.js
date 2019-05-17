@@ -95,7 +95,10 @@ server.on('ready', common.mustCall(() => {
     const stream = req.openStream();
     file.pipe(stream);
     stream.resume();
-    stream.on('close', common.mustCall(() => countdown.dec()));
+    stream.on('close', common.mustCall(() => {
+      debug('Bidirectional, Client-initiated stream %d closed', stream.id);
+      countdown.dec();
+    }));
     debug('Bidirectional, Client-initiated stream %d opened', stream.id);
   }));
 
@@ -107,7 +110,10 @@ server.on('ready', common.mustCall(() => {
     stream.on('end', common.mustCall(() => {
       assert.strictEqual(data, unidata.join(''));
     }));
-    stream.on('close', common.mustCall(() => countdown.dec()));
+    stream.on('close', common.mustCall(() => {
+      debug('Unidirectional, Server-initiated stream %d closed', stream.id);
+      countdown.dec();
+    }));
   }));
 
 }));
