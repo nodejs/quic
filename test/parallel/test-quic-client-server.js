@@ -68,7 +68,9 @@ server.on('ready', common.mustCall(() => {
     port: server.address.port,
     rejectUnauthorized: false,
     maxStreamsUni: 1000,
-    servername: kServerName
+    servername: kServerName,
+    minCidLen: 5,
+    maxCidLen: 10,
   });
 
   assert.strictEqual(req.servername, kServerName);

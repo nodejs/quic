@@ -59,12 +59,16 @@ class QuicSessionConfig {
       ngtcp2_settings* settings,
       ngtcp2_cid* pscid,
       bool stateless_reset_token = false);
+  size_t GetMaxCidLen() { return max_cid_len_; }
+  size_t GetMinCidLen() { return min_cid_len_; }
 
  private:
 #define V(idx, name, def) uint64_t name##_ = def;
   QUICSESSION_CONFIG(V)
 #undef V
   bool preferred_address_set_ = false;
+  size_t max_cid_len_ = NGTCP2_MAX_CIDLEN;
+  size_t min_cid_len_ = NGTCP2_MIN_CIDLEN;
   SocketAddress preferred_address_;
 };
 
@@ -564,6 +568,8 @@ class QuicSession : public AsyncWrap,
 
   // The amount of memory allocated by ngtcp2 internals
   uint64_t current_ngtcp2_memory_;
+  size_t max_cid_len_;
+  size_t min_cid_len_;
 
   mem::Allocator<ngtcp2_mem> allocator_;
 
@@ -711,7 +717,8 @@ class QuicClientSession : public QuicSession {
       const char* hostname,
       uint32_t port,
       v8::Local<v8::Value> early_transport_params,
-      v8::Local<v8::Value> session_ticket);
+      v8::Local<v8::Value> session_ticket,
+      v8::Local<v8::Value> dcid);
 
   QuicClientSession(
       QuicSocket* socket,
@@ -722,7 +729,8 @@ class QuicClientSession : public QuicSession {
       const char* hostname,
       uint32_t port,
       v8::Local<v8::Value> early_transport_params,
-      v8::Local<v8::Value> session_ticket);
+      v8::Local<v8::Value> session_ticket,
+      v8::Local<v8::Value> dcid);
 
   void AddToSocket(QuicSocket* socket) override;
 
@@ -783,7 +791,8 @@ class QuicClientSession : public QuicSession {
       const struct sockaddr* addr,
       uint32_t version,
       v8::Local<v8::Value> early_transport_params,
-      v8::Local<v8::Value> session_ticket);
+      v8::Local<v8::Value> session_ticket,
+      v8::Local<v8::Value> dcid);
   int ExtendMaxStreams(
       bool bidi,
       uint64_t max_streams);

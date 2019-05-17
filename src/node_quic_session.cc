@@ -52,6 +52,8 @@ void QuicSessionConfig::ResetToDefaults() {
 #define V(idx, name, def) name##_ = def;
   QUICSESSION_CONFIG(V)
 #undef V
+  max_cid_len_ = NGTCP2_MAX_CIDLEN;
+  min_cid_len_ = NGTCP2_MIN_CIDLEN;
 }
 
 // Sets the QuicSessionConfig using an AliasedBuffer for efficiency.
@@ -68,6 +70,16 @@ void QuicSessionConfig::Set(
     name##_ = static_cast<uint64_t>(buffer[IDX_QUIC_SESSION_##idx]);
   QUICSESSION_CONFIG(V)
 #undef V
+
+  if (flags & (1 << IDX_QUIC_SESSION_MAX_CID_LEN)) {
+    max_cid_len_ = static_cast<size_t>(buffer[IDX_QUIC_SESSION_MAX_CID_LEN]);
+    CHECK_LE(max_cid_len_, NGTCP2_MAX_CIDLEN);
+  }
+
+  if (flags & (1 << IDX_QUIC_SESSION_MIN_CID_LEN)) {
+    min_cid_len_ = static_cast<size_t>(buffer[IDX_QUIC_SESSION_MIN_CID_LEN]);
+    CHECK_GE(min_cid_len_, NGTCP2_MIN_CIDLEN);
+  }
 
   if (preferred_addr != nullptr) {
     preferred_address_set_ = true;
@@ -718,6 +730,8 @@ QuicSession::QuicSession(
     monitor_scheduled_(false),
     allow_retransmit_(false),
     current_ngtcp2_memory_(0),
+    max_cid_len_(NGTCP2_MAX_CIDLEN),
+    min_cid_len_(NGTCP2_MIN_CIDLEN),
     allocator_(this) {
   ssl_.reset(SSL_new(ctx->ctx_.get()));
   CHECK(ssl_);
@@ -1999,7 +2013,6 @@ void QuicServerSession::Init(
           &settings,
           *allocator_,
           static_cast<QuicSession*>(this)), 0);
-  // TODO(@jasnell): Handle out of memory response from ngtcp2
 
   if (ocid)
     ngtcp2_conn_set_retry_ocid(connection_, ocid);
@@ -2379,7 +2392,8 @@ std::shared_ptr<QuicSession> QuicClientSession::New(
     const char* hostname,
     uint32_t port,
     Local<Value> early_transport_params,
-    Local<Value> session_ticket) {
+    Local<Value> session_ticket,
+    Local<Value> dcid) {
   std::shared_ptr<QuicSession> session;
   Local<Object> obj;
   if (!socket->env()
@@ -2398,7 +2412,8 @@ std::shared_ptr<QuicSession> QuicClientSession::New(
           hostname,
           port,
           early_transport_params,
-          session_ticket);
+          session_ticket,
+          dcid);
 
   session->AddToSocket(socket);
   session->Start();
@@ -2415,18 +2430,20 @@ QuicClientSession::QuicClientSession(
     const char* hostname,
     uint32_t port,
     Local<Value> early_transport_params,
-    Local<Value> session_ticket) :
+    Local<Value> session_ticket,
+    Local<Value> dcid) :
     QuicSession(socket, wrap, context, AsyncWrap::PROVIDER_QUICCLIENTSESSION),
     resumption_(false),
     hostname_(hostname) {
-  Init(addr, version, early_transport_params, session_ticket);
+  Init(addr, version, early_transport_params, session_ticket, dcid);
 }
 
 int QuicClientSession::Init(
     const struct sockaddr* addr,
     uint32_t version,
     Local<Value> early_transport_params,
-    Local<Value> session_ticket) {
+    Local<Value> session_ticket,
+    Local<Value> dcid_value) {
 
   CHECK_NULL(connection_);
 
@@ -2435,20 +2452,28 @@ int QuicClientSession::Init(
 
   InitTLS();
 
-  ngtcp2_cid dcid;
-
-  // TODO(@jasnell): Make scid len configurable
-  scid_.datalen = NGTCP2_SV_SCIDLEN;
-  EntropySource(scid_.data, scid_.datalen);
-
-  // TODO(@jasnell): Make dcid and dcid len configurable
-  dcid.datalen = NGTCP2_SV_SCIDLEN;
-  EntropySource(dcid.data, dcid.datalen);
-
   ngtcp2_settings settings{};
   QuicSessionConfig client_session_config;
   client_session_config.Set(env());
   client_session_config.ToSettings(&settings, nullptr);
+  max_cid_len_ = client_session_config.GetMaxCidLen();
+  min_cid_len_ = client_session_config.GetMinCidLen();
+
+  scid_.datalen = max_cid_len_;
+  EntropySource(scid_.data, scid_.datalen);
+
+  ngtcp2_cid dcid;
+  if (dcid_value->IsArrayBufferView()) {
+    ArrayBufferViewContents<uint8_t> sbuf(
+        dcid_value.As<ArrayBufferView>());
+    CHECK_LE(sbuf.length(), max_cid_len_);
+    CHECK_GE(sbuf.length(), min_cid_len_);
+    memcpy(dcid.data, sbuf.data(), sbuf.length());
+    dcid.datalen = sbuf.length();
+  } else {
+    dcid.datalen = max_cid_len_;
+    EntropySource(dcid.data, dcid.datalen);
+  }
 
   QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
 
@@ -3229,7 +3254,8 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
           *servername,
           port,
           args[7],
-          args[8]);
+          args[8],
+          args[9]);
 
   socket->SendPendingData();
 
