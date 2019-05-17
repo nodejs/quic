@@ -2473,6 +2473,7 @@ int QuicClientSession::Init(
   }
 
   StartIdleTimer(settings.idle_timeout);
+  return 0;
 }
 
 int QuicClientSession::Start() {
