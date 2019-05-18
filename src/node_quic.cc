@@ -51,6 +51,7 @@ void QuicSetCallbacks(const FunctionCallbackInfo<Value>& args) {
   SETFUNCTION("onSessionError", session_error);
   SETFUNCTION("onSessionExtend", session_extend);
   SETFUNCTION("onSessionHandshake", session_handshake);
+  SETFUNCTION("onSessionPathValidation", session_path_validation);
   SETFUNCTION("onSessionTicket", session_ticket);
   SETFUNCTION("onStreamReady", stream_ready);
   SETFUNCTION("onStreamClose", stream_close);
@@ -431,6 +432,8 @@ void Initialize(Local<Object> target,
   NODE_DEFINE_CONSTANT(constants, NGTCP2_MIN_CIDLEN);
   NODE_DEFINE_CONSTANT(constants, QUIC_PREFERRED_ADDRESS_IGNORE);
   NODE_DEFINE_CONSTANT(constants, QUIC_PREFERRED_ADDRESS_ACCEPT);
+  NODE_DEFINE_CONSTANT(constants, NGTCP2_PATH_VALIDATION_RESULT_SUCCESS);
+  NODE_DEFINE_CONSTANT(constants, NGTCP2_PATH_VALIDATION_RESULT_FAILURE);
 
   NODE_DEFINE_CONSTANT(constants, NGTCP2_DEFAULT_MAX_ACK_DELAY);
 

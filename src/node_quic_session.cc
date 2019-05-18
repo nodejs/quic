@@ -995,13 +995,21 @@ int QuicSession::PathValidation(
           "Path validation succeeded. Updating local and remote addresses");
     SetLocalAddress(&path->local);
     remote_address_.Update(&path->remote);
-  } else {
-    Debug(this, "Path validation failed");
-    // TODO(danbev): How should a failed path validation be handled? A
-    // connection migration might fail, which could be indicated by path
-    // validation failure, and it may no longer be possible to use the local
-    // address (for // example if migrating from wifi to 3g/4g).
   }
+
+  HandleScope scope(env()->isolate());
+  Local<Context> context = env()->context();
+  Context::Scope context_scope(context);
+  Local<Value> argv[] = {
+    Integer::New(env()->isolate(), res),
+    AddressToJS(env(), reinterpret_cast<const sockaddr*>(path->local.addr)),
+    AddressToJS(env(), reinterpret_cast<const sockaddr*>(path->remote.addr))
+  };
+  MakeCallback(
+      env()->quic_on_session_path_validation_function(),
+      arraysize(argv),
+      argv);
+
   return 0;
 }
 
@@ -2557,7 +2565,6 @@ int QuicClientSession::SelectPreferredAddress(
       dest->addrlen = req.addrinfo->ai_addrlen;
       memcpy(dest->addr, req.addrinfo->ai_addr, req.addrinfo->ai_addrlen);
       uv_freeaddrinfo(req.addrinfo);
-
       break;
     }
     case QUIC_PREFERRED_ADDRESS_IGNORE:
