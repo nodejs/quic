@@ -558,18 +558,9 @@ int QuicSession::OnPathValidation(
     ngtcp2_path_validation_result res,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
-  CHECK_NOT_NULL(session);
-  if (res == NGTCP2_PATH_VALIDATION_RESULT_SUCCESS) {
-    session->SetLocalAddress(&path->local);
-  } else {
-    // TODO(danbev): How should a failed path validation be handled? A
-    // connection migration might fail, which could be indicated by path
-    // validation failure, and it may no longer be possible to use the local
-    // address (for // example if migrating from wifi to 3g/4g).
-  }
+  RETURN_IF_FAIL(session->PathValidation(path, res), 0, -1);
   return 0;
 }
-
 
 void QuicSession::SetupTokenContext(CryptoContext* context) {
   aead_aes_128_gcm(context);
@@ -994,6 +985,24 @@ bool QuicSession::IsDestroyed() {
 // method is called.
 bool QuicSession::IsClosing() {
   return closing_;
+}
+
+int QuicSession::PathValidation(
+    const ngtcp2_path* path,
+    ngtcp2_path_validation_result res) {
+  if (res == NGTCP2_PATH_VALIDATION_RESULT_SUCCESS) {
+    Debug(this,
+          "Path validation succeeded. Updating local and remote addresses");
+    SetLocalAddress(&path->local);
+    remote_address_.Update(&path->remote);
+  } else {
+    Debug(this, "Path validation failed");
+    // TODO(danbev): How should a failed path validation be handled? A
+    // connection migration might fail, which could be indicated by path
+    // validation failure, and it may no longer be possible to use the local
+    // address (for // example if migrating from wifi to 3g/4g).
+  }
+  return 0;
 }
 
 // Setting the closing_ flag disables the ability to open or accept

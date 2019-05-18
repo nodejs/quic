@@ -221,6 +221,9 @@ class QuicSession : public AsyncWrap,
       int64_t id);
   void HandshakeCompleted();
   inline bool IsInClosingPeriod();
+  int PathValidation(
+    const ngtcp2_path* path,
+    ngtcp2_path_validation_result res);
   inline void ScheduleMonitor();
   inline int SendPacket(bool retransmit = false);
   inline void SetHandshakeCompleted();
