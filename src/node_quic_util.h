@@ -46,6 +46,20 @@ constexpr size_t TOKEN_RAND_DATALEN = 16;
 constexpr size_t TOKEN_SECRETLEN = 16;
 constexpr size_t DEFAULT_MAX_STREAM_DATA_BIDI_LOCAL = 256_k;
 
+#define RETURN_IF_FAIL(test, success, ret)                                     \
+  do {                                                                         \
+    if ((test) != (success)) return (ret);                                     \
+  } while (0)
+
+#define RETURN_IF_FAIL_OPENSSL(test) RETURN_IF_FAIL(test, 1, -1)
+
+enum SelectPreferredAddressPolicy {
+  // Ignore the server-provided preferred address
+  QUIC_PREFERRED_ADDRESS_IGNORE,
+  // Accept the server-provided preferred address
+  QUIC_PREFERRED_ADDRESS_ACCEPT
+};
+
 class SocketAddress {
  public:
   static bool numeric_host(const char* hostname) {
@@ -60,6 +74,53 @@ class SocketAddress {
 
   static size_t GetMaxPktLen(const sockaddr* addr) {
     return addr->sa_family ? NGTCP2_MAX_PKTLEN_IPV6 : NGTCP2_MAX_PKTLEN_IPV4;
+  }
+
+  static int ResolvePreferredAddress(
+      Environment* env,
+      ADDRESS_FAMILY local_address_family,
+      const ngtcp2_preferred_addr* paddr,
+      uv_getaddrinfo_t* req) {
+
+    int af;
+    const uint8_t *binaddr;
+    uint16_t port;
+    constexpr uint8_t empty_addr[] = {0, 0, 0, 0, 0, 0, 0, 0,
+                                      0, 0, 0, 0, 0, 0, 0, 0};
+
+    if (local_address_family == AF_INET &&
+        memcmp(empty_addr, paddr->ipv4_addr, sizeof(paddr->ipv4_addr)) != 0) {
+      af = AF_INET;
+      binaddr = paddr->ipv4_addr;
+      port = paddr->ipv4_port;
+    } else if (local_address_family == AF_INET6 &&
+               memcmp(empty_addr,
+                      paddr->ipv6_addr,
+                      sizeof(paddr->ipv6_addr)) != 0) {
+      af = AF_INET6;
+      binaddr = paddr->ipv6_addr;
+      port = paddr->ipv6_port;
+    } else {
+      return -1;
+    }
+
+    char host[NI_MAXHOST];
+    if (inet_ntop(af, binaddr, host, sizeof(host)) == NULL)
+      return -1;
+
+    addrinfo hints{};
+    hints.ai_flags = AI_NUMERICHOST | AI_NUMERICSERV;
+    hints.ai_family = af;
+    hints.ai_socktype = SOCK_DGRAM;
+
+    return
+        uv_getaddrinfo(
+            env->event_loop(),
+            req,
+            nullptr,
+            host,
+            std::to_string(port).c_str(),
+            &hints);
   }
 
   static int ToSockAddr(
@@ -145,6 +206,8 @@ class SocketAddress {
   size_t Size() {
     return GetAddressLen(&address_);
   }
+
+  ADDRESS_FAMILY GetFamily() { return address_.ss_family; }
 
  private:
   sockaddr_storage address_;
@@ -260,14 +323,6 @@ struct CryptoToken {
   size_t ivlen;
   CryptoToken() : keylen(key.size()), ivlen(iv.size()) {}
 };
-
-#define RETURN_IF_FAIL(test, success, ret)                                     \
-  do {                                                                         \
-    if ((test) != (success)) return (ret);                                     \
-  } while (0)
-
-#define RETURN_IF_FAIL_OPENSSL(test) RETURN_IF_FAIL(test, 1, -1)
-
 
 }  // namespace quic
 }  // namespace node

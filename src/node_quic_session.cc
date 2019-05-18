@@ -108,24 +108,24 @@ void QuicSessionConfig::ToSettings(ngtcp2_settings* settings,
 
   if (pscid != nullptr && preferred_address_set_) {
     settings->preferred_address_present = 1;
-    char* host = nullptr;
-    int port;
     const sockaddr* addr = *preferred_address_;
     switch (addr->sa_family) {
       case AF_INET: {
-        SocketAddress::GetAddress(addr, &host);
-        port = SocketAddress::GetPort(addr);
         auto& dest = settings->preferred_address.ipv4_addr;
-        memcpy(&dest, host, sizeof(dest));
-        settings->preferred_address.ipv4_port = port;
+        memcpy(
+            &dest,
+            &reinterpret_cast<const sockaddr_in*>(addr)->sin_addr,
+            sizeof(dest));
+        settings->preferred_address.ipv4_port = SocketAddress::GetPort(addr);
         break;
       }
       case AF_INET6: {
-        SocketAddress::GetAddress(addr, &host);
-        port = SocketAddress::GetPort(addr);
         auto& dest = settings->preferred_address.ipv6_addr;
-        memcpy(&dest, host, sizeof(dest));
-        settings->preferred_address.ipv6_port = port;
+        memcpy(
+            &dest,
+            &reinterpret_cast<const sockaddr_in6*>(addr)->sin6_addr,
+            sizeof(dest));
+        settings->preferred_address.ipv6_port = SocketAddress::GetPort(addr);
         break;
       }
       default:
@@ -468,7 +468,15 @@ int QuicSession::OnSelectPreferredAddress(
     ngtcp2_addr* dest,
     const ngtcp2_preferred_addr* paddr,
     void* user_data) {
-  // TODO(@jasnell): Implement preferred address selection.
+
+  // For now, there are two modes: we can accept the preferred address
+  // or we can reject it. Later, we may want to implement a callback
+  // to ask the user if they want to accept the preferred address or
+  // not.
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  RETURN_IF_FAIL(
+      session->SelectPreferredAddress(dest, paddr), 0,
+      NGTCP2_ERR_CALLBACK_FAILURE);
   return 0;
 }
 
@@ -2393,7 +2401,8 @@ std::shared_ptr<QuicSession> QuicClientSession::New(
     uint32_t port,
     Local<Value> early_transport_params,
     Local<Value> session_ticket,
-    Local<Value> dcid) {
+    Local<Value> dcid,
+    int select_preferred_address_policy) {
   std::shared_ptr<QuicSession> session;
   Local<Object> obj;
   if (!socket->env()
@@ -2413,7 +2422,8 @@ std::shared_ptr<QuicSession> QuicClientSession::New(
           port,
           early_transport_params,
           session_ticket,
-          dcid);
+          dcid,
+          select_preferred_address_policy);
 
   session->AddToSocket(socket);
   session->Start();
@@ -2431,10 +2441,12 @@ QuicClientSession::QuicClientSession(
     uint32_t port,
     Local<Value> early_transport_params,
     Local<Value> session_ticket,
-    Local<Value> dcid) :
+    Local<Value> dcid,
+    int select_preferred_address_policy) :
     QuicSession(socket, wrap, context, AsyncWrap::PROVIDER_QUICCLIENTSESSION),
     resumption_(false),
-    hostname_(hostname) {
+    hostname_(hostname),
+    select_preferred_address_policy_(select_preferred_address_policy) {
   Init(addr, version, early_transport_params, session_ticket, dcid);
 }
 
@@ -2512,6 +2524,37 @@ int QuicClientSession::Init(
   }
 
   StartIdleTimer(settings.idle_timeout);
+  return 0;
+}
+
+int QuicClientSession::SelectPreferredAddress(
+    ngtcp2_addr* dest,
+    const ngtcp2_preferred_addr* paddr) {
+  switch (select_preferred_address_policy_) {
+    case QUIC_PREFERRED_ADDRESS_ACCEPT: {
+      SocketAddress* local_address = Socket()->GetLocalAddress();
+      uv_getaddrinfo_t req;
+
+      RETURN_IF_FAIL(
+          SocketAddress::ResolvePreferredAddress(
+              env(),
+              local_address->GetFamily(),
+              paddr,
+              &req), 0, -1);
+
+      if (req.addrinfo == nullptr)
+        return -1;
+
+      dest->addrlen = req.addrinfo->ai_addrlen;
+      memcpy(dest->addr, req.addrinfo->ai_addr, req.addrinfo->ai_addrlen);
+      uv_freeaddrinfo(req.addrinfo);
+
+      break;
+    }
+    case QUIC_PREFERRED_ADDRESS_IGNORE:
+      // Fall-through
+      break;
+  }
   return 0;
 }
 
@@ -3244,6 +3287,10 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
   if (err != 0)
     return args.GetReturnValue().Set(err);
 
+  int select_preferred_address_policy;
+  USE(args[10]->Int32Value(
+    env->context()).To(&select_preferred_address_policy));
+
   socket->ReceiveStart();
 
   std::shared_ptr<QuicSession> session =
@@ -3255,7 +3302,8 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
           port,
           args[7],
           args[8],
-          args[9]);
+          args[9],
+          select_preferred_address_policy);
 
   socket->SendPendingData();
 

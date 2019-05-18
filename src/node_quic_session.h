@@ -514,6 +514,9 @@ class QuicSession : public AsyncWrap,
   virtual void SetClientCryptoLevel(ngtcp2_crypto_level level) = 0;
   virtual void SetLocalCryptoLevel(ngtcp2_crypto_level level) = 0;
   virtual int Start() { return 0; }
+  virtual int SelectPreferredAddress(
+    ngtcp2_addr* dest,
+    const ngtcp2_preferred_addr* paddr) { return 0; }
 
   ngtcp2_crypto_level rx_crypto_level_;
   ngtcp2_crypto_level tx_crypto_level_;
@@ -718,7 +721,9 @@ class QuicClientSession : public QuicSession {
       uint32_t port,
       v8::Local<v8::Value> early_transport_params,
       v8::Local<v8::Value> session_ticket,
-      v8::Local<v8::Value> dcid);
+      v8::Local<v8::Value> dcid,
+      int select_preferred_address_policy =
+          QUIC_PREFERRED_ADDRESS_IGNORE);
 
   QuicClientSession(
       QuicSocket* socket,
@@ -730,7 +735,8 @@ class QuicClientSession : public QuicSession {
       uint32_t port,
       v8::Local<v8::Value> early_transport_params,
       v8::Local<v8::Value> session_ticket,
-      v8::Local<v8::Value> dcid);
+      v8::Local<v8::Value> dcid,
+      int select_preferred_address_policy);
 
   void AddToSocket(QuicSocket* socket) override;
 
@@ -776,6 +782,9 @@ class QuicClientSession : public QuicSession {
       unsigned int flags) override;
   int ReceiveRetry() override;
   void RemoveFromSocket() override;
+  int SelectPreferredAddress(
+    ngtcp2_addr* dest,
+    const ngtcp2_preferred_addr* paddr) override;
   int SendConnectionClose(
       int error) override;
   int SendPendingData(
@@ -798,17 +807,18 @@ class QuicClientSession : public QuicSession {
       uint64_t max_streams);
   int SetupInitialCryptoContext();
 
-  bool resumption_;
-  const char* hostname_;
-  uint32_t port_;
-
   ngtcp2_crypto_level GetServerCryptoLevel() override;
   ngtcp2_crypto_level GetClientCryptoLevel() override;
   void SetServerCryptoLevel(ngtcp2_crypto_level level) override;
   void SetClientCryptoLevel(ngtcp2_crypto_level level) override;
   void SetLocalCryptoLevel(ngtcp2_crypto_level level) override;
 
+  bool resumption_;
+  const char* hostname_;
+  uint32_t port_;
+
   MaybeStackBuffer<char> transportParams_;
+  int select_preferred_address_policy_;
 
   const ngtcp2_conn_callbacks callbacks_ = {
     OnClientInitial,
