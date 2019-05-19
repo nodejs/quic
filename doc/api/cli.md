@@ -534,20 +534,6 @@ added: v5.2.0
 
 Process V8 profiler output generated using the V8 option `--prof`.
 
-### `--quic-keylog`
-<!-- YAML
-added: REPLACEME
--->
-
-Write QUIC TLS secrets to a diagnostic *.keylog file.
-
-### `--quic-keylog-file=file`
-<!-- YAML
-added: REPLACEME
--->
-
-Write QUIC TLS secrets to the given file.
-
 ### `--redirect-warnings=file`
 <!-- YAML
 added: v8.0.0

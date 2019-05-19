@@ -26,6 +26,14 @@ const unidata = ['I wonder if it worked.', 'test'];
 const kServerName = 'test';
 const kALPN = 'h3-20';
 
+const kKeylogs = [
+  /SERVER_HANDSHAKE_TRAFFIC_SECRET.*/,
+  /CLIENT_HANDSHAKE_TRAFFIC_SECRET.*/,
+  /EXPORTER_SECRET.*/,
+  /SERVER_TRAFFIC_SECRET_0.*/,
+  /CLIENT_TRAFFIC_SECRET_0.*/
+];
+
 const countdown = new Countdown(2, () => {
   debug('Countdown expired. Destroying sockets');
   server.close();
@@ -35,6 +43,11 @@ const countdown = new Countdown(2, () => {
 server.listen({ key, cert });
 server.on('session', common.mustCall((session) => {
   debug('QuicServerSession Created');
+
+  session.on('keylog', common.mustCall((line) => {
+    assert(kKeylogs.shift().test(line));
+  }), kKeylogs.length);
+
   session.on('secure', common.mustCall((servername, alpn) => {
     debug('QuicServerSession TLS Handshake Complete');
     debug('Server name: %s', servername);

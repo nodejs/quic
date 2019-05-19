@@ -133,8 +133,6 @@ class EnvironmentOptions : public Options {
   uint64_t heap_prof_interval = kDefaultHeapProfInterval;
   bool heap_prof = false;
 #endif  // HAVE_INSPECTOR
-  bool has_quic_keylog = false;
-  std::string quic_keylog_file;
   std::string redirect_warnings;
   bool throw_deprecation = false;
   bool trace_deprecation = false;

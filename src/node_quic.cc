@@ -51,6 +51,7 @@ void QuicSetCallbacks(const FunctionCallbackInfo<Value>& args) {
   SETFUNCTION("onSessionError", session_error);
   SETFUNCTION("onSessionExtend", session_extend);
   SETFUNCTION("onSessionHandshake", session_handshake);
+  SETFUNCTION("onSessionKeylog", session_keylog);
   SETFUNCTION("onSessionPathValidation", session_path_validation);
   SETFUNCTION("onSessionTicket", session_ticket);
   SETFUNCTION("onStreamReady", stream_ready);
@@ -248,47 +249,6 @@ int Server_Transport_Params_Parse_CB(
   return 1;
 }
 
-void InitKeylog(Environment* env, SecureContext* sc) {
-  static const char LF = '\n';
-  if (env->options()->has_quic_keylog) {
-    if (env->options()->quic_keylog_file.empty()) {
-      DiagnosticFilename filename(env, "quic", "keylog");
-      env->options()->quic_keylog_file = *filename;
-    }
-
-    // Emitting keylog entries is inherently insecure. Warn the user.
-    ProcessEmitWarning(
-      env,
-      "Emitting QUIC TLS secrets to file: %s",
-      env->options()->quic_keylog_file.c_str());
-
-    SSL_CTX_set_keylog_callback(**sc, [](const SSL* ssl, const char* line) {
-      QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
-      Environment* env = session->env();
-      uv_fs_t req;
-      int fd =
-          uv_fs_open(
-              env->event_loop(),
-              &req,
-              env->options()->quic_keylog_file.c_str(),
-              O_CREAT | O_APPEND, 0644, nullptr);
-      uv_fs_req_cleanup(&req);
-      // TODO(@jasnell): Error handling
-      CHECK_GE(fd, 0);
-
-      uv_buf_t buf = uv_buf_init(const_cast<char*>(line), strlen(line));
-      CHECK_GE(
-        uv_fs_write(env->event_loop(), &req, fd, &buf, 1, -1, nullptr), 0);
-      buf = uv_buf_init(const_cast<char*>(&LF), 1);
-      CHECK_GE(
-        uv_fs_write(env->event_loop(), &req, fd, &buf, 1, -1, nullptr), 0);
-
-      CHECK_EQ(uv_fs_close(env->event_loop(), &req, fd, nullptr), 0);
-      uv_fs_req_cleanup(&req);
-    });
-  }
-}
-
 // Sets QUIC specific configuration options for the SecureContext.
 // It's entirely likely that there's a better way to do this, but
 // for now this works.
@@ -327,8 +287,6 @@ void QuicInitSecureContext(const FunctionCallbackInfo<Value>& args) {
       return env->ThrowError("Failed to set groups");
     return crypto::ThrowCryptoError(env, err);
   }
-
-  InitKeylog(env, sc);
 }
 
 void QuicInitSecureContextClient(const FunctionCallbackInfo<Value>& args) {
@@ -370,8 +328,6 @@ void QuicInitSecureContextClient(const FunctionCallbackInfo<Value>& args) {
             SSL_get_app_data(ssl));
     return s->SetSession(session);
   });
-
-  InitKeylog(env, sc);
 }
 }  // namespace
 
@@ -423,6 +379,8 @@ void Initialize(Local<Object> target,
   NODE_DEFINE_CONSTANT(constants, DEFAULT_RETRYTOKEN_EXPIRATION);
   NODE_DEFINE_CONSTANT(constants, ERR_INVALID_REMOTE_TRANSPORT_PARAMS);
   NODE_DEFINE_CONSTANT(constants, ERR_INVALID_TLS_SESSION_TICKET);
+  NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT);
+  NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_STATE_KEYLOG_ENABLED);
   NODE_DEFINE_CONSTANT(constants, MAX_RETRYTOKEN_EXPIRATION);
   NODE_DEFINE_CONSTANT(constants, MIN_RETRYTOKEN_EXPIRATION);
   NODE_DEFINE_CONSTANT(constants, NGTCP2_MAX_CIDLEN);

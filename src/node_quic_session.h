@@ -74,6 +74,7 @@ class QuicSessionConfig {
 
 enum QuicSessionState {
   IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT,
+  IDX_QUIC_SESSION_STATE_KEYLOG_ENABLED,
   IDX_QUIC_SESSION_STATE_COUNT
 };
 
@@ -423,6 +424,8 @@ class QuicSession : public AsyncWrap,
       uint64_t max_streams,
       void* user_data);
 
+  static void OnKeylog(const SSL* ssl, const char* line);
+
   virtual void InitTLS_Post() = 0;
 
   int ReceiveClientInitial(
@@ -491,6 +494,7 @@ class QuicSession : public AsyncWrap,
       const uint8_t* sample,
       size_t samplelen);
   void InitTLS();
+  void Keylog(const char* line);
   void StreamClose(
       int64_t stream_id,
       uint16_t app_error_code);

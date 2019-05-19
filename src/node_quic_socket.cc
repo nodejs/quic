@@ -119,6 +119,9 @@ int QuicSocket::Bind(
         "Binding to address %s, port %d, with flags %d, and family %d",
         address, port, flags, family);
 
+  HandleScope scope(env()->isolate());
+  Local<Context> context = env()->context();
+
   sockaddr_storage addr;
   int err = SocketAddress::ToSockAddr(family, address, port, &addr);
   if (err != 0)
@@ -200,6 +203,8 @@ void QuicSocket::OnRecv(
 
   if (nread < 0) {
     Debug(socket, "Reading data from UDP socket failed. Error %d", nread);
+    HandleScope scope(socket->env()->isolate());
+    Local<Context> context = socket->env()->context();
     Local<Value> arg = Integer::New(socket->env()->isolate(), nread);
     socket->MakeCallback(
         socket->env()->quic_on_socket_error_function(), 1, &arg);
@@ -312,6 +317,8 @@ void QuicSocket::RemoveSession(QuicCID* cid) {
 
 void QuicSocket::ReportSendError(int error) {
   Debug(this, "There was an error sending the UDP packet. Error %d", error);
+  HandleScope scope(env()->isolate());
+  Local<Context> context = env()->context();
   Local<Value> arg = Integer::New(env()->isolate(), error);
   MakeCallback(env()->quic_on_socket_error_function(), 1, &arg);
   return;

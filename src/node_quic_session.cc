@@ -3,6 +3,7 @@
 #include "env-inl.h"
 #include "ngtcp2/ngtcp2.h"
 #include "node.h"
+#include "node_buffer.h"
 #include "node_crypto.h"
 #include "node_internals.h"
 #include "node_quic_crypto.h"
@@ -562,6 +563,11 @@ int QuicSession::OnPathValidation(
   return 0;
 }
 
+void QuicSession::OnKeylog(const SSL* ssl, const char* line) {
+  QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
+  session->Keylog(line);
+}
+
 void QuicSession::SetupTokenContext(CryptoContext* context) {
   aead_aes_128_gcm(context);
   prf_sha256(context);
@@ -736,6 +742,7 @@ QuicSession::QuicSession(
     min_cid_len_(NGTCP2_MIN_CIDLEN),
     allocator_(this) {
   ssl_.reset(SSL_new(ctx->ctx_.get()));
+  SSL_CTX_set_keylog_callback(ctx->ctx_.get(), OnKeylog);
   CHECK(ssl_);
 
   USE(wrap->DefineOwnProperty(
@@ -752,6 +759,19 @@ QuicSession::~QuicSession() {
   CHECK(destroyed_);
   ssl_.reset();
   ngtcp2_conn_del(connection_);
+}
+
+void QuicSession::Keylog(const char* line) {
+  if (LIKELY(state_[IDX_QUIC_SESSION_STATE_KEYLOG_ENABLED] == 0))
+    return;
+
+  HandleScope handle_scope(env()->isolate());
+  Context::Scope context_scope(env()->context());
+  const size_t size = strlen(line);
+  Local<Value> line_bf = Buffer::Copy(env(), line, 1 + size).ToLocalChecked();
+  char* data = Buffer::Data(line_bf);
+  data[size] = '\n';
+  MakeCallback(env()->quic_on_session_keylog_function(), 1, &line_bf);
 }
 
 void QuicSession::AssociateCID(ngtcp2_cid* cid) {
