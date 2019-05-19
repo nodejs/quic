@@ -567,7 +567,7 @@ void QuicSession::SetupTokenContext(CryptoContext* context) {
   prf_sha256(context);
 }
 
-int QuicSession::GenerateToken(
+int QuicSession::GenerateRetryToken(
     uint8_t* token,
     size_t* tokenlen,
     const sockaddr* addr,
@@ -616,13 +616,14 @@ int QuicSession::GenerateToken(
   return 0;
 }
 
-int QuicSession::VerifyToken(
+int QuicSession::VerifyRetryToken(
     Environment* env,
     ngtcp2_cid* ocid,
     const ngtcp2_pkt_hd* hd,
     const sockaddr* addr,
     CryptoContext* token_crypto_ctx,
-    std::array<uint8_t, TOKEN_SECRETLEN>* token_secret) {
+    std::array<uint8_t, TOKEN_SECRETLEN>* token_secret,
+    uint64_t verification_expiration) {
 
   uv_getnameinfo_t info;
   char* host = nullptr;
@@ -693,8 +694,10 @@ int QuicSession::VerifyToken(
 
   uint64_t now = uv_hrtime();
 
-  // 10-second window... TODO(@jasnell): make configurable?
-  if (t + 10ULL + NGTCP2_SECONDS < now) {
+  // 10-second window by default, but configurable for each
+  // QuicSocket instance with a MIN_RETRYTOKEN_EXPIRATION second
+  // minimum and a MAX_RETRYTOKEN_EXPIRATION second maximum.
+  if (t + verification_expiration * NGTCP2_SECONDS < now) {
     // Token has expired
     return -1;
   }

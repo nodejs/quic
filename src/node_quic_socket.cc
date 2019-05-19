@@ -56,14 +56,17 @@ inline uint32_t GenerateReservedVersion(
 
 QuicSocket::QuicSocket(
     Environment* env,
-    Local<Object> wrap) :
+    Local<Object> wrap,
+    bool validate_address,
+    uint64_t retry_token_expiration) :
     HandleWrap(env, wrap,
                reinterpret_cast<uv_handle_t*>(&handle_),
                AsyncWrap::PROVIDER_QUICSOCKET),
-               server_listening_(false),
-               validate_addr_(false),
-               server_secure_context_(nullptr),
-               token_crypto_ctx_{} {
+    server_listening_(false),
+    validate_addr_(validate_address),
+    server_secure_context_(nullptr),
+    token_crypto_ctx_{},
+    retry_token_expiration_(retry_token_expiration) {
   CHECK_EQ(uv_udp_init(env->event_loop(), &handle_), 0);
   Debug(this, "New QuicSocket created.");
 
@@ -371,7 +374,7 @@ int QuicSocket::SendRetry(
   std::array<uint8_t, 256> token;
   size_t tokenlen = token.size();
 
-  if (QuicSession::GenerateToken(
+  if (QuicSession::GenerateRetryToken(
           token.data(), &tokenlen,
           addr,
           &chd->dcid,
@@ -442,11 +445,12 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
   if (validate_addr_ && hd->type == NGTCP2_PKT_INITIAL) {
     Debug(this, "Stateless address validation.");
     if (hd->tokenlen == 0 ||
-        QuicSession::VerifyToken(
+        QuicSession::VerifyRetryToken(
             env(), &ocid,
             hd, addr,
             &token_crypto_ctx_,
-            &token_secret_) != 0) {
+            &token_secret_,
+            retry_token_expiration_) != 0) {
       Debug(this, "Invalid token. Sending retry");
       SendRetry(hd, addr);
       return session;
@@ -649,7 +653,15 @@ namespace {
 void NewQuicSocket(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   CHECK(args.IsConstructCall());
-  new QuicSocket(env, args.This());
+
+  bool validate_address = false;
+  int32_t retry_token_expiration = DEFAULT_RETRYTOKEN_EXPIRATION;
+  USE(args[0]->BooleanValue(env->context()).To(&validate_address));
+  USE(args[1]->Int32Value(env->context()).To(&retry_token_expiration));
+  CHECK_GE(retry_token_expiration, MIN_RETRYTOKEN_EXPIRATION);
+  CHECK_LE(retry_token_expiration, MAX_RETRYTOKEN_EXPIRATION);
+
+  new QuicSocket(env, args.This(), validate_address, retry_token_expiration);
 }
 
 void QuicSocketAddMembership(const FunctionCallbackInfo<Value>& args) {

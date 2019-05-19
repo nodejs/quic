@@ -37,7 +37,9 @@ class QuicSocket : public HandleWrap {
 
   QuicSocket(
       Environment* env,
-      Local<Object> wrap);
+      Local<Object> wrap,
+      bool verify_address,
+      uint64_t retry_token_expiration);
   ~QuicSocket() override;
 
   int AddMembership(
@@ -155,6 +157,7 @@ class QuicSocket : public HandleWrap {
   std::unordered_map<std::string, std::string> dcid_to_scid_;
   CryptoContext token_crypto_ctx_;
   std::array<uint8_t, TOKEN_SECRETLEN> token_secret_;
+  uint64_t retry_token_expiration_;
 
   struct socket_stats {
     // The total number of bytes received (and not ignored)

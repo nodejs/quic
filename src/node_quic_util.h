@@ -45,6 +45,9 @@ constexpr size_t NGTCP2_SV_SCIDLEN = 18;
 constexpr size_t TOKEN_RAND_DATALEN = 16;
 constexpr size_t TOKEN_SECRETLEN = 16;
 constexpr size_t DEFAULT_MAX_STREAM_DATA_BIDI_LOCAL = 256_k;
+constexpr uint64_t MIN_RETRYTOKEN_EXPIRATION = 1;
+constexpr uint64_t MAX_RETRYTOKEN_EXPIRATION = 60;
+constexpr uint64_t DEFAULT_RETRYTOKEN_EXPIRATION = 10ULL;
 
 #define RETURN_IF_FAIL(test, success, ret)                                     \
   do {                                                                         \

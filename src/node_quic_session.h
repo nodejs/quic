@@ -178,20 +178,21 @@ class QuicSession : public AsyncWrap,
 
   static void SetupTokenContext(
       CryptoContext* context);
-  static int GenerateToken(
+  static int GenerateRetryToken(
       uint8_t* token,
       size_t* tokenlen,
       const sockaddr* addr,
       const ngtcp2_cid* ocid,
       CryptoContext* context,
       std::array<uint8_t, TOKEN_SECRETLEN>* token_secret);
-  static int VerifyToken(
+  static int VerifyRetryToken(
       Environment* env,
       ngtcp2_cid* ocid,
       const ngtcp2_pkt_hd* hd,
       const sockaddr* addr,
       CryptoContext* context,
-      std::array<uint8_t, TOKEN_SECRETLEN>* token_secret);
+      std::array<uint8_t, TOKEN_SECRETLEN>* token_secret,
+      uint64_t verification_expiration);
 
   static void DebugLog(
       void* user_data,
