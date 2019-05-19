@@ -16,6 +16,7 @@ namespace node {
 using v8::Context;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
+using v8::Integer;
 using v8::Isolate;
 using v8::Local;
 using v8::Number;
@@ -58,6 +59,7 @@ QuicStream::QuicStream(
     session_(session),
     flags_(0),
     stream_id_(stream_id),
+    reset_(false),
     should_send_fin_(false),
     available_outbound_length_(0) {
   CHECK_NOT_NULL(session);
@@ -79,6 +81,28 @@ void QuicStream::Close(
   flags_ |= QUIC_STREAM_FLAG_CLOSED;
   Local<Value> arg = Number::New(env()->isolate(), app_error_code);
   MakeCallback(env()->quic_on_stream_close_function(), 1, &arg);
+}
+
+void QuicStream::Reset(uint64_t final_size, uint16_t app_error_code) {
+  // Receiving a reset means that any data we've accumulated to send
+  // can be discarded and we don't want to keep writing data, so
+  // we likely want to clear our outbound buffers here and notify
+  // the JavaScript side that we've been reset so that we stop
+  // pumping data out.
+  Debug(this,
+        "Resetting stream %llu with app error code %d, and final size %llu",
+        GetID(),
+        app_error_code,
+        final_size);
+  reset_ = true;
+  HandleScope scope(env()->isolate());
+  streambuf_.Cancel();
+  Local<Value> argv[] = {
+    Number::New(env()->isolate(), final_size),
+    Integer::New(env()->isolate(), app_error_code)
+  };
+  Local<Value> arg = Number::New(env()->isolate(), app_error_code);
+  MakeCallback(env()->quic_on_stream_reset_function(), arraysize(argv), argv);
 }
 
 void QuicStream::Destroy() {
@@ -104,7 +128,11 @@ int QuicStream::DoWrite(
     uv_stream_t* send_handle) {
 
   CHECK_NULL(send_handle);
-  if (IsDestroyed()) {  // or !IsWritable
+
+  // If the stream has been reset, then the writable side of
+  // the duplex should have been closed and we shouldn't be
+  // receiving any more data.. but just in case...
+  if (reset_ || IsDestroyed()) {
     req_wrap->Done(UV_EOF);
     return 0;
   }
@@ -207,6 +235,10 @@ int QuicStream::ReceiveData(
     const uint8_t* data,
     size_t datalen) {
   Debug(this, "Receiving %d bytes of data", datalen);
+  if (reset_) {
+    Debug(this, "Stream has been reset, discarding received data.");
+    return 0;
+  }
   HandleScope scope(env()->isolate());
   do {
     uv_buf_t buf = EmitAlloc(datalen);

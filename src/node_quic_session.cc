@@ -1582,7 +1582,10 @@ void QuicSession::StreamReset(
     int64_t stream_id,
     uint64_t final_size,
     uint16_t app_error_code) {
-  // TODO(@jasnell): Reset the stream
+  CHECK(!IsDestroyed());
+  QuicStream* stream = FindStream(stream_id);
+  if (stream != nullptr)
+    stream->Reset(final_size, app_error_code);
 }
 
 int QuicSession::ShutdownStreamRead(int64_t stream_id, uint16_t code) {

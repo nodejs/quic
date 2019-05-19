@@ -66,6 +66,10 @@ class QuicStream : public AsyncWrap,
   virtual void Close(
       uint16_t app_error_code);
 
+  virtual void Reset(
+    uint64_t final_size,
+    uint16_t app_error_code);
+
   virtual void Destroy();
 
   int DoWrite(
@@ -129,6 +133,7 @@ class QuicStream : public AsyncWrap,
   QuicSession* session_;
   uint32_t flags_;
   uint64_t stream_id_;
+  bool reset_;
 
   QuicBuffer streambuf_;
   bool should_send_fin_;
