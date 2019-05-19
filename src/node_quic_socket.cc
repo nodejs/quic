@@ -192,17 +192,17 @@ void QuicSocket::OnRecv(
       free(buf->base);
   });
 
-  if (nread == 0)
-    return;
-
   QuicSocket* socket = static_cast<QuicSocket*>(handle->data);
   CHECK_NOT_NULL(socket);
 
+  if (nread == 0)
+    return;
+
   if (nread < 0) {
-    Debug(socket,
-          "An error occurred while reading data from the UDP socket. Error %d",
-          nread);
-    // TODO(@jasnell): Should this be fatal for the QuicSocket?
+    Debug(socket, "Reading data from UDP socket failed. Error %d", nread);
+    Local<Value> arg = Integer::New(socket->env()->isolate(), nread);
+    socket->MakeCallback(
+        socket->env()->quic_on_socket_error_function(), 1, &arg);
     return;
   }
 
@@ -312,7 +312,9 @@ void QuicSocket::RemoveSession(QuicCID* cid) {
 
 void QuicSocket::ReportSendError(int error) {
   Debug(this, "There was an error sending the UDP packet. Error %d", error);
-  // TODO(@jasnell): Handle this correctly
+  Local<Value> arg = Integer::New(env()->isolate(), error);
+  MakeCallback(env()->quic_on_socket_error_function(), 1, &arg);
+  return;
 }
 
 void QuicSocket::SendPendingData(
