@@ -144,15 +144,15 @@ void QuicSessionConfig::ToSettings(ngtcp2_settings* settings,
 }
 
 void QuicSession::CheckAllocatedSize(size_t previous_size) {
-  // CHECK_GE(current_ngtcp2_memory_, previous_size);
+  CHECK_GE(current_ngtcp2_memory_, previous_size);
 }
 
 void QuicSession::IncrementAllocatedSize(size_t size) {
-  // current_ngtcp2_memory_ += size;
+  current_ngtcp2_memory_ += size;
 }
 
 void QuicSession::DecrementAllocatedSize(size_t size) {
-  // current_ngtcp2_memory_ -= size;
+  current_ngtcp2_memory_ -= size;
 }
 
 // Static ngtcp2 callbacks are registered when ngtcp2 when a new ngtcp2_conn is
