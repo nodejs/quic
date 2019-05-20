@@ -58,12 +58,14 @@ QuicSocket::QuicSocket(
     Environment* env,
     Local<Object> wrap,
     bool validate_address,
-    uint64_t retry_token_expiration) :
+    uint64_t retry_token_expiration,
+    size_t max_connections_per_host) :
     HandleWrap(env, wrap,
                reinterpret_cast<uv_handle_t*>(&handle_),
                AsyncWrap::PROVIDER_QUICSOCKET),
     server_listening_(false),
     validate_addr_(validate_address),
+    max_connections_per_host_(max_connections_per_host),
     server_secure_context_(nullptr),
     token_crypto_ctx_{},
     retry_token_expiration_(retry_token_expiration) {
@@ -102,6 +104,7 @@ void QuicSocket::AddSession(
     QuicCID* cid,
     std::shared_ptr<QuicSession> session) {
   sessions_[cid->ToStr()] = session;
+  IncrementSocketAddressCounter(**session->GetRemoteAddress());
 }
 
 void QuicSocket::AssociateCID(
@@ -310,9 +313,10 @@ int QuicSocket::ReceiveStop() {
   return uv_udp_recv_stop(&handle_);
 }
 
-void QuicSocket::RemoveSession(QuicCID* cid) {
+void QuicSocket::RemoveSession(QuicCID* cid, const sockaddr* addr) {
   Debug(this, "Removing QuicSession for cid %s.", cid->ToHex().c_str());
   sessions_.erase(cid->ToStr());
+  DecrementSocketAddressCounter(addr);
 }
 
 void QuicSocket::ReportSendError(int error) {
@@ -330,9 +334,6 @@ void QuicSocket::SendPendingData(
   HandleScope handle_scope(env()->isolate());
   InternalCallbackScope callback_scope(this);
 
-  // TODO(@jasnell): Explore scheduled writes similar to how we do
-  // it with http2, except as soon as possible rather than on event
-  // loop turn over.
   Debug(this, "Sending pending data. Retransmit? %s",
         retransmit ? "yes" : "no");
   for (auto session : sessions_) {
@@ -426,7 +427,6 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
     const uint8_t* data,
     const struct sockaddr* addr,
     unsigned int flags) {
-
   std::shared_ptr<QuicSession> session;
   HandleScope handle_scope(env()->isolate());
   Context::Scope context_scope(env()->context());
@@ -446,6 +446,10 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
   if (err == 1) {
     Debug(this, "Unexpected QUIC version.");
     SendVersionNegotiation(hd, addr);
+    return session;
+  }
+  if (GetCurrentSocketAddressCounter(addr) >= max_connections_per_host_) {
+    Debug(this, "Max number of connections for this client exceeded.");
     return session;
   }
 
@@ -481,6 +485,27 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
   MakeCallback(env()->quic_on_session_ready_function(), 1, &arg);
 
   return session;
+}
+
+void QuicSocket::IncrementSocketAddressCounter(const sockaddr* addr) {
+  addr_counts_[addr]++;
+}
+
+void QuicSocket::DecrementSocketAddressCounter(const sockaddr* addr) {
+  auto it = addr_counts_.find(addr);
+  if (it == std::end(addr_counts_))
+    return;
+  it->second--;
+  // Remove the address if the counter reaches zero again.
+  if (it->second == 0)
+    addr_counts_.erase(addr);
+}
+
+size_t QuicSocket::GetCurrentSocketAddressCounter(const sockaddr* addr) {
+  auto it = addr_counts_.find(addr);
+  if (it == std::end(addr_counts_))
+    return 0;
+  return (*it).second;
 }
 
 int QuicSocket::SetTTL(int ttl) {
@@ -665,12 +690,19 @@ void NewQuicSocket(const FunctionCallbackInfo<Value>& args) {
 
   bool validate_address = false;
   int32_t retry_token_expiration = DEFAULT_RETRYTOKEN_EXPIRATION;
+  int32_t max_connections_per_host = DEFAULT_MAX_CONNECTIONS_PER_HOST;
   USE(args[0]->BooleanValue(env->context()).To(&validate_address));
   USE(args[1]->Int32Value(env->context()).To(&retry_token_expiration));
+  USE(args[2]->Int32Value(env->context()).To(&max_connections_per_host));
   CHECK_GE(retry_token_expiration, MIN_RETRYTOKEN_EXPIRATION);
   CHECK_LE(retry_token_expiration, MAX_RETRYTOKEN_EXPIRATION);
 
-  new QuicSocket(env, args.This(), validate_address, retry_token_expiration);
+  new QuicSocket(
+      env,
+      args.This(),
+      validate_address,
+      retry_token_expiration,
+      max_connections_per_host);
 }
 
 void QuicSocketAddMembership(const FunctionCallbackInfo<Value>& args) {

@@ -45,6 +45,7 @@ constexpr size_t NGTCP2_SV_SCIDLEN = 18;
 constexpr size_t TOKEN_RAND_DATALEN = 16;
 constexpr size_t TOKEN_SECRETLEN = 16;
 constexpr size_t DEFAULT_MAX_STREAM_DATA_BIDI_LOCAL = 256_k;
+constexpr size_t DEFAULT_MAX_CONNECTIONS_PER_HOST = 100;
 constexpr uint64_t MIN_RETRYTOKEN_EXPIRATION = 1;
 constexpr uint64_t MAX_RETRYTOKEN_EXPIRATION = 60;
 constexpr uint64_t DEFAULT_RETRYTOKEN_EXPIRATION = 10ULL;
@@ -63,8 +64,47 @@ enum SelectPreferredAddressPolicy {
   QUIC_PREFERRED_ADDRESS_ACCEPT
 };
 
+// TODO(@jasnell): Fun hash combine trick based on a variadic template that
+// I came across a while back but can't remember where. Will add an attribution
+// if I can find the source.
+inline void hash_combine(size_t& seed) { }
+
+template <typename T, typename... Args>
+inline void hash_combine(size_t& seed, const T& value, Args... rest) {
+    seed ^= std::hash<T>{}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    hash_combine(seed, rest...);
+}
+
 class SocketAddress {
  public:
+  // std::hash specialization for sockaddr instances (ipv4 or ipv6) used
+  // for tracking the number of connections per client.
+  // TODO(@jasnell): Verify that this is producing an adequately unique hash
+  struct Hash {
+    size_t operator()(const sockaddr* addr) const {
+      size_t hash = 0;
+      switch (addr->sa_family) {
+        case AF_INET: {
+          const sockaddr_in* ipv4 =
+              reinterpret_cast<const sockaddr_in*>(addr);
+          hash_combine(hash, ipv4->sin_port, ipv4->sin_addr.s_addr);
+          break;
+        }
+        case AF_INET6: {
+          const sockaddr_in6* ipv6 =
+              reinterpret_cast<const sockaddr_in6*>(addr);
+          const uint64_t* a =
+              reinterpret_cast<const uint64_t*>(&ipv6->sin6_addr);
+          hash_combine(hash, ipv6->sin6_port, a[0], a[1]);
+          break;
+        }
+        default:
+          UNREACHABLE();
+      }
+      return hash;
+    }
+  };
+
   static bool numeric_host(const char* hostname) {
     return numeric_host(hostname, AF_INET) || numeric_host(hostname, AF_INET6);
   }

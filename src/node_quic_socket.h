@@ -39,7 +39,8 @@ class QuicSocket : public HandleWrap {
       Environment* env,
       Local<Object> wrap,
       bool verify_address,
-      uint64_t retry_token_expiration);
+      uint64_t retry_token_expiration,
+      size_t max_connections_per_host);
   ~QuicSocket() override;
 
   int AddMembership(
@@ -68,7 +69,8 @@ class QuicSocket : public HandleWrap {
   int ReceiveStart();
   int ReceiveStop();
   void RemoveSession(
-      QuicCID* cid);
+      QuicCID* cid,
+      const sockaddr* addr);
   void ReportSendError(
       int error);
   void SendPendingData(
@@ -139,6 +141,10 @@ class QuicSocket : public HandleWrap {
       const ngtcp2_pkt_hd* chd,
       const sockaddr* addr);
 
+  void IncrementSocketAddressCounter(const sockaddr* addr);
+  void DecrementSocketAddressCounter(const sockaddr* addr);
+  size_t GetCurrentSocketAddressCounter(const sockaddr* addr);
+
   template <typename T,
             int (*F)(const typename T::HandleType*, sockaddr*, int*)>
   friend void node::GetSockOrPeerName(
@@ -151,6 +157,7 @@ class QuicSocket : public HandleWrap {
   SocketAddress local_address_;
   bool server_listening_;
   bool validate_addr_;
+  size_t max_connections_per_host_;
   QuicSessionConfig server_session_config_;
   crypto::SecureContext* server_secure_context_;
   std::unordered_map<std::string, std::shared_ptr<QuicSession>> sessions_;
@@ -158,6 +165,17 @@ class QuicSocket : public HandleWrap {
   CryptoContext token_crypto_ctx_;
   std::array<uint8_t, TOKEN_SECRETLEN> token_secret_;
   uint64_t retry_token_expiration_;
+
+  // Counts the number of active connections per remote
+  // address. A custom std::hash specialization for
+  // sockaddr instances is used. Values are incremented
+  // when a QuicSession is added to the socket, and
+  // decremented when the QuicSession is removed. If the
+  // value reaches the value of max_connections_per_host_,
+  // attempts to create new connections will be ignored
+  // until the value falls back below the limit.
+  std::unordered_map<const sockaddr*, size_t, SocketAddress::Hash>
+    addr_counts_;
 
   struct socket_stats {
     // The total number of bytes received (and not ignored)

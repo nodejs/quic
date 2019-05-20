@@ -2217,7 +2217,7 @@ void QuicServerSession::RemoveFromSocket() {
   }
 
   QuicCID scid(scid_);
-  socket_->RemoveSession(&scid);
+  socket_->RemoveSession(&scid, **GetRemoteAddress());
 }
 
 // Transmits the CONNECTION_CLOSE to the peer, signaling
@@ -2995,7 +2995,7 @@ void QuicClientSession::RemoveFromSocket() {
 
   Debug(this, "Remove this QuicClientSession from the QuicSocket.");
   QuicCID scid(scid_);
-  socket_->RemoveSession(&scid);
+  socket_->RemoveSession(&scid, **GetRemoteAddress());
 }
 
 int QuicClientSession::SendPendingData(bool retransmit) {
