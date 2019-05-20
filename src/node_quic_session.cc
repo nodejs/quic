@@ -455,25 +455,22 @@ int QuicSession::OnAckedStreamDataOffset(
     void* user_data,
     void* stream_user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
-  RETURN_IF_FAIL(
-      session->AckedStreamDataOffset(stream_id, offset, datalen), 0,
-      NGTCP2_ERR_CALLBACK_FAILURE);
+  session->AckedStreamDataOffset(stream_id, offset, datalen);
   return 0;
 }
 
 // Called by ngtcp2 for a client connection when the server
 // has indicated a preferred address in the transport
 // params.
+// For now, there are two modes: we can accept the preferred address
+// or we can reject it. Later, we may want to implement a callback
+// to ask the user if they want to accept the preferred address or
+// not.
 int QuicSession::OnSelectPreferredAddress(
     ngtcp2_conn* conn,
     ngtcp2_addr* dest,
     const ngtcp2_preferred_addr* paddr,
     void* user_data) {
-
-  // For now, there are two modes: we can accept the preferred address
-  // or we can reject it. Later, we may want to implement a callback
-  // to ask the user if they want to accept the preferred address or
-  // not.
   QuicSession* session = static_cast<QuicSession*>(user_data);
   RETURN_IF_FAIL(
       session->SelectPreferredAddress(dest, paddr), 0,
@@ -807,7 +804,7 @@ void QuicSession::AckedCryptoOffset(
 // This applies to TLS Handshake data as well as stream data. Once acknowledged,
 // the buffered data can be released. This function is called only by the
 // OnAckedStreamDataOffset ngtcp2 callback function.
-int QuicSession::AckedStreamDataOffset(
+void QuicSession::AckedStreamDataOffset(
     int64_t stream_id,
     uint64_t offset,
     size_t datalen) {
@@ -818,7 +815,6 @@ int QuicSession::AckedStreamDataOffset(
   QuicStream* stream = FindStream(stream_id);
   if (stream != nullptr)
     stream->AckedDataOffset(offset, datalen);
-  return 0;
 }
 
 // Add the given QuicStream to this QuicSession's collection of streams. All
@@ -1068,7 +1064,12 @@ uint32_t QuicSession::GetNegotiatedVersion() {
   return ngtcp2_conn_get_negotiated_version(connection_);
 }
 
-// Generates and associates a new connection ID for this QuicSession
+// Generates and associates a new connection ID for this QuicSession.
+// ngtcp2 will call this multiple times at the start of a new connection
+// in order to build a pool of available CIDs.
+// TODO(@jasnell): It's possible that we could improve performance by
+// generating a large pool of random data to use for CIDs when the
+// session is created, then simply creating slices off that here.
 int QuicSession::GetNewConnectionID(
     ngtcp2_cid* cid,
     uint8_t* token,
@@ -1085,7 +1086,7 @@ int QuicSession::GetNewConnectionID(
   return 0;
 }
 
-// Returns the associated peers address. Note that this
+// Returns the associated peer's address. Note that this
 // value can change over the lifetime of the QuicSession.
 // The fact that the session is not tied intrinsically to
 // a single address is one of the benefits of QUIC.
@@ -1584,6 +1585,10 @@ QuicStream* QuicSession::CreateStream(int64_t stream_id) {
 
 // Called by ngtcp2 when a stream has been opened. If the stream has already
 // been created, return an error.
+// TODO(@jasnell): Currently, this will cause the stream object to be
+// created, but we might want to wait to create the stream object until
+// we receive the first packet of data for the stream... doing so ensures
+// that we are not committing resources until we actually need to.
 int QuicSession::StreamOpen(int64_t stream_id) {
   CHECK(!IsDestroyed());
   if (IsClosing()) {
@@ -1603,7 +1608,9 @@ int QuicSession::StreamOpen(int64_t stream_id) {
   return 0;
 }
 
-// Called by ngtcp2 when a strema has been reset.
+// Called by ngtcp2 when a stream has been reset. Resetting a streams
+// allows it's state to be completely reset for the purposes of canceling
+// transmission of stream data.
 void QuicSession::StreamReset(
     int64_t stream_id,
     uint64_t final_size,
@@ -1706,39 +1713,18 @@ int QuicSession::TLSHandshake() {
   CHECK(!IsDestroyed());
   Debug(this, "TLS handshake %s", initial_ ? "starting" : "continuing");
   ClearTLSError();
-  int err;
 
-  if (initial_) {
-    err = TLSHandshake_Initial();
-    if (err != 0) {
-      return err;
-    }
+  if (initial_)
+    RETURN_RET_IF_FAIL(TLSHandshake_Initial(), 0);
+
+  int err = DoTLSHandshake(ssl());
+  if (err > 0) {
+    RETURN_RET_IF_FAIL(TLSHandshake_Complete(), 0);
+    Debug(this, "TLS Handshake completed.");
+    SetHandshakeCompleted();
+    err = 0;
   }
-
-  err = SSL_do_handshake(ssl());
-  if (err <= 0) {
-    err = SSL_get_error(ssl(), err);
-    switch (err) {
-      case SSL_ERROR_WANT_READ:
-      case SSL_ERROR_WANT_WRITE:
-        return 0;
-      case SSL_ERROR_SSL:
-        Debug(this, "TLS handshake error: %s", TLSErrorString(err));
-        return NGTCP2_ERR_CRYPTO;
-      default:
-        Debug(this, "TLS handshake error: %d", err);
-        return NGTCP2_ERR_CRYPTO;
-    }
-  }
-  err = TLSHandshake_Complete();
-  if (err != 0) {
-    return err;
-  }
-
-  Debug(this, "TLS Handshake completed.");
-
-  SetHandshakeCompleted();
-  return 0;
+  return err;
 }
 
 // It's possible for TLS handshake to contain extra data that is not
@@ -1747,31 +1733,7 @@ int QuicSession::TLSHandshake() {
 int QuicServerSession::TLSRead() {
   CHECK(!IsDestroyed());
   ClearTLSError();
-
-  std::array<uint8_t, 4096> buf;
-  size_t nread;
-  Debug(this, "Reading TLS data");
-  for (;;) {
-    int err = SSL_read_ex(ssl(), buf.data(), buf.size(), &nread);
-    if (err == 1) {
-      return NGTCP2_ERR_PROTO;
-    }
-    int code = SSL_get_error(ssl(), 0);
-    switch (code) {
-      case SSL_ERROR_WANT_READ:
-      case SSL_ERROR_WANT_WRITE:
-        return 0;
-      case SSL_ERROR_SSL:
-      case SSL_ERROR_ZERO_RETURN:
-        // TLS read error
-        // std::cerr << "TLS read error: "
-        //           << ERR_error_string(ERR_get_error(), nullptr) << std::endl;
-        return NGTCP2_ERR_CRYPTO;
-      default:
-        // std::cerr << "TLS read error: " << err << std::endl;
-        return NGTCP2_ERR_CRYPTO;
-    }
-  }
+  return ClearTLS(ssl());
 }
 
 // Called by ngtcp2 when the QuicSession keys need to be updated. This may
@@ -1779,7 +1741,6 @@ int QuicServerSession::TLSRead() {
 int QuicSession::UpdateKey() {
   CHECK(!IsDestroyed());
   Debug(this, "Updating keys.");
-  int err;
 
   std::array<uint8_t, 64> secret;
   ssize_t secretlen;
@@ -1821,14 +1782,13 @@ int QuicSession::UpdateKey() {
   if (params.ivlen < 0)
     return -1;
 
-  err = ngtcp2_conn_update_tx_key(
-      connection_,
-      params.key.data(),
-      params.keylen,
-      params.iv.data(),
-      params.ivlen);
-  if (err != 0)
-    return -1;
+  RETURN_IF_FAIL(
+      ngtcp2_conn_update_tx_key(
+          connection_,
+          params.key.data(),
+          params.keylen,
+          params.iv.data(),
+          params.ivlen), 0, -1);
 
   secretlen =
       UpdateTrafficSecret(
@@ -1864,14 +1824,13 @@ int QuicSession::UpdateKey() {
   if (params.ivlen < 0)
     return -1;
 
-  err = ngtcp2_conn_update_rx_key(
-      connection_,
-      params.key.data(),
-      params.keylen,
-      params.iv.data(),
-      params.ivlen);
-  if (err != 0)
-    return -1;
+  RETURN_IF_FAIL(
+      ngtcp2_conn_update_rx_key(
+          connection_,
+          params.key.data(),
+          params.keylen,
+          params.iv.data(),
+          params.ivlen), 0, -1);
 
   return 0;
 }
@@ -1949,16 +1908,11 @@ int QuicServerSession::DoHandshake(
     const uint8_t* data,
     size_t datalen) {
   CHECK(!IsDestroyed());
-
   RETURN_IF_FAIL(DoHandshakeReadOnce(path, data, datalen), 0, -1);
-
-  int err = SendPacket();
-  if (err != 0)
-    return err;
-
+  RETURN_RET_IF_FAIL(SendPacket(), 0);
+  ssize_t nwrite;
   for (;;) {
-    ssize_t nwrite = DoHandshakeWriteOnce();
-    if (nwrite <= 0)
+    if ((nwrite = DoHandshakeWriteOnce()) <= 0)
       return nwrite;
   }
 }
@@ -1975,8 +1929,7 @@ void QuicServerSession::AddToSocket(QuicSocket* socket) {
   }
 }
 
-int QuicServerSession::HandleError(
-    int error) {
+int QuicServerSession::HandleError(int error) {
   return SendConnectionClose(error);
 }
 
@@ -2255,27 +2208,21 @@ int QuicServerSession::SendPendingData(bool retransmit) {
     return 0;
 
   Debug(this, "Sending pending data for server session");
-  int err;
 
   if (IsInClosingPeriod())
     return 0;
 
-  err = SendPacket();
-  if (err != 0)
-    return err;
+  RETURN_RET_IF_FAIL(SendPacket(), 0);
 
   if (!IsHandshakeCompleted()) {
-    err = DoHandshake(nullptr, nullptr, 0);
+    int err = DoHandshake(nullptr, nullptr, 0);
     if (err == 0)
       ScheduleMonitor();
     return err;
   }
 
-  for (auto stream : streams_) {
-    err = stream.second->SendPendingData(retransmit);
-    if (err != 0)
-      return err;
-  }
+  for (auto stream : streams_)
+    RETURN_RET_IF_FAIL(stream.second->SendPendingData(retransmit), 0);
 
   QuicPathStorage path;
 
@@ -2297,14 +2244,9 @@ int QuicServerSession::SendPendingData(bool retransmit) {
     if (n == 0)
       break;
 
-    sendbuf_.Push(std::move(data));
     remote_address_.Update(&path.path.remote);
-
-    err = SendPacket();
-    if (err != 0) {
-      Debug(this, "Error sending packet. Error %d", err);
-      return err;
-    }
+    sendbuf_.Push(std::move(data));
+    RETURN_RET_IF_FAIL(SendPacket(), 0);
   }
   Debug(this, "Done sending pending server session data");
 
@@ -2358,36 +2300,8 @@ void QuicServerSession::StartDrainingPeriod() {
 }
 
 int QuicServerSession::TLSHandshake_Initial() {
-  std::array<uint8_t, 8> buf;
-  size_t nread;
-  int err = SSL_read_early_data(ssl(), buf.data(), buf.size(), &nread);
   initial_ = false;
-  switch (err) {
-    case SSL_READ_EARLY_DATA_ERROR: {
-      Debug(this, "TLS Read Early Data Error. Error %d", err);
-      int code = SSL_get_error(ssl(), err);
-      switch (code) {
-        case SSL_ERROR_WANT_READ:
-        case SSL_ERROR_WANT_WRITE:
-          return 0;
-        case SSL_ERROR_SSL:
-          Debug(this, "TLS handshake error: %s", TLSErrorString(code));
-          return NGTCP2_ERR_CRYPTO;
-        default:
-          Debug(this, "TLS handshake error: %d", code);
-          return NGTCP2_ERR_CRYPTO;
-      }
-      break;
-    }
-    case SSL_READ_EARLY_DATA_SUCCESS:
-      Debug(this, "TLS Read Early Data Success");
-      if (nread > 0)
-        return NGTCP2_ERR_PROTO;
-      break;
-    case SSL_READ_EARLY_DATA_FINISH:
-      Debug(this, "TLS Read Early Data Finish");
-  }
-  return 0;
+  return DoTLSReadEarlyData(ssl());
 }
 
 int QuicServerSession::TLSHandshake_Complete() {
@@ -2551,7 +2465,7 @@ int QuicClientSession::Init(
 
   QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
 
-  int err =
+  RETURN_RET_IF_FAIL(
       ngtcp2_conn_client_new(
           &connection_,
           &dcid,
@@ -2561,29 +2475,17 @@ int QuicClientSession::Init(
           &callbacks_,
           &settings,
           *allocator_,
-          static_cast<QuicSession*>(this));
-  if (err != 0) {
-    Debug(this, "There was an error creating the session. Error %d", err);
-    return err;
-  }
+          static_cast<QuicSession*>(this)), 0);
 
-  err = SetupInitialCryptoContext();
-  if (err != 0)
-    return err;
+  RETURN_RET_IF_FAIL(SetupInitialCryptoContext(), 0);
 
   // Remote Transport Params
-  if (early_transport_params->IsArrayBufferView()) {
-    err = SetEarlyTransportParams(early_transport_params);
-    if (err != 0)
-      return err;
-  }
+  if (early_transport_params->IsArrayBufferView())
+    RETURN_RET_IF_FAIL(SetEarlyTransportParams(early_transport_params), 0);
 
   // Session Ticket
-  if (session_ticket->IsArrayBufferView()) {
-    err = SetSession(session_ticket);
-    if (err != 0)
-      return err;
-  }
+  if (session_ticket->IsArrayBufferView())
+    RETURN_RET_IF_FAIL(SetSession(session_ticket), 0);
 
   StartIdleTimer(settings.idle_timeout);
   return 0;
@@ -2621,11 +2523,8 @@ int QuicClientSession::SelectPreferredAddress(
 
 int QuicClientSession::Start() {
   int err;
-  for (auto stream : streams_) {
-    err = stream.second->Send0RTTData();
-    if (err != 0)
-      return err;
-  }
+  for (auto stream : streams_)
+    RETURN_RET_IF_FAIL(stream.second->Send0RTTData(), 0);
   return DoHandshakeWriteOnce();
 }
 
@@ -2799,31 +2698,7 @@ int QuicClientSession::OnKey(
 int QuicClientSession::TLSRead() {
   CHECK(!IsDestroyed());
   ClearTLSError();
-
-  std::array<uint8_t, 4096> buf;
-  size_t nread;
-  Debug(this, "Reading TLS data");
-  for (;;) {
-    int err = SSL_read_ex(ssl(), buf.data(), buf.size(), &nread);
-    if (err == 1) {
-      continue;
-    }
-    int code = SSL_get_error(ssl(), 0);
-    switch (code) {
-      case SSL_ERROR_WANT_READ:
-      case SSL_ERROR_WANT_WRITE:
-        return 0;
-      case SSL_ERROR_SSL:
-      case SSL_ERROR_ZERO_RETURN:
-        // TLS read error
-        // std::cerr << "TLS read error: "
-        //           << ERR_error_string(ERR_get_error(), nullptr) << std::endl;
-        return NGTCP2_ERR_CRYPTO;
-      default:
-        // std::cerr << "TLS read error: " << err << std::endl;
-        return NGTCP2_ERR_CRYPTO;
-    }
-  }
+  return ClearTLS(ssl(), true);
 }
 
 int QuicClientSession::DoHandshake(

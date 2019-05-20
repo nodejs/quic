@@ -210,7 +210,7 @@ class QuicSession : public AsyncWrap,
       ngtcp2_crypto_level crypto_level,
       uint64_t offset,
       size_t datalen);
-  int AckedStreamDataOffset(
+  void AckedStreamDataOffset(
       int64_t stream_id,
       uint64_t offset,
       size_t datalen);

@@ -32,10 +32,16 @@ constexpr uint64_t DEFAULT_RETRYTOKEN_EXPIRATION = 10ULL;
 
 #define RETURN_IF_FAIL(test, success, ret)                                     \
   do {                                                                         \
-    if ((test) != (success)) return (ret);                                     \
+    if (UNLIKELY((test) != (success))) return (ret);                           \
   } while (0)
 
 #define RETURN_IF_FAIL_OPENSSL(test) RETURN_IF_FAIL(test, 1, -1)
+
+#define RETURN_RET_IF_FAIL(test, success)                                      \
+  do {                                                                         \
+    int ret = test;                                                            \
+    if (UNLIKELY((ret) != (success))) return (ret);                            \
+  } while (0)
 
 enum SelectPreferredAddressPolicy {
   // Ignore the server-provided preferred address
