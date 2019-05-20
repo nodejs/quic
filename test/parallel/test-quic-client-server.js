@@ -24,7 +24,7 @@ const server = createSocket({ type: 'udp4', port: 0 });
 
 const unidata = ['I wonder if it worked.', 'test'];
 const kServerName = 'test';
-const kALPN = 'h3-20';
+const kALPN = 'zzz';  // ALPN can be overriden to whatever we want
 
 const kKeylogs = [
   /SERVER_HANDSHAKE_TRAFFIC_SECRET.*/,
@@ -40,7 +40,7 @@ const countdown = new Countdown(2, () => {
   client.close();
 });
 
-server.listen({ key, cert });
+server.listen({ key, cert, alpn: kALPN });
 server.on('session', common.mustCall((session) => {
   debug('QuicServerSession Created');
 
@@ -74,9 +74,9 @@ server.on('session', common.mustCall((session) => {
 
 server.on('ready', common.mustCall(() => {
   debug('Server is listening on port %d', server.address.port);
-  client = createSocket({ type: 'udp6', port: 0 });
+  client = createSocket({ type: 'udp4', port: 0 });
   const req = client.connect({
-    type: 'udp6',
+    type: 'udp4',
     address: 'localhost',
     port: server.address.port,
     rejectUnauthorized: false,
@@ -84,6 +84,7 @@ server.on('ready', common.mustCall(() => {
     servername: kServerName,
     minCidLen: 5,
     maxCidLen: 10,
+    alpn: kALPN,
   });
 
   assert.strictEqual(req.servername, kServerName);

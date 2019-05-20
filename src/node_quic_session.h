@@ -88,13 +88,15 @@ class QuicSession : public AsyncWrap,
       QuicSocket* socket,
       v8::Local<v8::Object> wrap,
       crypto::SecureContext* ctx,
-      AsyncWrap::ProviderType provider);
+      AsyncWrap::ProviderType provider,
+      const std::string& alpn);
   ~QuicSession() override;
 
   void AddStream(QuicStream* stream);
   void Close();
   void Closing();
   void Destroy();
+  const std::string& GetALPN();
   void GetLocalTransportParams(
       ngtcp2_transport_params* params);
   uint32_t GetNegotiatedVersion();
@@ -582,6 +584,8 @@ class QuicSession : public AsyncWrap,
   size_t max_cid_len_;
   size_t min_cid_len_;
 
+  std::string alpn_;
+
   mem::Allocator<ngtcp2_mem> allocator_;
 
   friend class QuicServerSession;
@@ -601,7 +605,8 @@ class QuicServerSession : public QuicSession {
       const struct sockaddr* addr,
       const ngtcp2_cid* dcid,
       const ngtcp2_cid* ocid,
-      uint32_t version);
+      uint32_t version,
+      const std::string& alpn = NGTCP2_ALPN_H3);
 
   void AddToSocket(QuicSocket* socket) override;
 
@@ -631,7 +636,8 @@ class QuicServerSession : public QuicSession {
       const struct sockaddr* addr,
       const ngtcp2_cid* dcid,
       const ngtcp2_cid* ocid,
-      uint32_t version);
+      uint32_t version,
+      const std::string& alpn);
 
   void DisassociateCID(
       const ngtcp2_cid* cid) override;
@@ -731,7 +737,8 @@ class QuicClientSession : public QuicSession {
       v8::Local<v8::Value> session_ticket,
       v8::Local<v8::Value> dcid,
       int select_preferred_address_policy =
-          QUIC_PREFERRED_ADDRESS_IGNORE);
+          QUIC_PREFERRED_ADDRESS_IGNORE,
+      const std::string& alpn = NGTCP2_ALPN_H3);
 
   QuicClientSession(
       QuicSocket* socket,
@@ -744,7 +751,8 @@ class QuicClientSession : public QuicSession {
       v8::Local<v8::Value> early_transport_params,
       v8::Local<v8::Value> session_ticket,
       v8::Local<v8::Value> dcid,
-      int select_preferred_address_policy);
+      int select_preferred_address_policy,
+      const std::string& alpn);
 
   void AddToSocket(QuicSocket* socket) override;
 

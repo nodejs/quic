@@ -717,7 +717,8 @@ QuicSession::QuicSession(
     QuicSocket* socket,
     Local<Object> wrap,
     SecureContext* ctx,
-    AsyncWrap::ProviderType type) :
+    AsyncWrap::ProviderType type,
+    const std::string& alpn) :
     AsyncWrap(socket->env(), wrap, type),
     rx_crypto_level_(NGTCP2_CRYPTO_LEVEL_INITIAL),
     tx_crypto_level_(NGTCP2_CRYPTO_LEVEL_INITIAL),
@@ -740,6 +741,7 @@ QuicSession::QuicSession(
     current_ngtcp2_memory_(0),
     max_cid_len_(NGTCP2_MAX_CIDLEN),
     min_cid_len_(NGTCP2_MIN_CIDLEN),
+    alpn_(alpn),
     allocator_(this) {
   ssl_.reset(SSL_new(ctx->ctx_.get()));
   SSL_CTX_set_keylog_callback(ctx->ctx_.get(), OnKeylog);
@@ -759,6 +761,10 @@ QuicSession::~QuicSession() {
   CHECK(destroyed_);
   ssl_.reset();
   ngtcp2_conn_del(connection_);
+}
+
+const std::string& QuicSession::GetALPN() {
+  return alpn_;
 }
 
 void QuicSession::Keylog(const char* line) {
@@ -1918,11 +1924,14 @@ QuicServerSession::QuicServerSession(
     const struct sockaddr* addr,
     const ngtcp2_cid* dcid,
     const ngtcp2_cid* ocid,
-    uint32_t version) :
-    QuicSession(socket,
-                wrap,
-                socket->GetServerSecureContext(),
-                AsyncWrap::PROVIDER_QUICSERVERSESSION),
+    uint32_t version,
+    const std::string& alpn) :
+    QuicSession(
+        socket,
+        wrap,
+        socket->GetServerSecureContext(),
+        AsyncWrap::PROVIDER_QUICSERVERSESSION,
+        alpn),
     pscid_{},
     rcid_(*rcid),
     draining_(false) {
@@ -2081,7 +2090,8 @@ std::shared_ptr<QuicSession> QuicServerSession::New(
     const struct sockaddr* addr,
     const ngtcp2_cid* dcid,
     const ngtcp2_cid* ocid,
-    uint32_t version) {
+    uint32_t version,
+    const std::string& alpn) {
   std::shared_ptr<QuicSession> session;
   Local<Object> obj;
   if (!socket->env()
@@ -2097,7 +2107,8 @@ std::shared_ptr<QuicSession> QuicServerSession::New(
           addr,
           dcid,
           ocid,
-          version));
+          version,
+          alpn));
 
   session->AddToSocket(socket);
   return session;
@@ -2445,7 +2456,8 @@ std::shared_ptr<QuicSession> QuicClientSession::New(
     Local<Value> early_transport_params,
     Local<Value> session_ticket,
     Local<Value> dcid,
-    int select_preferred_address_policy) {
+    int select_preferred_address_policy,
+    const std::string& alpn) {
   std::shared_ptr<QuicSession> session;
   Local<Object> obj;
   if (!socket->env()
@@ -2466,7 +2478,8 @@ std::shared_ptr<QuicSession> QuicClientSession::New(
           early_transport_params,
           session_ticket,
           dcid,
-          select_preferred_address_policy);
+          select_preferred_address_policy,
+          alpn);
 
   session->AddToSocket(socket);
   session->Start();
@@ -2485,8 +2498,14 @@ QuicClientSession::QuicClientSession(
     Local<Value> early_transport_params,
     Local<Value> session_ticket,
     Local<Value> dcid,
-    int select_preferred_address_policy) :
-    QuicSession(socket, wrap, context, AsyncWrap::PROVIDER_QUICCLIENTSESSION),
+    int select_preferred_address_policy,
+    const std::string& alpn) :
+    QuicSession(
+        socket,
+        wrap,
+        context,
+        AsyncWrap::PROVIDER_QUICCLIENTSESSION,
+        alpn),
     resumption_(false),
     hostname_(hostname),
     select_preferred_address_policy_(select_preferred_address_policy) {
@@ -2707,8 +2726,8 @@ int QuicClientSession::SetSession(SSL_SESSION* session) {
 void QuicClientSession::InitTLS_Post() {
   SSL_set_connect_state(ssl());
 
-  const uint8_t* alpn = reinterpret_cast<const uint8_t*>(NGTCP2_ALPN_H3);
-  size_t alpnlen = strsize(NGTCP2_ALPN_H3);
+  const uint8_t* alpn = reinterpret_cast<const uint8_t*>(GetALPN().c_str());
+  size_t alpnlen = GetALPN().length();
   SSL_set_alpn_protos(ssl(), alpn, alpnlen);
 
   // If the hostname is an IP address and we have no additional
@@ -3333,6 +3352,13 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
   USE(args[10]->Int32Value(
     env->context()).To(&select_preferred_address_policy));
 
+  std::string alpn(NGTCP2_ALPN_H3);
+  if (args[11]->IsString()) {
+    Utf8Value val(env->isolate(), args[11]);
+    alpn = val.length();
+    alpn += *val;
+  }
+
   socket->ReceiveStart();
 
   std::shared_ptr<QuicSession> session =
@@ -3345,7 +3371,8 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
           args[7],
           args[8],
           args[9],
-          select_preferred_address_policy);
+          select_preferred_address_policy,
+          alpn);
 
   socket->SendPendingData();
 

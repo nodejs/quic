@@ -84,8 +84,8 @@ int ALPN_Select_Proto_CB(SSL* ssl,
 
   switch (version) {
   case NGTCP2_PROTO_VER:
-    alpn = reinterpret_cast<const uint8_t*>(NGTCP2_ALPN_H3);
-    alpnlen = strsize(NGTCP2_ALPN_H3);
+    alpn = reinterpret_cast<const uint8_t*>(session->GetALPN().c_str());
+    alpnlen = session->GetALPN().length();
     break;
   default:
     // Unexpected QUIC protocol version
