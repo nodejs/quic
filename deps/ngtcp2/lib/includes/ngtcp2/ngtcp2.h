@@ -2057,6 +2057,13 @@ NGTCP2_EXTERN ngtcp2_duration ngtcp2_conn_get_idle_timeout(ngtcp2_conn *conn);
 /**
  * @function
  *
+ * `ngtcp2_conn_get_pto` returns Probe Timeout (PTO).
+ */
+NGTCP2_EXTERN ngtcp2_duration ngtcp2_conn_get_pto(ngtcp2_conn *conn);
+
+/**
+ * @function
+ *
  * `ngtcp2_conn_set_remote_transport_params` sets transport parameter
  * |params| to |conn|.
  *
@@ -2540,7 +2547,9 @@ NGTCP2_EXTERN const ngtcp2_addr *ngtcp2_conn_get_remote_addr(ngtcp2_conn *conn);
  * @function
  *
  * `ngtcp2_conn_initiate_migration` starts connection migration to the
- * given |path|.  Only client can initiate migration.
+ * given |path|.  Only client can initiate migration.  This function
+ * does immediate migration; it does not probe peer reachability from
+ * a new local address.
  *
  * This function returns 0 if it succeeds, or one of the following
  * negative error codes:
