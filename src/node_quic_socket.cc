@@ -123,7 +123,7 @@ int QuicSocket::Bind(
         address, port, flags, family);
 
   HandleScope scope(env()->isolate());
-  Local<Context> context = env()->context();
+  Context::Scope context_scope(env()->context());
 
   sockaddr_storage addr;
   int err = SocketAddress::ToSockAddr(family, address, port, &addr);
@@ -206,11 +206,11 @@ void QuicSocket::OnRecv(
 
   if (nread < 0) {
     Debug(socket, "Reading data from UDP socket failed. Error %d", nread);
-    HandleScope scope(socket->env()->isolate());
-    Local<Context> context = socket->env()->context();
-    Local<Value> arg = Integer::New(socket->env()->isolate(), nread);
-    socket->MakeCallback(
-        socket->env()->quic_on_socket_error_function(), 1, &arg);
+    Environment* env = socket->env();
+    HandleScope scope(env->isolate());
+    Context::Scope context_scope(env->context());
+    Local<Value> arg = Integer::New(env->isolate(), nread);
+    socket->MakeCallback(env->quic_on_socket_error_function(), 1, &arg);
     return;
   }
 
@@ -322,7 +322,7 @@ void QuicSocket::RemoveSession(QuicCID* cid, const sockaddr* addr) {
 void QuicSocket::ReportSendError(int error) {
   Debug(this, "There was an error sending the UDP packet. Error %d", error);
   HandleScope scope(env()->isolate());
-  Local<Context> context = env()->context();
+  Context::Scope context_scope(env()->context());
   Local<Value> arg = Integer::New(env()->isolate(), error);
   MakeCallback(env()->quic_on_socket_error_function(), 1, &arg);
   return;
@@ -688,12 +688,11 @@ void NewQuicSocket(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   CHECK(args.IsConstructCall());
 
-  bool validate_address = false;
-  int32_t retry_token_expiration = DEFAULT_RETRYTOKEN_EXPIRATION;
-  int32_t max_connections_per_host = DEFAULT_MAX_CONNECTIONS_PER_HOST;
-  USE(args[0]->BooleanValue(env->context()).To(&validate_address));
-  USE(args[1]->Int32Value(env->context()).To(&retry_token_expiration));
-  USE(args[2]->Int32Value(env->context()).To(&max_connections_per_host));
+  bool validate_address = args[0]->BooleanValue(args.GetIsolate());
+  uint32_t retry_token_expiration = DEFAULT_RETRYTOKEN_EXPIRATION;
+  uint32_t max_connections_per_host = DEFAULT_MAX_CONNECTIONS_PER_HOST;
+  USE(args[1]->Uint32Value(env->context()).To(&retry_token_expiration));
+  USE(args[2]->Uint32Value(env->context()).To(&max_connections_per_host));
   CHECK_GE(retry_token_expiration, MIN_RETRYTOKEN_EXPIRATION);
   CHECK_LE(retry_token_expiration, MAX_RETRYTOKEN_EXPIRATION);
 

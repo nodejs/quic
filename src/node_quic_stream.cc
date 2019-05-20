@@ -101,7 +101,6 @@ void QuicStream::Reset(uint64_t final_size, uint16_t app_error_code) {
     Number::New(env()->isolate(), final_size),
     Integer::New(env()->isolate(), app_error_code)
   };
-  Local<Value> arg = Number::New(env()->isolate(), app_error_code);
   MakeCallback(env()->quic_on_stream_reset_function(), arraysize(argv), argv);
 }
 

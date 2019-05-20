@@ -32,10 +32,10 @@ constexpr int ERR_INVALID_REMOTE_TRANSPORT_PARAMS = -1;
 constexpr int ERR_INVALID_TLS_SESSION_TICKET = -2;
 
 #define QUICSESSION_CONFIG(V)                                                 \
-  V(MAX_STREAM_DATA_BIDI_LOCAL, max_stream_data_bidi_local, 256_k)            \
-  V(MAX_STREAM_DATA_BIDI_REMOTE, max_stream_data_bidi_remote, 256_k)          \
-  V(MAX_STREAM_DATA_UNI, max_stream_data_uni, 256_k)                          \
-  V(MAX_DATA, max_data, 1_m)                                                  \
+  V(MAX_STREAM_DATA_BIDI_LOCAL, max_stream_data_bidi_local, 256 * 1024)       \
+  V(MAX_STREAM_DATA_BIDI_REMOTE, max_stream_data_bidi_remote, 256 * 1024)     \
+  V(MAX_STREAM_DATA_UNI, max_stream_data_uni, 256 * 1024)                     \
+  V(MAX_DATA, max_data, 1 * (1024 ^ 2))                                       \
   V(MAX_STREAMS_BIDI, max_streams_bidi, 100)                                  \
   V(MAX_STREAMS_UNI, max_streams_uni, 3)                                      \
   V(IDLE_TIMEOUT, idle_timeout, 10 * 1000)                                    \

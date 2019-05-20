@@ -18,33 +18,13 @@
 namespace node {
 namespace quic {
 
-/* NOLINTNEXTLINE(build/namespaces) */
-namespace {
-
-constexpr unsigned long long operator"" _k(  // NOLINT(runtime/int)
-    unsigned long long k) {                  // NOLINT(runtime/int)
-  return k * 1024;
-}
-
-constexpr unsigned long long operator"" _m(  // NOLINT(runtime/int)
-    unsigned long long m) {                  // NOLINT(runtime/int)
-  return m * 1024 * 1024;
-}
-
-constexpr unsigned long long operator"" _g(  // NOLINT(runtime/int)
-    unsigned long long g) {                  // NOLINT(runtime/int)
-  return g * 1024 * 1024 * 1024;
-}
-
-}  // namespace
-
 constexpr uint16_t NGTCP2_APP_NOERROR = 0xff00;
 
 constexpr size_t MIN_INITIAL_QUIC_PKT_SIZE = 1200;
 constexpr size_t NGTCP2_SV_SCIDLEN = 18;
 constexpr size_t TOKEN_RAND_DATALEN = 16;
 constexpr size_t TOKEN_SECRETLEN = 16;
-constexpr size_t DEFAULT_MAX_STREAM_DATA_BIDI_LOCAL = 256_k;
+constexpr size_t DEFAULT_MAX_STREAM_DATA_BIDI_LOCAL = 256 * 1024;
 constexpr size_t DEFAULT_MAX_CONNECTIONS_PER_HOST = 100;
 constexpr uint64_t MIN_RETRYTOKEN_EXPIRATION = 1;
 constexpr uint64_t MAX_RETRYTOKEN_EXPIRATION = 60;
@@ -67,11 +47,11 @@ enum SelectPreferredAddressPolicy {
 // TODO(@jasnell): Fun hash combine trick based on a variadic template that
 // I came across a while back but can't remember where. Will add an attribution
 // if I can find the source.
-inline void hash_combine(size_t& seed) { }
+inline void hash_combine(size_t* seed) { }
 
 template <typename T, typename... Args>
-inline void hash_combine(size_t& seed, const T& value, Args... rest) {
-    seed ^= std::hash<T>{}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+inline void hash_combine(size_t* seed, const T& value, Args... rest) {
+    *seed ^= std::hash<T>{}(value) + 0x9e3779b9 + (*seed << 6) + (*seed >> 2);
     hash_combine(seed, rest...);
 }
 
@@ -87,7 +67,7 @@ class SocketAddress {
         case AF_INET: {
           const sockaddr_in* ipv4 =
               reinterpret_cast<const sockaddr_in*>(addr);
-          hash_combine(hash, ipv4->sin_port, ipv4->sin_addr.s_addr);
+          hash_combine(&hash, ipv4->sin_port, ipv4->sin_addr.s_addr);
           break;
         }
         case AF_INET6: {
@@ -95,7 +75,7 @@ class SocketAddress {
               reinterpret_cast<const sockaddr_in6*>(addr);
           const uint64_t* a =
               reinterpret_cast<const uint64_t*>(&ipv6->sin6_addr);
-          hash_combine(hash, ipv6->sin6_port, a[0], a[1]);
+          hash_combine(&hash, ipv6->sin6_port, a[0], a[1]);
           break;
         }
         default:
@@ -121,12 +101,11 @@ class SocketAddress {
 
   static int ResolvePreferredAddress(
       Environment* env,
-      ADDRESS_FAMILY local_address_family,
+      int local_address_family,
       const ngtcp2_preferred_addr* paddr,
       uv_getaddrinfo_t* req) {
-
     int af;
-    const uint8_t *binaddr;
+    const uint8_t* binaddr;
     uint16_t port;
     constexpr uint8_t empty_addr[] = {0, 0, 0, 0, 0, 0, 0, 0,
                                       0, 0, 0, 0, 0, 0, 0, 0};
@@ -148,7 +127,7 @@ class SocketAddress {
     }
 
     char host[NI_MAXHOST];
-    if (inet_ntop(af, binaddr, host, sizeof(host)) == NULL)
+    if (uv_inet_ntop(af, binaddr, host, sizeof(host)) == 0)
       return -1;
 
     addrinfo hints{};
@@ -250,7 +229,7 @@ class SocketAddress {
     return GetAddressLen(&address_);
   }
 
-  ADDRESS_FAMILY GetFamily() { return address_.ss_family; }
+  int GetFamily() { return address_.ss_family; }
 
  private:
   sockaddr_storage address_;

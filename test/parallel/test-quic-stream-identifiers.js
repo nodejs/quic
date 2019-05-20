@@ -21,10 +21,8 @@ const common = require('../common');
 if (!common.hasCrypto)
   common.skip('missing crypto');
 
-const { Buffer } = require('buffer');
 const Countdown = require('../common/countdown');
 const assert = require('assert');
-const fs = require('fs');
 const fixtures = require('../common/fixtures');
 const key = fixtures.readKey('agent8-key.pem', 'binary');
 const cert = fixtures.readKey('agent8-cert.pem', 'binary');

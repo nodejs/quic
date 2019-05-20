@@ -74,9 +74,9 @@ server.on('session', common.mustCall((session) => {
 
 server.on('ready', common.mustCall(() => {
   debug('Server is listening on port %d', server.address.port);
-  client = createSocket({ type: 'udp4', port: 0 });
+  client = createSocket({ type: 'udp6', port: 0 });
   const req = client.connect({
-    type: 'udp4',
+    type: 'udp6',
     address: 'localhost',
     port: server.address.port,
     rejectUnauthorized: false,

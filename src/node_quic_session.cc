@@ -115,7 +115,7 @@ void QuicSessionConfig::ToSettings(ngtcp2_settings* settings,
         auto& dest = settings->preferred_address.ipv4_addr;
         memcpy(
             &dest,
-            &reinterpret_cast<const sockaddr_in*>(addr)->sin_addr,
+            &(reinterpret_cast<const sockaddr_in*>(addr)->sin_addr),
             sizeof(dest));
         settings->preferred_address.ipv4_port = SocketAddress::GetPort(addr);
         break;
@@ -124,7 +124,7 @@ void QuicSessionConfig::ToSettings(ngtcp2_settings* settings,
         auto& dest = settings->preferred_address.ipv6_addr;
         memcpy(
             &dest,
-            &reinterpret_cast<const sockaddr_in6*>(addr)->sin6_addr,
+            &(reinterpret_cast<const sockaddr_in6*>(addr)->sin6_addr),
             sizeof(dest));
         settings->preferred_address.ipv6_port = SocketAddress::GetPort(addr);
         break;
@@ -144,15 +144,15 @@ void QuicSessionConfig::ToSettings(ngtcp2_settings* settings,
 }
 
 void QuicSession::CheckAllocatedSize(size_t previous_size) {
-  //CHECK_GE(current_ngtcp2_memory_, previous_size);
+  // CHECK_GE(current_ngtcp2_memory_, previous_size);
 }
 
 void QuicSession::IncrementAllocatedSize(size_t size) {
-  //current_ngtcp2_memory_ += size;
+  // current_ngtcp2_memory_ += size;
 }
 
 void QuicSession::DecrementAllocatedSize(size_t size) {
-  //current_ngtcp2_memory_ -= size;
+  // current_ngtcp2_memory_ -= size;
 }
 
 // Static ngtcp2 callbacks are registered when ngtcp2 when a new ngtcp2_conn is
@@ -3329,7 +3329,7 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
   if (err != 0)
     return args.GetReturnValue().Set(err);
 
-  int select_preferred_address_policy;
+  int select_preferred_address_policy = QUIC_PREFERRED_ADDRESS_IGNORE;
   USE(args[10]->Int32Value(
     env->context()).To(&select_preferred_address_policy));
 
