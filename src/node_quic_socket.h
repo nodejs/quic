@@ -74,8 +74,6 @@ class QuicSocket : public HandleWrap {
       const sockaddr* addr);
   void ReportSendError(
       int error);
-  void SendPendingData(
-      bool retransmit = false);
   int SetBroadcast(
       bool on);
   int SetMulticastInterface(

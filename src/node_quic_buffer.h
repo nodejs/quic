@@ -187,6 +187,19 @@ class QuicBuffer : public MemoryRetainer {
     CHECK_EQ(length_, 0);
   }
 
+  inline uint64_t Copy(
+      uv_buf_t* bufs,
+      size_t nbufs) {
+    uint64_t total = 0;
+    for (size_t n = 0; n < nbufs; n++) {
+      MallocedBuffer<uint8_t> data(bufs[n].len);
+      memcpy(data.data, bufs[n].base, bufs[n].len);
+      total += bufs[n].len;
+      Push(std::move(data));
+    }
+    return total;
+  }
+
   // Push one or more uv_buf_t instances into the buffer.
   // the done_cb callback will be invoked when the last
   // uv_buf_t in the bufs array is consumed and popped out

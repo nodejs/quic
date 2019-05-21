@@ -11,6 +11,8 @@
 #include "node_quic_util.h"
 #include "v8.h"
 
+#include <algorithm>
+
 namespace node {
 
 using v8::Context;
@@ -57,15 +59,13 @@ QuicStream::QuicStream(
     AsyncWrap(session->env(), wrap, AsyncWrap::PROVIDER_QUICSTREAM),
     StreamBase(session->env()),
     session_(session),
-    flags_(0),
     stream_id_(stream_id),
-    reset_(false),
-    should_send_fin_(false),
+    flags_(QUIC_STREAM_FLAG_NONE),
     available_outbound_length_(0) {
   CHECK_NOT_NULL(session);
+  session->AddStream(this);
   StreamBase::AttachToObject(GetObject());
   PushStreamListener(&stream_listener_);
-  session->AddStream(this);
 }
 
 QuicStream::~QuicStream() {
@@ -74,31 +74,34 @@ QuicStream::~QuicStream() {
   CHECK_EQ(0, streambuf_.Length());
 }
 
-void QuicStream::Close(
-    uint16_t app_error_code) {
+// QuicStream::Close() is called by the QuicSession when ngtcp2 detects that
+// a stream has been closed. This, in turn, calls out to the JavaScript to
+// start the process of tearing down and destroying the QuicStream instance.
+void QuicStream::Close(uint16_t app_error_code) {
   Debug(this, "Stream %llu closed with code %d", GetID(), app_error_code);
   HandleScope scope(env()->isolate());
+  Context::Scope context_context(env()->context());
   flags_ |= QUIC_STREAM_FLAG_CLOSED;
   Local<Value> arg = Number::New(env()->isolate(), app_error_code);
   MakeCallback(env()->quic_on_stream_close_function(), 1, &arg);
 }
 
+// Receiving a reset means that any data we've accumulated to send
+// can be discarded and we don't want to keep writing data, so
+// we want to clear our outbound buffers here and notify
+// the JavaScript side that we've been reset so that we stop
+// pumping data out.
 void QuicStream::Reset(uint64_t final_size, uint16_t app_error_code) {
-  // Receiving a reset means that any data we've accumulated to send
-  // can be discarded and we don't want to keep writing data, so
-  // we likely want to clear our outbound buffers here and notify
-  // the JavaScript side that we've been reset so that we stop
-  // pumping data out.
   Debug(this,
         "Resetting stream %llu with app error code %d, and final size %llu",
         GetID(),
         app_error_code,
         final_size);
-  reset_ = true;
   HandleScope scope(env()->isolate());
+  Context::Scope context_scope(env()->context());
   streambuf_.Cancel();
   Local<Value> argv[] = {
-    Number::New(env()->isolate(), final_size),
+    Number::New(env()->isolate(), static_cast<double>(final_size)),
     Integer::New(env()->isolate(), app_error_code)
   };
   MakeCallback(env()->quic_on_stream_reset_function(), arraysize(argv), argv);
@@ -113,10 +116,8 @@ void QuicStream::Destroy() {
 int QuicStream::DoShutdown(ShutdownWrap* req_wrap) {
   if (IsDestroyed())
     return UV_EPIPE;
-  Debug(this, "Writable side shutdown");
   flags_ |= QUIC_STREAM_FLAG_SHUT;
-  should_send_fin_ = true;
-
+  session_->SendStreamData(this);
   return 1;
 }
 
@@ -125,40 +126,59 @@ int QuicStream::DoWrite(
     uv_buf_t* bufs,
     size_t nbufs,
     uv_stream_t* send_handle) {
-
   CHECK_NULL(send_handle);
 
-  // If the stream has been reset, then the writable side of
-  // the duplex should have been closed and we shouldn't be
-  // receiving any more data.. but just in case...
-  if (reset_ || IsDestroyed()) {
+  if (IsDestroyed()) {
     req_wrap->Done(UV_EOF);
     return 0;
   }
-  // Buffers written must be held on to until acked. The callback
-  // passed in here will be called when the ack is received.
-  // TODO(@jasnell): For now, the data will be held onto for
-  // pretty much eternity, and the implementation will retry an
-  // unlimited number of times. We need to constrain that to
-  // fail reasonably after a given number of attempts.
-  // Specifically, we need to ensure that all of the data is
-  // cleaned up when the stream is destroyed, even if it hasn't
-  // been acknowledged.
+  // There's a difficult balance required here:
   //
-  // When more than one buffer is passed in, the callback will
-  // only be invoked when the final buffer in the set is consumed.
-  uint64_t len =
-      streambuf_.Push(
-          bufs,
-          nbufs,
-          [&](int status, void* user_data) {
-              DecrementAvailableOutboundLength(len);
-              WriteWrap* wrap = static_cast<WriteWrap*>(user_data);
-              CHECK_NOT_NULL(wrap);
-              wrap->Done(status);
-            }, req_wrap, req_wrap->object());
+  // Unlike typical UDP, which is fire-and-forget, QUIC packets
+  // have to be acknowledged. If a packet is not acknowledged
+  // soon enough, it is retransmitted. The exact arrangement
+  // of packets being retransmitted varies over the course of
+  // the connection on many factors, so we can't simply encode
+  // the packets and resend them. Instead, we have to retain the
+  // original data and re-encode packets on each transmission
+  // attempt. This means we have to persist the data written
+  // until either an acknowledgement is received or the stream
+  // is reset and canceled.
+  //
+  // That said, on the JS Streams API side, we can only write
+  // one batch of buffers at a time. That is, DoWrite won't be
+  // called again until the previous DoWrite is completed by
+  // calling WriteWrap::Done(). The challenge, however, is that
+  // calling Done() essentially signals that we're done with
+  // the buffers being written, allowing those to be freed.
+  //
+  // In other words, if we just store the given buffers and
+  // wait to call Done() when we receive an acknowledgement,
+  // we severely limit our throughput and kill performance
+  // because the JavaScript side won't be able to send additional
+  // buffers until we receive the acknowledgement from the peer.
+  // However, if we call Done() here to allow the next chunk to
+  // be written, we have to copy the data because the buffers
+  // may end up being freed once the callback is invoked. The
+  // memcpy obviously incurs a cost but it'll at least be less
+  // than waiting for the acknowledgement, allowing data to be
+  // written faster but at the cost of a data copy.
+  //
+  // Because of the need to copy, performing many small writes
+  // will incur a performance penalty over a smaller number of
+  // larger writes, but only up to a point. Frequently copying
+  // large chunks of data will end up slowing things down also.
+  //
+  // Because we are copying to allow the JS side to write
+  // faster independently of the underlying send, we will have
+  // to be careful not to allow the internal buffer to grow
+  // too large, or we'll run into several other problems.
 
-  IncrementAvailableOutboundLength(len);
+  uint64_t len = streambuf_.Copy(bufs, nbufs);
+  req_wrap->Done(0);
+
+  // IncrementAvailableOutboundLength(len);
+  session_->SendStreamData(this);
   return 0;
 }
 
@@ -170,23 +190,18 @@ QuicSession* QuicStream::Session() {
   return session_;
 }
 
-int QuicStream::AckedDataOffset(
-    uint64_t offset,
-    size_t datalen) {
+void QuicStream::AckedDataOffset(uint64_t offset,  size_t datalen) {
   streambuf_.Consume(datalen);
-  return 0;
 }
 
-int QuicStream::Send0RTTData() {
-  return session_->Send0RTTStreamData(this, should_send_fin_, &streambuf_);
+size_t QuicStream::DrainInto(
+    std::vector<ngtcp2_vec>* vec,
+    QuicBuffer::drain_from from) {
+  return streambuf_.DrainInto(vec, from);
 }
 
-int QuicStream::SendPendingData(bool retransmit) {
-  return session_->SendStreamData(
-      this,
-      should_send_fin_,
-      &streambuf_,
-      retransmit ? QuicBuffer::DRAIN_FROM_ROOT : QuicBuffer::DRAIN_FROM_HEAD);
+void QuicStream::Commit(size_t count) {
+  streambuf_.SeekHead(count);
 }
 
 inline void QuicStream::IncrementAvailableOutboundLength(size_t amount) {
@@ -214,9 +229,6 @@ int QuicStream::ReadStart() {
   Debug(this, "Reading started.");
   flags_ |= QUIC_STREAM_FLAG_READ_START;
   flags_ &= ~QUIC_STREAM_FLAG_READ_PAUSED;
-
-  // Flush data to JS here?
-
   return 0;
 }
 
@@ -229,21 +241,15 @@ int QuicStream::ReadStop() {
   return 0;
 }
 
-int QuicStream::ReceiveData(
-    int fin,
-    const uint8_t* data,
-    size_t datalen) {
-  Debug(this, "Receiving %d bytes of data", datalen);
-  if (reset_) {
-    Debug(this, "Stream has been reset, discarding received data.");
-    return 0;
-  }
-  HandleScope scope(env()->isolate());
-  do {
+// Passes chunks of data on to the JavaScript side as soon as they are
+// received. The caller of this must have a HandleScope.
+void QuicStream::ReceiveData(int fin, const uint8_t* data, size_t datalen) {
+  Debug(this, "Receiving %d bytes of data. Final? %s",
+        datalen, fin ? "yes" : "no");
+
+  while (datalen > 0) {
     uv_buf_t buf = EmitAlloc(datalen);
-    ssize_t avail = datalen;
-    if (static_cast<ssize_t>(buf.len) < avail)
-      avail = buf.len;
+    size_t avail = std::min(static_cast<size_t>(buf.len), datalen);
 
     // TODO(@jasnell): For now, we're allocating and copying. Once
     // we determine if we can safely switch to a non-allocated mode
@@ -256,17 +262,11 @@ int QuicStream::ReceiveData(
       memcpy(buf.base, data, avail);
     data += avail;
     datalen -= avail;
-    Debug(this, "Emitting %d bytes of data", avail);
     EmitRead(avail, buf);
-  } while (datalen != 0);
+  };
 
-  if (fin) {
-    Debug(this, "Emitting EOF");
+  if (fin)
     EmitRead(UV_EOF);
-    Session()->ShutdownStreamRead(stream_id_);
-  }
-
-  return 0;
 }
 
 // JavaScript API

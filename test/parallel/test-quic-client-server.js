@@ -16,6 +16,7 @@ const cert = fixtures.readKey('agent8-cert.pem', 'binary');
 const { debuglog } = require('util');
 const debug = debuglog('test');
 
+const filedata = fs.readFileSync(__filename, { encoding: 'utf8' });
 
 const { createSocket } = require('quic');
 
@@ -46,12 +47,13 @@ server.on('session', common.mustCall((session) => {
 
   session.on('keylog', common.mustCall((line) => {
     assert(kKeylogs.shift().test(line));
-  }), kKeylogs.length);
+  }, kKeylogs.length));
 
-  session.on('secure', common.mustCall((servername, alpn) => {
+  session.on('secure', common.mustCall((servername, alpn, cipher) => {
     debug('QuicServerSession TLS Handshake Complete');
-    debug('Server name: %s', servername);
-    debug('ALPN: %s', alpn);
+    debug('  Server name: %s', servername);
+    debug('  ALPN: %s', alpn);
+    debug('  Cipher: %s, %s', cipher.name, cipher.version);
     assert.strictEqual(session.servername, servername);
     assert.strictEqual(servername, kServerName);
     assert.strictEqual(session.alpnProtocol, alpn);
@@ -60,15 +62,25 @@ server.on('session', common.mustCall((session) => {
     uni.write(unidata[0]);
     uni.end(unidata[1]);
     debug('Unidirectional, Server-initiated stream %d opened', uni.id);
+    uni.on('data', common.mustNotCall());
+    uni.on('finish', common.mustCall());
+    uni.on('close', common.mustCall());
+    uni.on('end', common.mustCall());
   }));
 
   session.on('stream', common.mustCall((stream) => {
     debug('Bidirectional, Client-initiated stream %d received', stream.id);
     const file = fs.createReadStream(__filename);
+    let data = '';
     file.pipe(stream);
     stream.setEncoding('utf8');
-    stream.resume();
-    stream.on('end', common.mustCall());
+    stream.on('data', (chunk) => data += chunk);
+    stream.on('end', common.mustCall(() => {
+      assert.strictEqual(data, filedata);
+      debug('Server received expected data for stream %d', stream.id);
+    }));
+    stream.on('close', common.mustCall());
+    stream.on('finish', common.mustCall());
   }));
 }));
 
@@ -87,6 +99,8 @@ server.on('ready', common.mustCall(() => {
     alpn: kALPN,
   });
 
+  client.on('close', () => debug('Client closing'));
+
   assert.strictEqual(req.servername, kServerName);
 
   req.on('sessionTicket', common.mustCall((id, ticket, params) => {
@@ -94,12 +108,16 @@ server.on('ready', common.mustCall(() => {
     assert(id instanceof Buffer);
     assert(ticket instanceof Buffer);
     assert(params instanceof Buffer);
+    debug('  ID: %s', id.toString('hex'));
+    debug('  Ticket: %s', ticket.toString('hex'));
+    debug('  Params: %s', params.toString('hex'));
   }, 2));
 
-  req.on('secure', common.mustCall((servername, alpn) => {
+  req.on('secure', common.mustCall((servername, alpn, cipher) => {
     debug('QuicClientSession TLS Handshake Complete');
-    debug('Server name: %s', servername);
-    debug('ALPN: %s', alpn);
+    debug('  Server name: %s', servername);
+    debug('  ALPN: %s', alpn);
+    debug('  Cipy: %s, %s', cipher.name, cipher.version);
     assert.strictEqual(servername, kServerName);
     assert.strictEqual(req.servername, kServerName);
     assert.strictEqual(alpn, kALPN);
@@ -110,7 +128,15 @@ server.on('ready', common.mustCall(() => {
     const file = fs.createReadStream(__filename);
     const stream = req.openStream();
     file.pipe(stream);
+    let data = '';
     stream.resume();
+    stream.setEncoding('utf8');
+    stream.on('data', (chunk) => data += chunk);
+    stream.on('finish', common.mustCall());
+    stream.on('end', common.mustCall(() => {
+      assert.strictEqual(data, filedata);
+      debug('Client received expected data for stream %d', stream.id);
+    }));
     stream.on('close', common.mustCall(() => {
       debug('Bidirectional, Client-initiated stream %d closed', stream.id);
       countdown.dec();
@@ -125,6 +151,7 @@ server.on('ready', common.mustCall(() => {
     stream.on('data', (chunk) => data += chunk);
     stream.on('end', common.mustCall(() => {
       assert.strictEqual(data, unidata.join(''));
+      debug('Client received expected data for stream %d', stream.id);
     }));
     stream.on('close', common.mustCall(() => {
       debug('Unidirectional, Server-initiated stream %d closed', stream.id);
@@ -135,3 +162,4 @@ server.on('ready', common.mustCall(() => {
 }));
 
 server.on('listening', common.mustCall());
+server.on('close', () => debug('Server closing'));

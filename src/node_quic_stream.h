@@ -19,15 +19,10 @@ class QuicServerSession;
 
 enum quic_stream_flags {
   QUIC_STREAM_FLAG_NONE = 0x0,
-  // Writable side has ended
   QUIC_STREAM_FLAG_SHUT = 0x1,
-  // Reading has started
   QUIC_STREAM_FLAG_READ_START = 0x2,
-  // Reading is paused
   QUIC_STREAM_FLAG_READ_PAUSED = 0x4,
-  // Stream is closed
   QUIC_STREAM_FLAG_CLOSED = 0x8,
-  // Stream has received all the data it can
   QUIC_STREAM_FLAG_EOS = 0x20
 };
 
@@ -45,30 +40,19 @@ class QuicStream : public AsyncWrap,
       v8::Local<v8::Object> target,
       v8::Local<v8::Context> context);
 
-  static QuicStream* New(
-      QuicSession* session,
-      uint64_t stream_id);
-
-  QuicStream(
-      QuicSession* session,
-      v8::Local<v8::Object> target,
-      uint64_t stream_id);
+  static QuicStream* New(QuicSession* session, uint64_t stream_id);
 
   ~QuicStream() override;
 
   uint64_t GetID() const;
+
   QuicSession* Session();
 
-  virtual int AckedDataOffset(
-      uint64_t offset,
-      size_t datalen);
+  virtual void AckedDataOffset(uint64_t offset, size_t datalen);
 
-  virtual void Close(
-      uint16_t app_error_code);
+  virtual void Close(uint16_t app_error_code = 0);
 
-  virtual void Reset(
-    uint64_t final_size,
-    uint16_t app_error_code);
+  virtual void Reset(uint64_t final_size, uint16_t app_error_code = 0);
 
   virtual void Destroy();
 
@@ -78,11 +62,6 @@ class QuicStream : public AsyncWrap,
       size_t nbufs,
       uv_stream_t* send_handle) override;
 
-  inline void IncrementAvailableOutboundLength(
-      size_t amount);
-  inline void DecrementAvailableOutboundLength(
-      size_t amount);
-
   bool IsAlive() override {
     return !IsDestroyed() && !IsShutdown() && !IsClosing();
   }
@@ -90,16 +69,17 @@ class QuicStream : public AsyncWrap,
     return flags_ & QUIC_STREAM_FLAG_SHUT ||
            flags_ & QUIC_STREAM_FLAG_EOS;
   }
-  bool IsDestroyed() { return session_ == nullptr; }
-  bool IsEnded() { return flags_ & QUIC_STREAM_FLAG_EOS; }
-  bool IsPaused() { return flags_ & QUIC_STREAM_FLAG_READ_PAUSED; }
-  bool IsReading() { return flags_ & QUIC_STREAM_FLAG_READ_START; }
-  bool IsShutdown() { return flags_ & QUIC_STREAM_FLAG_SHUT; }
 
-  virtual int ReceiveData(
-      int fin,
-      const uint8_t* data,
-      size_t datalen);
+  inline bool IsDestroyed() { return session_ == nullptr; }
+  inline bool IsEnded() { return flags_ & QUIC_STREAM_FLAG_EOS; }
+  inline bool IsPaused() { return flags_ & QUIC_STREAM_FLAG_READ_PAUSED; }
+  inline bool IsReading() { return flags_ & QUIC_STREAM_FLAG_READ_START; }
+  inline bool IsShutdown() { return flags_ & QUIC_STREAM_FLAG_SHUT; }
+
+  inline void IncrementAvailableOutboundLength(size_t amount);
+  inline void DecrementAvailableOutboundLength(size_t amount);
+
+  virtual void ReceiveData(int fin, const uint8_t* data, size_t datalen);
 
   // Required for StreamBase
   int ReadStart() override;
@@ -108,12 +88,13 @@ class QuicStream : public AsyncWrap,
   int ReadStop() override;
 
   // Required for StreamBase
-  int DoShutdown(
-      ShutdownWrap* req_wrap) override;
+  int DoShutdown(ShutdownWrap* req_wrap) override;
 
-  int Send0RTTData();
-  int SendPendingData(
-      bool retransmit = false);
+  size_t DrainInto(
+    std::vector<ngtcp2_vec>* vec,
+    QuicBuffer::drain_from from);
+
+  void Commit(size_t count);
 
   AsyncWrap* GetAsyncWrap() override { return this; }
 
@@ -129,14 +110,17 @@ class QuicStream : public AsyncWrap,
   SET_SELF_SIZE(QuicStream)
 
  private:
+  QuicStream(
+      QuicSession* session,
+      v8::Local<v8::Object> target,
+      uint64_t stream_id);
+
   QuicStreamListener stream_listener_;
   QuicSession* session_;
-  uint32_t flags_;
   uint64_t stream_id_;
-  bool reset_;
+  uint32_t flags_;
 
   QuicBuffer streambuf_;
-  bool should_send_fin_;
   size_t available_outbound_length_;
 };
 

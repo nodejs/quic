@@ -35,7 +35,7 @@ constexpr int ERR_INVALID_TLS_SESSION_TICKET = -2;
   V(MAX_STREAM_DATA_BIDI_LOCAL, max_stream_data_bidi_local, 256 * 1024)       \
   V(MAX_STREAM_DATA_BIDI_REMOTE, max_stream_data_bidi_remote, 256 * 1024)     \
   V(MAX_STREAM_DATA_UNI, max_stream_data_uni, 256 * 1024)                     \
-  V(MAX_DATA, max_data, 1 * (1024 ^ 2))                                       \
+  V(MAX_DATA, max_data, 1 * 1024 * 1024)                                      \
   V(MAX_STREAMS_BIDI, max_streams_bidi, 100)                                  \
   V(MAX_STREAMS_UNI, max_streams_uni, 3)                                      \
   V(IDLE_TIMEOUT, idle_timeout, 10 * 1000)                                    \
@@ -114,20 +114,15 @@ class QuicSession : public AsyncWrap,
   int ReceiveStreamData(
       int64_t stream_id,
       int fin,
-      uint64_t offset,
       const uint8_t* data,
       size_t datalen);
   void RemoveStream(
       int64_t stream_id);
   int Send0RTTStreamData(
       QuicStream* stream,
-      int fin,
-      QuicBuffer* data,
       QuicBuffer::drain_from from = QuicBuffer::DRAIN_FROM_HEAD);
   int SendStreamData(
       QuicStream* stream,
-      int fin,
-      QuicBuffer* data,
       QuicBuffer::drain_from from = QuicBuffer::DRAIN_FROM_HEAD);
   int SetRemoteTransportParams(
       ngtcp2_transport_params* params);
@@ -225,6 +220,7 @@ class QuicSession : public AsyncWrap,
       int64_t id);
   void HandshakeCompleted();
   inline bool IsInClosingPeriod();
+  inline bool IsInDrainingPeriod();
   int PathValidation(
     const ngtcp2_path* path,
     ngtcp2_path_validation_result res);
@@ -425,6 +421,12 @@ class QuicSession : public AsyncWrap,
       ngtcp2_conn* conn,
       uint64_t max_streams,
       void* user_data);
+  static int OnExtendMaxStreamData(
+      ngtcp2_conn* conn,
+      int64_t stream_id,
+      uint64_t max_data,
+      void* user_data,
+      void* stream_user_data);
 
   static void OnKeylog(const SSL* ssl, const char* line);
 
@@ -511,6 +513,10 @@ class QuicSession : public AsyncWrap,
       ngtcp2_cid* cid,
       uint8_t* token,
       size_t cidlen);
+  void ExtendMaxStreamData(
+      int64_t stream_id,
+      uint64_t max_data);
+  int WritePackets();
 
   inline QuicStream* CreateStream(
       int64_t stream_id);
@@ -587,6 +593,22 @@ class QuicSession : public AsyncWrap,
   std::string alpn_;
 
   mem::Allocator<ngtcp2_mem> allocator_;
+
+  // SendScope will cause the session to flush it's
+  // current pending data queue to the underlying
+  // socket.
+  class SendScope {
+   public:
+    explicit SendScope(QuicSession* session) : session_(session) {}
+    ~SendScope() {
+      if (session_->IsDestroyed())
+        return;
+      session_->SendPendingData();
+      session_->StartIdleTimer(-1);
+    }
+   private:
+    QuicSession* session_;
+  };
 
   friend class QuicServerSession;
   friend class QuicClientSession;
@@ -713,7 +735,7 @@ class QuicServerSession : public QuicSession {
     OnStreamReset,
     OnExtendMaxStreamsBidi,
     OnExtendMaxStreamsUni,
-    nullptr  // extend_max_stream_data
+    OnExtendMaxStreamData
   };
 
   friend class QuicSession;
@@ -866,7 +888,7 @@ class QuicClientSession : public QuicSession {
     nullptr,  // stream_reset
     nullptr,  // extend_max_remote_streams_bidi
     nullptr,  // extend_max_remote_streams_uni
-    nullptr  // extend_max_stream_data
+    OnExtendMaxStreamData
   };
 
   friend class QuicSession;

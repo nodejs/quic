@@ -226,6 +226,7 @@ void QuicSocket::Receive(
     const struct sockaddr* addr,
     unsigned int flags) {
   Debug(this, "Receiving %d bytes from the UDP socket.", nread);
+  IncrementSocketStat(nread, &socket_stats_, &socket_stats::bytes_received);
   ngtcp2_pkt_hd hd;
   int err;
 
@@ -260,47 +261,38 @@ void QuicSocket::Receive(
     if (scid_it == std::end(dcid_to_scid_)) {
       Debug(this, "There is no existing session for dcid %s", dcid_hex.c_str());
       if (!server_listening_) {
-        Debug(this, "Ignoring unhandled packet.");
+        Debug(this, "Ignoring packet because socket is not listening.");
         return;
       }
-      Debug(this, "Dispatching packet to server.");
       session = ServerReceive(&dcid, &hd, nread, data, addr, flags);
       if (!session) {
         Debug(this, "Could not initialize a new QuicServerSession.");
-        // TODO(@jasnell): What should we do here?
+        // TODO(@jasnell): Should this be fatal for the QuicSocket?
         return;
       }
       IncrementSocketStat(1, &socket_stats_, &socket_stats::server_sessions);
     } else {
-      Debug(this, "An existing QuicSession for this packet was found.");
       session_it = sessions_.find((*scid_it).second);
       session = (*session_it).second;
       CHECK_NE(session_it, std::end(sessions_));
     }
   } else {
-    Debug(this, "An existing QuicSession for this packet was found.");
     session = (*session_it).second;
   }
 
   CHECK_NOT_NULL(session);
+  Debug(this, "Dispatching packet to session");
   // An appropriate handler was found! Dispatch the data
   if (session->IsDestroyed()) {
-    // Ignoring packet for destroyed session
+    Debug(this, "Ignoring packet because session is destroyed");
     return;
   }
-  Debug(this, "Dispatching packet to session for dcid %s", dcid_hex.c_str());
   err = session->Receive(&hd, nread, data, addr, flags);
   if (err != 0) {
-    Debug(this,
-          "The QuicSession failed to process the packet successfully. Error %d",
-          err);
+    Debug(this, "Ignoring unsuccessfully processed packet. Error %d", err);
     return;
   }
-
-  IncrementSocketStat(nread, &socket_stats_, &socket_stats::bytes_received);
   IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_received);
-
-  SendPendingData();
 }
 
 int QuicSocket::ReceiveStart() {
@@ -329,22 +321,6 @@ void QuicSocket::ReportSendError(int error) {
   Local<Value> arg = Integer::New(env()->isolate(), error);
   MakeCallback(env()->quic_on_socket_error_function(), 1, &arg);
   return;
-}
-
-void QuicSocket::SendPendingData(
-    bool retransmit) {
-
-  HandleScope handle_scope(env()->isolate());
-  InternalCallbackScope callback_scope(this);
-
-  Debug(this, "Sending pending data. Retransmit? %s",
-        retransmit ? "yes" : "no");
-  for (auto session : sessions_) {
-    int err = session.second->SendPendingData(retransmit);
-    if (err != 0) {
-      // TODO(@jasnell): handle error
-    }
-  }
 }
 
 int QuicSocket::SendVersionNegotiation(
