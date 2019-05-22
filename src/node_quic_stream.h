@@ -17,24 +17,80 @@ namespace quic {
 class QuicSession;
 class QuicServerSession;
 
-enum quic_stream_flags {
-  QUIC_STREAM_FLAG_NONE = 0x0,
-  QUIC_STREAM_FLAG_SHUT = 0x1,
-  QUIC_STREAM_FLAG_READ_START = 0x2,
-  QUIC_STREAM_FLAG_READ_PAUSED = 0x4,
-  QUIC_STREAM_FLAG_CLOSED = 0x8,
-  QUIC_STREAM_FLAG_EOS = 0x20
-};
-
 class QuicStreamListener : public StreamListener {
  public:
   uv_buf_t OnStreamAlloc(size_t suggested_size) override;
   void OnStreamRead(ssize_t nread, const uv_buf_t& buf) override;
 };
 
+// QuicStream's are simple data flows that, fortunately, do not
+// require much. They may be:
+//
+// * Bidirectional or Unidirectional
+// * Server or Client Initiated
+//
+// The flow direction and origin of the stream are important in
+// determining the write and read state (Open or Closed). Specifically:
+//
+// A Unidirectional stream originating with the Server is:
+//
+// * Server Writable (Open) but not Client Writable (Closed)
+// * Client Readable (Open) but not Server Readable (Closed)
+//
+// Likewise, a Unidirectional stream originating with the
+// Client is:
+//
+// * Client Writable (Open) but not Server Writable (Closed)
+// * Server Readable (Open) but not Client Readable (Closed)
+//
+// Bidirectional Stream States
+// +------------+--------------+--------------------+---------------------+
+// |            | Initiated By | Initial Read State | Initial Write State |
+// +------------+--------------+--------------------+---------------------+
+// | On Server  |   Server     |        Open        |         Open        |
+// +------------+--------------+--------------------+---------------------+
+// | On Server  |   Client     |        Open        |         Open        |
+// +------------+--------------+--------------------+---------------------+
+// | On Client  |   Server     |        Open        |         Open        |
+// +------------+--------------+--------------------+---------------------+
+// | On Client  |   Client     |        Open        |         Open        |
+// +------------+--------------+--------------------+---------------------+
+//
+// Unidirectional Stream States
+// +------------+--------------+--------------------+---------------------+
+// |            | Initiated By | Initial Read State | Initial Write State |
+// +------------+--------------+--------------------+---------------------+
+// | On Server  |   Server     |       Closed       |         Open        |
+// +------------+--------------+--------------------+---------------------+
+// | On Server  |   Client     |        Open        |        Closed       |
+// +------------+--------------+--------------------+---------------------+
+// | On Client  |   Server     |        Open        |        Closed       |
+// +------------+--------------+--------------------+---------------------+
+// | On Client  |   Client     |       Closed       |         Open        |
+// +------------+--------------+--------------------+---------------------+
+//
+// The Closed states is terminal. A stream may be destroyed
+// naturally when both the read and write states are Closed.
+// Although, any stream may be abruptly terminated at any time.
+//
+// A stream that is Open Writable may have data pending or not.
+//
+// A QuicSession should only attempt to send stream data when (a) there
+// is data pending to send of (b) there is no remaining data to send and
+// the writable side is ready to transition to Closed.
 class QuicStream : public AsyncWrap,
                    public StreamBase {
  public:
+  enum QuicStreamDirection {
+    QUIC_STREAM_BIRECTIONAL,
+    QUIC_STREAM_UNIDIRECTIONAL
+  };
+
+  enum QuicStreamOrigin {
+    QUIC_STREAM_SERVER,
+    QUIC_STREAM_CLIENT
+  };
+
   static void Initialize(
       Environment* env,
       v8::Local<v8::Object> target,
@@ -44,9 +100,49 @@ class QuicStream : public AsyncWrap,
 
   ~QuicStream() override;
 
-  uint64_t GetID() const;
+  inline QuicStreamDirection GetDirection() const {
+    return stream_id_ & 0b10 ?
+        QUIC_STREAM_UNIDIRECTIONAL :
+        QUIC_STREAM_BIRECTIONAL;
+  }
 
-  QuicSession* Session();
+  inline QuicStreamOrigin GetOrigin() const {
+    return stream_id_ & 0b01 ?
+        QUIC_STREAM_SERVER :
+        QUIC_STREAM_CLIENT;
+  }
+
+  uint64_t GetID() const { return stream_id_; }
+
+  inline bool IsDestroyed() {
+    return session_ == nullptr;
+  }
+
+  inline bool IsWritable() {
+    return (flags_ & QUICSTREAM_FLAG_WRITE) == 0;
+  }
+
+  inline bool IsReadable() {
+    return (flags_ & QUICSTREAM_FLAG_READ) == 0;
+  }
+
+  inline bool IsReadStarted() {
+    return flags_ & QUICSTREAM_FLAG_READ_STARTED;
+  }
+
+  inline bool IsReadPaused() {
+    return flags_ & QUICSTREAM_FLAG_READ_PAUSED;
+  }
+
+  bool IsAlive() override {
+    return !IsDestroyed() && !IsClosing();
+  }
+
+  bool IsClosing() override {
+    return !IsWritable() && !IsReadable();
+  }
+
+  QuicSession* Session() { return session_; }
 
   virtual void AckedDataOffset(uint64_t offset, size_t datalen);
 
@@ -61,20 +157,6 @@ class QuicStream : public AsyncWrap,
       uv_buf_t* bufs,
       size_t nbufs,
       uv_stream_t* send_handle) override;
-
-  bool IsAlive() override {
-    return !IsDestroyed() && !IsShutdown() && !IsClosing();
-  }
-  bool IsClosing() override {
-    return flags_ & QUIC_STREAM_FLAG_SHUT ||
-           flags_ & QUIC_STREAM_FLAG_EOS;
-  }
-
-  inline bool IsDestroyed() { return session_ == nullptr; }
-  inline bool IsEnded() { return flags_ & QUIC_STREAM_FLAG_EOS; }
-  inline bool IsPaused() { return flags_ & QUIC_STREAM_FLAG_READ_PAUSED; }
-  inline bool IsReading() { return flags_ & QUIC_STREAM_FLAG_READ_START; }
-  inline bool IsShutdown() { return flags_ & QUIC_STREAM_FLAG_SHUT; }
 
   inline void IncrementAvailableOutboundLength(size_t amount);
   inline void DecrementAvailableOutboundLength(size_t amount);
@@ -114,6 +196,36 @@ class QuicStream : public AsyncWrap,
       QuicSession* session,
       v8::Local<v8::Object> target,
       uint64_t stream_id);
+
+  inline void SetInitialFlags();
+
+  enum Flags {
+    QUICSTREAM_FLAG_INITIAL = 0,
+    QUICSTREAM_FLAG_READ = 1,
+    QUICSTREAM_FLAG_WRITE = 2,
+    QUICSTREAM_FLAG_READ_STARTED = 3,
+    QUICSTREAM_FLAG_READ_PAUSED = 8
+  };
+
+  inline void SetWriteClose() {
+    flags_ |= QUICSTREAM_FLAG_WRITE;
+  }
+
+  inline void SetReadClose() {
+    flags_ |= QUICSTREAM_FLAG_READ;
+  }
+
+  inline void SetReadStart() {
+    flags_ |= QUICSTREAM_FLAG_READ_STARTED;
+  }
+
+  inline void SetReadPause() {
+    flags_ |= QUICSTREAM_FLAG_READ_PAUSED;
+  }
+
+  inline void SetReadResume() {
+    flags_ &= QUICSTREAM_FLAG_READ_PAUSED;
+  }
 
   QuicStreamListener stream_listener_;
   QuicSession* session_;

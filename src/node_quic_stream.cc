@@ -60,9 +60,10 @@ QuicStream::QuicStream(
     StreamBase(session->env()),
     session_(session),
     stream_id_(stream_id),
-    flags_(QUIC_STREAM_FLAG_NONE),
+    flags_(QUICSTREAM_FLAG_INITIAL),
     available_outbound_length_(0) {
   CHECK_NOT_NULL(session);
+  SetInitialFlags();
   session->AddStream(this);
   StreamBase::AttachToObject(GetObject());
   PushStreamListener(&stream_listener_);
@@ -74,14 +75,43 @@ QuicStream::~QuicStream() {
   CHECK_EQ(0, streambuf_.Length());
 }
 
+inline void QuicStream::SetInitialFlags() {
+  if (GetDirection() == QUIC_STREAM_UNIDIRECTIONAL) {
+    if (session_->IsServer()) {
+      switch (GetOrigin()) {
+        case QUIC_STREAM_SERVER:
+          SetReadClose();
+          break;
+        case QUIC_STREAM_CLIENT:
+          SetWriteClose();
+          break;
+        default:
+          UNREACHABLE();
+      }
+    } else {
+      switch (GetOrigin()) {
+        case QUIC_STREAM_SERVER:
+          SetWriteClose();
+          break;
+        case QUIC_STREAM_CLIENT:
+          SetReadClose();
+          break;
+        default:
+          UNREACHABLE();
+      }
+    }
+  }
+}
+
 // QuicStream::Close() is called by the QuicSession when ngtcp2 detects that
 // a stream has been closed. This, in turn, calls out to the JavaScript to
 // start the process of tearing down and destroying the QuicStream instance.
 void QuicStream::Close(uint16_t app_error_code) {
   Debug(this, "Stream %llu closed with code %d", GetID(), app_error_code);
+  SetReadClose();
+  SetWriteClose();
   HandleScope scope(env()->isolate());
   Context::Scope context_context(env()->context());
-  flags_ |= QUIC_STREAM_FLAG_CLOSED;
   Local<Value> arg = Number::New(env()->isolate(), app_error_code);
   MakeCallback(env()->quic_on_stream_close_function(), 1, &arg);
 }
@@ -108,15 +138,23 @@ void QuicStream::Reset(uint64_t final_size, uint16_t app_error_code) {
 }
 
 void QuicStream::Destroy() {
+  SetReadClose();
+  SetWriteClose();
   streambuf_.Cancel();
   session_->RemoveStream(stream_id_);
   session_ = nullptr;
 }
 
+// Do shutdown is called when the JS stream writable side is closed.
+// We want to mark the writable side closed and send pending data.
 int QuicStream::DoShutdown(ShutdownWrap* req_wrap) {
   if (IsDestroyed())
     return UV_EPIPE;
-  flags_ |= QUIC_STREAM_FLAG_SHUT;
+  // Do nothing if the stream was already shutdown. Specifically,
+  // we should not attempt to send anything on the QuicSession
+  if (!IsWritable())
+    return 1;
+  SetWriteClose();
   session_->SendStreamData(this);
   return 1;
 }
@@ -128,7 +166,9 @@ int QuicStream::DoWrite(
     uv_stream_t* send_handle) {
   CHECK_NULL(send_handle);
 
-  if (IsDestroyed()) {
+  // A write should not have happened if we've been destroyed or
+  // the QuicStream is no longer writable.
+  if (IsDestroyed() || !IsWritable()) {
     req_wrap->Done(UV_EOF);
     return 0;
   }
@@ -174,23 +214,17 @@ int QuicStream::DoWrite(
   // to be careful not to allow the internal buffer to grow
   // too large, or we'll run into several other problems.
 
-  uint64_t len = streambuf_.Copy(bufs, nbufs);
+  streambuf_.Copy(bufs, nbufs);
   req_wrap->Done(0);
+  session_->SendStreamData(this);
 
   // IncrementAvailableOutboundLength(len);
-  session_->SendStreamData(this);
   return 0;
 }
 
-uint64_t QuicStream::GetID() const {
-  return stream_id_;
-}
-
-QuicSession* QuicStream::Session() {
-  return session_;
-}
-
 void QuicStream::AckedDataOffset(uint64_t offset,  size_t datalen) {
+  if (IsDestroyed())
+    return;
   streambuf_.Consume(datalen);
 }
 
@@ -212,40 +246,34 @@ inline void QuicStream::DecrementAvailableOutboundLength(size_t amount) {
   available_outbound_length_ -= amount;
 }
 
-QuicStream* QuicStream::New(
-    QuicSession* session,
-    uint64_t stream_id) {
-  Local<Object> obj;
-  if (!session->env()
-              ->quicserverstream_constructor_template()
-              ->NewInstance(session->env()->context()).ToLocal(&obj)) {
-    return nullptr;
-  }
-  return new QuicStream(session, obj, stream_id);
-}
-
 int QuicStream::ReadStart() {
   CHECK(!this->IsDestroyed());
-  Debug(this, "Reading started.");
-  flags_ |= QUIC_STREAM_FLAG_READ_START;
-  flags_ &= ~QUIC_STREAM_FLAG_READ_PAUSED;
+  CHECK(IsReadable());
+  SetReadStart();
+  SetReadResume();
   return 0;
 }
 
 int QuicStream::ReadStop() {
   CHECK(!this->IsDestroyed());
-  if (!IsReading())
-    return 0;
-  Debug(this, "Reading stopped");
-  flags_ |= QUIC_STREAM_FLAG_READ_PAUSED;
+  CHECK(IsReadable());
+  SetReadPause();
   return 0;
 }
 
 // Passes chunks of data on to the JavaScript side as soon as they are
-// received. The caller of this must have a HandleScope.
+// received but only if we're still readable. The caller of this must have a
+// HandleScope.
+// TODO(@jasnell): There's currently no flow control here. The data is pushed
+// up to the JavaScript side regardless of whether the JS stream is flowing and
+// the connected peer is told to keep sending. We need to implement back
+// pressure.
 void QuicStream::ReceiveData(int fin, const uint8_t* data, size_t datalen) {
-  Debug(this, "Receiving %d bytes of data. Final? %s",
-        datalen, fin ? "yes" : "no");
+  Debug(this, "Receiving %d bytes of data. Final? %s. Readable? %s",
+        datalen, fin ? "yes" : "no", IsReadable() ? "yes" : "no");
+
+  if (!IsReadable())
+    return;
 
   while (datalen > 0) {
     uv_buf_t buf = EmitAlloc(datalen);
@@ -265,8 +293,24 @@ void QuicStream::ReceiveData(int fin, const uint8_t* data, size_t datalen) {
     EmitRead(avail, buf);
   };
 
-  if (fin)
+  // When fin != 0, we've received that last chunk of data for this
+  // stream, indicating that the stream is no longer readable.
+  if (fin) {
+    SetReadClose();
     EmitRead(UV_EOF);
+  }
+}
+
+QuicStream* QuicStream::New(
+    QuicSession* session,
+    uint64_t stream_id) {
+  Local<Object> obj;
+  if (!session->env()
+              ->quicserverstream_constructor_template()
+              ->NewInstance(session->env()->context()).ToLocal(&obj)) {
+    return nullptr;
+  }
+  return new QuicStream(session, obj, stream_id);
 }
 
 // JavaScript API

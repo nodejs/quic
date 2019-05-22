@@ -21,13 +21,12 @@ const filedata = fs.readFileSync(__filename, { encoding: 'utf8' });
 const { createSocket } = require('quic');
 
 let client;
-const server = createSocket({ type: 'udp4', port: 5678 });
+const server = createSocket({ type: 'udp4', port: 0 });
 
 const unidata = ['I wonder if it worked.', 'test'];
 const kServerName = 'test';
 const kALPN = 'zzz';  // ALPN can be overriden to whatever we want
 
-const keylogFile = fs.createWriteStream('keys.log');
 
 const kKeylogs = [
   /QUIC_SERVER_HANDSHAKE_TRAFFIC_SECRET.*/,
@@ -46,7 +45,6 @@ const countdown = new Countdown(2, () => {
   debug('Countdown expired. Destroying sockets');
   server.close();
   client.close();
-  keylogFile.end();
 });
 
 server.listen({ key, cert, alpn: kALPN });
@@ -55,7 +53,6 @@ server.on('session', common.mustCall((session) => {
 
   session.on('keylog', common.mustCall((line) => {
     assert(kKeylogs.shift().test(line));
-    keylogFile.write(line);
   }, kKeylogs.length));
 
   session.on('secure', common.mustCall((servername, alpn, cipher) => {
@@ -95,7 +92,7 @@ server.on('session', common.mustCall((session) => {
 
 server.on('ready', common.mustCall(() => {
   debug('Server is listening on port %d', server.address.port);
-  client = createSocket({ type: 'udp4', port: 5679 });
+  client = createSocket({ type: 'udp4', port: 0 });
   const req = client.connect({
     type: 'udp4',
     address: 'localhost',
@@ -126,7 +123,7 @@ server.on('ready', common.mustCall(() => {
     debug('QuicClientSession TLS Handshake Complete');
     debug('  Server name: %s', servername);
     debug('  ALPN: %s', alpn);
-    debug('  Cipy: %s, %s', cipher.name, cipher.version);
+    debug('  Cipher: %s, %s', cipher.name, cipher.version);
     assert.strictEqual(servername, kServerName);
     assert.strictEqual(req.servername, kServerName);
     assert.strictEqual(alpn, kALPN);

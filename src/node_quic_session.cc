@@ -1426,7 +1426,6 @@ int QuicSession::Send0RTTStreamData(
   ssize_t ndatalen = 0;
 
   std::vector<ngtcp2_vec> vec;
-  uint8_t fin = stream->IsShutdown() ? 1 : 0;
   size_t count = stream->DrainInto(&vec, from);
   size_t c = count;
   ngtcp2_vec* v = vec.data();
@@ -1439,7 +1438,7 @@ int QuicSession::Send0RTTStreamData(
         max_pktlen_,
         &ndatalen,
         stream->GetID(),
-        fin,
+        stream->IsWritable() ? 0 : 1,
         reinterpret_cast<const ngtcp2_vec*>(v),
         c,
         uv_hrtime());
@@ -1505,7 +1504,7 @@ int QuicSession::SendStreamData(
             max_pktlen_,
             &ndatalen,
             stream->GetID(),
-            stream->IsShutdown() ? 1 : 0,
+            stream->IsWritable() ? 0 : 1,
             reinterpret_cast<const ngtcp2_vec*>(v),
             c,
             uv_hrtime());
@@ -1719,7 +1718,9 @@ void QuicSession::StopRetransmitTimer() {
 // Called by ngtcp2 when a stream has been closed. If the stream does
 // not exist, the close is ignored.
 void QuicSession::StreamClose(int64_t stream_id, uint16_t app_error_code) {
-  CHECK(!IsDestroyed());
+  // Ignore if the session has already been destroyed
+  if (IsDestroyed())
+    return;
   Debug(this, "Closing stream %llu with code %d",
         stream_id, app_error_code);
   QuicStream* stream = FindStream(stream_id);
