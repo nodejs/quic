@@ -896,6 +896,54 @@ inline void MessageCB(
   }
 }
 
+inline std::string ToHex(const uint8_t *s, size_t len) {
+  static constexpr char LOWER_XDIGITS[] = "0123456789abcdef";
+  std::string res;
+  res.resize(len * 2);
+  for (size_t i = 0; i < len; ++i) {
+    auto c = s[i];
+    res[i * 2] = LOWER_XDIGITS[c >> 4];
+    res[i * 2 + 1] = LOWER_XDIGITS[c & 0x0f];
+  }
+  return res;
+}
+
+inline void LogSecret(
+    SSL *ssl,
+    int name,
+    const unsigned char *secret,
+    size_t secretlen) {
+  if (auto keylog_cb = SSL_CTX_get_keylog_callback(SSL_get_SSL_CTX(ssl))) {
+    unsigned char crandom[32];
+    if (SSL_get_client_random(ssl, crandom, 32) != 32)
+      return;
+    std::string line;
+    switch (name) {
+    case SSL_KEY_CLIENT_EARLY_TRAFFIC:
+      line = "QUIC_CLIENT_EARLY_TRAFFIC_SECRET";
+      break;
+    case SSL_KEY_CLIENT_HANDSHAKE_TRAFFIC:
+      line = "QUIC_CLIENT_HANDSHAKE_TRAFFIC_SECRET";
+      break;
+    case SSL_KEY_CLIENT_APPLICATION_TRAFFIC:
+      line = "QUIC_CLIENT_TRAFFIC_SECRET_0";
+      break;
+    case SSL_KEY_SERVER_HANDSHAKE_TRAFFIC:
+      line = "QUIC_SERVER_HANDSHAKE_TRAFFIC_SECRET";
+      break;
+    case SSL_KEY_SERVER_APPLICATION_TRAFFIC:
+      line = "QUIC_SERVER_TRAFFIC_SECRET_0";
+      break;
+    default:
+      return;
+    }
+    line += " " + ToHex(crandom, 32);
+    line += " " + ToHex(secret, secretlen);
+    keylog_cb(ssl, line.c_str());
+  }
+}
+
+
 // KeyCB provides a hook into the keying process of the TLS handshake,
 // triggering registration of the keys associated with the TLS session.
 inline int KeyCB(
@@ -905,6 +953,9 @@ inline int KeyCB(
     size_t secretlen,
     void* arg) {
   QuicSession* session = static_cast<QuicSession*>(arg);
+
+  // Output the secret to the keylog
+  LogSecret(ssl, name, secret, secretlen);
 
   return session->OnKey(name, secret, secretlen) != 0 ? 0 : 1;
 }

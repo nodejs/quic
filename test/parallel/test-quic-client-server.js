@@ -21,24 +21,32 @@ const filedata = fs.readFileSync(__filename, { encoding: 'utf8' });
 const { createSocket } = require('quic');
 
 let client;
-const server = createSocket({ type: 'udp4', port: 0 });
+const server = createSocket({ type: 'udp4', port: 5678 });
 
 const unidata = ['I wonder if it worked.', 'test'];
 const kServerName = 'test';
 const kALPN = 'zzz';  // ALPN can be overriden to whatever we want
 
+const keylogFile = fs.createWriteStream('keys.log');
+
 const kKeylogs = [
+  /QUIC_SERVER_HANDSHAKE_TRAFFIC_SECRET.*/,
   /SERVER_HANDSHAKE_TRAFFIC_SECRET.*/,
+  /QUIC_CLIENT_HANDSHAKE_TRAFFIC_SECRET.*/,
   /CLIENT_HANDSHAKE_TRAFFIC_SECRET.*/,
+  /QUIC_SERVER_TRAFFIC_SECRET_0.*/,
   /EXPORTER_SECRET.*/,
   /SERVER_TRAFFIC_SECRET_0.*/,
-  /CLIENT_TRAFFIC_SECRET_0.*/
+  /QUIC_CLIENT_TRAFFIC_SECRET_0.*/,
+  /CLIENT_TRAFFIC_SECRET_0.*/,
 ];
+
 
 const countdown = new Countdown(2, () => {
   debug('Countdown expired. Destroying sockets');
   server.close();
   client.close();
+  keylogFile.end();
 });
 
 server.listen({ key, cert, alpn: kALPN });
@@ -47,6 +55,7 @@ server.on('session', common.mustCall((session) => {
 
   session.on('keylog', common.mustCall((line) => {
     assert(kKeylogs.shift().test(line));
+    keylogFile.write(line);
   }, kKeylogs.length));
 
   session.on('secure', common.mustCall((servername, alpn, cipher) => {
@@ -86,7 +95,7 @@ server.on('session', common.mustCall((session) => {
 
 server.on('ready', common.mustCall(() => {
   debug('Server is listening on port %d', server.address.port);
-  client = createSocket({ type: 'udp4', port: 0 });
+  client = createSocket({ type: 'udp4', port: 5679 });
   const req = client.connect({
     type: 'udp4',
     address: 'localhost',
