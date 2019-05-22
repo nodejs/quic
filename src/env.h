@@ -29,13 +29,15 @@
 #include "inspector_agent.h"
 #include "inspector_profiler.h"
 #endif
+#if HAVE_OPENSSL
+#include "node_quic_monitor.h"
+#include "node_quic_state.h"
+#endif
 #include "handle_wrap.h"
 #include "node.h"
 #include "node_binding.h"
 #include "node_http2_state.h"
 #include "node_main_instance.h"
-#include "node_quic_monitor.h"
-#include "node_quic_state.h"
 #include "node_options.h"
 #include "req_wrap.h"
 #include "util.h"
@@ -1058,10 +1060,12 @@ class Environment : public MemoryRetainer {
   inline http2::Http2State* http2_state() const;
   inline void set_http2_state(std::unique_ptr<http2::Http2State> state);
 
+#if HAVE_OPENSSL
   inline QuicState* quic_state() const;
   inline void set_quic_state(std::unique_ptr<QuicState> state);
 
   inline quic::QuicMonitor* quic_monitor();
+#endif
 
   inline bool debug_enabled(DebugCategory category) const;
   inline void set_debug_enabled(DebugCategory category, bool enabled);
@@ -1383,8 +1387,10 @@ class Environment : public MemoryRetainer {
   char* http_parser_buffer_ = nullptr;
   bool http_parser_buffer_in_use_ = false;
   std::unique_ptr<http2::Http2State> http2_state_;
+#if HAVE_OPENSSL
   std::unique_ptr<QuicState> quic_state_;
   std::unique_ptr<quic::QuicMonitor> quic_monitor_;
+#endif
 
   bool debug_enabled_[static_cast<int>(DebugCategory::CATEGORY_COUNT)] = {0};
 
