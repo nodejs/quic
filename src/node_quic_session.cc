@@ -1347,10 +1347,13 @@ int QuicSession::ReceiveStreamData(
   CHECK_NOT_NULL(stream);
   stream->ReceiveData(fin, data, datalen);
 
-  ngtcp2_conn_extend_max_stream_offset(connection_, stream_id, datalen);
   ngtcp2_conn_extend_max_offset(connection_, datalen);
 
   return 0;
+}
+
+void QuicSession::ExtendStreamOffset(QuicStream* stream, size_t amount) {
+  ngtcp2_conn_extend_max_stream_offset(connection_, stream->GetID(), amount);
 }
 
 // Removes the given connection id from the QuicSession.

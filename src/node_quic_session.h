@@ -96,6 +96,7 @@ class QuicSession : public AsyncWrap,
   void Close();
   void Closing();
   void Destroy();
+  void ExtendStreamOffset(QuicStream* stream, size_t amount);
   const std::string& GetALPN();
   void GetLocalTransportParams(
       ngtcp2_transport_params* params);

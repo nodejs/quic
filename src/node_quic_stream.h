@@ -234,6 +234,7 @@ class QuicStream : public AsyncWrap,
 
   QuicBuffer streambuf_;
   size_t available_outbound_length_;
+  size_t inbound_consumed_data_while_paused_;
 };
 
 }  // namespace quic

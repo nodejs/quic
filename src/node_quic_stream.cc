@@ -61,7 +61,8 @@ QuicStream::QuicStream(
     session_(session),
     stream_id_(stream_id),
     flags_(QUICSTREAM_FLAG_INITIAL),
-    available_outbound_length_(0) {
+    available_outbound_length_(0),
+    inbound_consumed_data_while_paused_(0) {
   CHECK_NOT_NULL(session);
   SetInitialFlags();
   session->AddStream(this);
@@ -251,6 +252,7 @@ int QuicStream::ReadStart() {
   CHECK(IsReadable());
   SetReadStart();
   SetReadResume();
+  session_->ExtendStreamOffset(this, inbound_consumed_data_while_paused_);
   return 0;
 }
 
@@ -291,6 +293,10 @@ void QuicStream::ReceiveData(int fin, const uint8_t* data, size_t datalen) {
     data += avail;
     datalen -= avail;
     EmitRead(avail, buf);
+    if (IsReadPaused())
+      inbound_consumed_data_while_paused_ += avail;
+    else
+      session_->ExtendStreamOffset(this, avail);
   };
 
   // When fin != 0, we've received that last chunk of data for this
