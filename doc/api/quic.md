@@ -17,17 +17,14 @@ const quic = require('quic');
 
 const key = getTLSKeySomehow();
 const cert = getTLSCertSomehow();
-const ca = getTLSCAListSomehow();
 
-// The default export of the quic module is the
-// createSocket function.
-const createSocket = require('quic');
+const { createSocket } = require('quic');
 
 // Create the local QUIC UDP socket...
 const socket = createSocket({ type: 'udp4', port: 1234 });
 
 // Tell the socket to operate as a server...
-socket.listen({ key, cert, ca });
+socket.listen({ key, cert });
 
 socket.on('session', (session) => {
   // A new server side session has been created!
@@ -62,27 +59,39 @@ socket.on('listening', () => {
 });
 ```
 
-### quic.createSocket([options])
+## quic.createSocket([options])
 <!-- YAML
 added: REPLACEME
 -->
 
 * `options` {Object}
-  * `address` {string} The local address to bind to.
-  * `ipv6Only` {boolean}
-  * `lookup` {Function}
+  * `address` {string} The local address to bind to. This may be an IPv4 or IPv6
+    address or a hostname. If a hostname is given, it will be resolved to an IP
+    address.
+  * `client` {Object} A default configuration for QUIC client sessions created
+    using `quicsocket.connect()`.
+  * `lookup` {Function} A custom DNS lookup function. Default `dns.lookup()`.
+  * `maxConnectionsPerHost` {number} The maximum number of inbound connections
+    per remote host. Default: `100`.
   * `port` {number} The local port to bind to.
-  * `resuseAddr` {boolean}
+  * `retryTokenTimeout` {number} The maximum number of seconds for retry token
+    validation. Defaults: `10`.
+  * `server` {Object} A default configuration for QUIC server sessions.
   * `type` {string} Either `'udp4'` or `'upd6'` to use either IPv4 or IPv6,
      respectively.
 
 Creates a new `QuicSocket` instance.
 
-### Class: QuicSession
+## Class: QuicSession exends EventEmitter
 <!-- YAML
 added: REPLACEME
 -->
 * Extends: {EventEmitter}
+
+The `QuicSession` is an abstract base class that defines events, methods, and
+properties that are shared by both `QuicClientSession` and `QuicServerSession`.
+
+Users will not create instances of `QuicSession` directly.
 
 ### Event: `'close'`
 <!-- YAML
@@ -96,8 +105,30 @@ Emiitted after the `QuicSession` has been destroyed.
 added: REPLACEME
 -->
 
-Emitted after the `'close'` event if the `QuicSession` was destroyed with
+Emitted before the `'close'` event if the `QuicSession` was destroyed with
 an error.
+
+### Event: `'extendMaxBidiStreams'`
+<!-- YAML
+added: REPLACEME
+-->
+
+Emitted when the maximum number of bidirectional streams has been extended.
+
+The callback will be invoked with a single argument:
+
+* `maxStreams` {number} The new maximum number of bidirectional streams
+
+### Event: `'extendMaxUniStreams'`
+<!-- YAML
+added: REPLACEME
+-->
+
+Emitted when the maximum number of unidirectional streams has been extended.
+
+The callback will be invoked with a single argument:
+
+* `maxStreams` {number} The new maximum number of unidirectional streams
 
 ### Event: `'secure'`
 <!-- YAML
@@ -110,9 +141,12 @@ The callback will be invoked with two arguments:
 
 * `servername` {string} The SNI servername requested by the client.
 * `alpnProtocol` {string} The negotiated ALPN protocol.
+* `cipher` {Object} Information about the selected cipher algorithm.
+  * `name` {string} The cipher algorithm name.
+  * `version` {string} The TLS version (currently always `'TLSv1.3'`).
 
-These will also be available using the `quicsession.servername` and
-`quicsession.alpnProtocol` properties.
+These will also be available using the `quicsession.servername`,
+`quicsession.alpnProtocol`, and `quicsession.cipher` properties.
 
 ### Event: `'stream'`
 <!-- YAML
@@ -130,14 +164,37 @@ added: REPLACEME
 
 The ALPN protocol identifier negotiated for this session.
 
-### quicsession.close([callback])
+### quicsession.cipher
 <!-- YAML
 added: REPLACEME
 -->
 
+* Type: {object}
+  * `name` {string} The cipher algorithm name.
+  * `type` {string} The TLS version (currently always `'TLSv1.3'`).
+
+Information about the cipher algorithm selected for the session.
+
+### quicsession.close([code[, callback]])
+<!-- YAML
+added: REPLACEME
+-->
+
+* `code` {number} The error code to when closing the session. Default: `0`.
 * `callback` {Function} Callback invoked when the close operation is completed
 
-Closes the `QuicSession`.
+Begins a graceful close of the `QuicSession`. Existing `QuicStream` instances will be
+permitted to close naturally. New `QuicStream` instances will not be permitted. Once
+all `QuicStream` instances have closed, the `QuicSession` instance will be destroyed.
+
+### quicsession.closing
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {boolean}
+
+Set the `true` if the `QuicSession` is in the process of a graceful shutdown.
 
 ### quicsession.destroy([error])
 <!-- YAML
@@ -146,9 +203,11 @@ added: REPLACEME
 
 * `error` {any}
 
-Destroys the `QuicSession` causing the `close` event to be emitted. If `error`
-is not `undefined`, the `error` event will be emitted following the `close`
+Destroys the `QuicSession` immediately causing the `close` event to be emitted.
+If `error` is not `undefined`, the `error` event will be emitted following the `close`
 event.
+
+Any `QuicStream` instances that are still opened will be abruptly closed.
 
 ### quicsession.destroyed
 <!-- YAML
@@ -164,12 +223,37 @@ Set to `true` if the `QuicSession` has been destroyed.
 added: REPLACEME
 -->
 
+* Returns: {Object} A [Certificate Object][].
+
+Returns an object representing the local certificate. The returned object has some
+properties corresponding to the fields of the certificate.
+
+If there is no local certificate, or if the `QuicSession` has been destroyed, an empty
+object will be returned.
+
 ### quicsession.getPeerCertificate([detailed])
 <!-- YAML
 added: REPLACEME
 -->
 
-* `detailed` {boolean} Defaults to `false`
+* `detailed` {boolean} Include the full certificate chain if `true`, otherwise include
+  just the peer's certificate.
+* Returns: {Object} A [Certificate Object][].
+
+Returns an object representing the peer's certificate. If the peer does not provide a
+certificate, or if the `QuicSession` has been destroyed, an empty object will be returned.
+
+If the full certificate chain was requested, each certificate will include an `issuerCertificate`
+property containing an object representing its issuer's certificate.
+
+### quicsession.handshakeComplete
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {boolean}
+
+True if the TLS handshake has completed.
 
 ### quicsession.openStream([options])
 <!-- YAML
@@ -182,6 +266,9 @@ added: REPLACEME
 * Returns: {QuicStream}
 
 Returns a new `QuicStream`.
+
+An error will be thrown if the `QuicSession` has been destroyed or is in the process
+of a graceful shutdown.
 
 ### quicsession.servername
 <!-- YAML
@@ -201,16 +288,17 @@ added: REPLACEME
 
 The `QuicSocket` the `QuicSession` is associated with.
 
-### Class: QuicClientSession
+## Class: QuicClientSession extends QuicSession
 <!-- YAML
 added: REPLACEME
 -->
 
 * Extends: {QuicSession}
 
-TBD
+The `QuicClientSession` class implements the client side of a QUIC connection.
+Instances are created using the `quicsocket.connect()` method.
 
-#### Event: `'sessionTicket'`
+### Event: `'sessionTicket'`
 
 The `'sessionTicket'` event is emitted when a new TLS session ticket has been
 generated for the current `QuicClientSession`. The callback is invoked with
@@ -224,39 +312,95 @@ three arguments:
 The `sessionTicket` and `remoteTransportParams` are useful when creating a new
 `QuicClientSession` to more quickly resume an existing session.
 
-#### quicclientsession.ephemeralKeyInfo
+### quicclientsession.ephemeralKeyInfo
 <!-- YAML
 added: REPLACEME
 -->
 
-### Class: QuicServerSession
+* Type: {Object}
+
+An object representing the type, name, and size of parameter of an ephemeral
+key exchange in Perfect Forward Secrecy on a client connection. It is an
+empty object when the key exchange is not ephemeral. The supported types are
+`'DH'` and `'ECDH'`. The `name` property is available only when type is `'ECDH'`.
+
+For example: `{ type: 'ECDH', name: 'prime256v1', size: 256 }`.
+
+### quicclientsession.ready
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {boolean}
+
+True if the `QuicClientSession` is ready for use. False if the `QuicSocket` has not
+yet been bound.
+
+### quicclientsession.readyToMigrate
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {boolean}
+
+Once established, a `QuicClientSession` can be migrated from one `QuicSocket` instance
+to another, without requiring the TLS handshake to be reestablished. Migration, however,
+can only occur once the TLS handshake is complete and the underlying session has had an
+opportunity to generate a pool of extra connection identifiers.
+
+### quicclientsession.setSocket(socket, callback])
+<!-- YAML
+added: REPLACEME
+-->
+
+* `socket` {QuicSocket} A `QuicSocket` instance to move this session to.
+* `callback` {Function} A callback function that will be invoked once the migration to
+  the new `QuicSocket` is complete.
+
+Migrates the `QuicClientSession` to the given `QuicSocket` instance. If the new `QuicSocket`
+has not yet been bound to a local UDP port, it will be bound prior to attempting the
+migration. If `quicclientsession.readyToMigrate` is `false`, an error will be thrown.
+
+## Class: QuicServerSession extends QuicSession
 <!-- YAML
 added: REPLACEME
 -->
 
 * Extends: {QuicSession}
 
-TBD
+The `QuicServerSession` class implements the server side of a QUIC connection.
+Instances are created internally and are emitted using the `QuicSocket` `'session'`
+event.
 
-### Class: QuicSocket
+## Class: QuicSocket
 <!-- YAML
 added: REPLACEME
 -->
+
+New instances of `QuicSocket` are created using the `quic.createSocket()` method.
+
+Once created, a `QuicSocket` can be configured to work as both a client and a server.
 
 ### Event: `'close'`
 <!-- YAML
 added: REPLACEME
 -->
 
+Emitted after the `QuicSocket` has been destroyed and is no longer usable.
+
 ### Event: `'error'`
 <!-- YAML
 added: REPLACEME
 -->
 
+Emitted before the `'close'` event if the `QuicSocket` was destroyed with an `error`.
+
 ### Event: `'ready'`
 <!-- YAML
 added: REPLACEME
 -->
+
+Emitted once the `QuicSocket` has been bound to a local UDP port.
 
 ### Event: `'session'`
 <!-- YAML
@@ -273,12 +417,30 @@ added: REPLACEME
 * `address` {string}
 * `iface` {string}
 
+Tells the kernel to join a multicast group at the given `multicastAddress` and
+`multicastInterface` using the `IP_ADD_MEMBERSHIP` socket option. If the
+`multicastInterface` argument is not specified, the operating system will
+choose one interface and will add membership to it. To add membership to every
+available interface, call `quicsocket.addMembership()` multiple times, once per
+interface.
+
+
 ### quicsocket.address
 <!-- YAML
 added: REPLACEME
 -->
 
 * Type: Address
+
+An object containing the address information for a bound `QuicSocket`.
+
+The object will contain the properties:
+
+* `address` {string} The local IPv4 or IPv6 address to which the `QuicSocket` is bound.
+* `family` {string} Either `'IPv4'` or `'IPv6'`.
+* `port` {number} The local IP port to which the `QuicSocket` is bound.
+
+If the `QuicSocket` is not bound, `quicsocket.address` is an empty object.
 
 ### quicsocket.bound
 <!-- YAML
@@ -297,7 +459,9 @@ added: REPLACEME
 
 * `callback` {Function}
 
-Closes the `QuicSocket`.
+Gracefully closes the `QuicSocket`. Existing `QuicSession` instances will be permitted to
+close naturally. New `QuicClientSession` and `QuicServerSession` instances will not be
+allowed.
 
 ### quicsocket.connect([options])
 <!-- YAML
@@ -307,6 +471,7 @@ added: REPLACEME
 * `options` {Object}
   * `address` {string} The domain name or IP address of the QUIC server
     endpoint.
+  * `alpn` {string} An ALPN protocol identifier.
   * `ca` {string|string[]|Buffer|Buffer[]} Optionally override the trusted CA
     certificates. Default is to trust the well-known CAs curated by Mozilla.
     Mozilla's CAs are completely replaced when CAs are explicitly specified
@@ -358,6 +523,7 @@ added: REPLACEME
     preferences instead of the client's. When `true`, causes
     `SSL_OP_CIPHER_SERVER_PREFERENCE` to be set in `secureOptions`, see
     [OpenSSL Options][] for more information.
+  * `idleTimeout` {number}
   * `ipv6Only` {boolean}
   * `key` {string|string[]|Buffer|Buffer[]|Object[]} Private keys in PEM format.
     PEM allows the option of private keys being encrypted. Encrypted keys will
@@ -367,6 +533,16 @@ added: REPLACEME
     passphrase: <string>]}`. The object form can only occur in an array.
     `object.passphrase` is optional. Encrypted keys will be decrypted with
     `object.passphrase` if provided, or `options.passphrase` if it is not.
+  * `maxAckDelay` {number}
+  * `maxCidLen` {number}
+  * `maxData` {number}
+  * `maxPacketSize` {number}
+  * `maxStreamDataBidiLocal` {number}
+  * `maxStreamDataBidiRemote` {number}
+  * `maxStreamDataUni` {number}
+  * `maxStreamsBidi` {number}
+  * `maxStreamsUni` {number}
+  * `minCidLen` {number}
   * `passphrase` {string} Shared passphrase used for a single private key and/or
     a PFX.
   * `pfx` {string|string[]|Buffer|Buffer[]|Object[]} PFX or PKCS12 encoded
@@ -379,6 +555,7 @@ added: REPLACEME
     decrypted with `object.passphrase` if provided, or `options.passphrase` if
     it is not.
   * `port` {number} The IP port of the remote QUIC server.
+  * `preferredAddressPolicy` {string} `'accept'` or `'reject'`.
   * `remoteTransportParams` {Buffer|TypedArray|DataView} The serialized remote
     transport parameters from a previously established session. These would
     have been provided as part of the `'sessionTicket'` event on a previous
@@ -426,6 +603,14 @@ added: REPLACEME
 * `address` {string}
 * `iface` {string}
 
+Instructs the kernel to leave a multicast group at `multicastAddress` using the
+`IP_DROP_MEMBERSHIP` socket option. This method is automatically called by the
+kernel when the socket is closed or the process terminates, so most apps will
+never have reason to call this.
+
+If `multicastInterface` is not specified, the operating system will attempt to
+drop membership on all valid interfaces.
+
 ### quicsocket.fd
 <!-- YAML
 added: REPLACEME
@@ -441,6 +626,7 @@ added: REPLACEME
 -->
 
 * `options` {Object}
+  * `alpn` {string} An ALPN protocol identifier.
   * `ca` {string|string[]|Buffer|Buffer[]} Optionally override the trusted CA
     certificates. Default is to trust the well-known CAs curated by Mozilla.
     Mozilla's CAs are completely replaced when CAs are explicitly specified
@@ -492,6 +678,7 @@ added: REPLACEME
     preferences instead of the client's. When `true`, causes
     `SSL_OP_CIPHER_SERVER_PREFERENCE` to be set in `secureOptions`, see
     [OpenSSL Options][] for more information.
+  * `idleTimeout` {number}
   * `key` {string|string[]|Buffer|Buffer[]|Object[]} Private keys in PEM format.
     PEM allows the option of private keys being encrypted. Encrypted keys will
     be decrypted with `options.passphrase`. Multiple keys using different
@@ -500,6 +687,16 @@ added: REPLACEME
     passphrase: <string>]}`. The object form can only occur in an array.
     `object.passphrase` is optional. Encrypted keys will be decrypted with
     `object.passphrase` if provided, or `options.passphrase` if it is not.
+  * `maxAckDelay` {number}
+  * `maxCidLen` {number}
+  * `maxData` {number}
+  * `maxPacketSize` {number}
+  * `maxStreamsBidi` {number}
+  * `maxStreamsUni` {number}
+  * `maxStreamDataBidiLocal` {number}
+  * `maxStreamDataBidiRemote` {number}
+  * `maxStreamDataUni` {number}
+  * `minCidLen` {number}
   * `passphrase` {string} Shared passphrase used for a single private key and/or
     a PFX.
   * `pfx` {string|string[]|Buffer|Buffer[]|Object[]} PFX or PKCS12 encoded
@@ -511,6 +708,10 @@ added: REPLACEME
     occur in an array. `object.passphrase` is optional. Encrypted PFX will be
     decrypted with `object.passphrase` if provided, or `options.passphrase` if
     it is not.
+  * `preferredAddress` {Object}
+    * `address` {string}
+    * `port` {number}
+    * `type` {string} `'udp4'` or `'udp6'`.
   * `secureOptions` {number} Optionally affect the OpenSSL protocol behavior,
     which is not usually necessary. This should be used carefully if at all!
     Value is a numeric bitmask of the `SSL_OP_*` options from
@@ -546,12 +747,18 @@ added: REPLACEME
 
 * `on` {boolean}
 
+Sets or clears the `SO_BROADCAST` socket option. When set to `true`, UDP packets may be sent
+to a local interface's broadcast address.
+
 ### quicsocket.setMulticastLoopback([on])
 <!-- YAML
 added: REPLACEME
 -->
 
 * `on` {boolean}
+
+Sets or clears the `IP_MULTICAST_LOOP` socket option. When set to `true`, multicast packets
+will also be received on the local interface.
 
 ### quicsocket.setMulticastInterface(iface)
 <!-- YAML
@@ -560,12 +767,91 @@ added: REPLACEME
 
 * `iface` {string}
 
+All references to scope in this section are referring to IPv6 Zone Indices, which are
+defined by [RFC 4007][]. In string form, an IP with a scope index is written as `'IP%scope'`
+where scope is an interface name or interface number.
+
+Sets the default outgoing multicast interface of the socket to a chosen interface or back to
+system interface selection. The multicastInterface must be a valid string representation of
+an IP from the socket's family.
+
+For IPv4 sockets, this should be the IP configured for the desired physical interface. All
+packets sent to multicast on the socket will be sent on the interface determined by the most
+recent successful use of this call.
+
+For IPv6 sockets, multicastInterface should include a scope to indicate the interface as in
+the examples that follow. In IPv6, individual send calls can also use explicit scope in
+addresses, so only packets sent to a multicast address without specifying an explicit scope
+are affected by the most recent successful use of this call.
+
+#### Examples: IPv6 Outgoing Multicast Interface
+<!-- YAML
+added: REPLACEME
+-->
+On most systems, where scope format uses the interface name:
+
+```js
+const socket = quic.createSocket({ type: 'udp6', port: 1234 });
+
+socket.on('ready', () => {
+  socket.setMulticastInterface('::%eth1');
+});
+```
+
+On Windows, where scope format uses an interface number:
+
+```js
+const socket = quic.createSocket({ type: 'udp6', port: 1234 });
+
+socket.on('ready', () => {
+  socket.setMulticastInterface('::%2');
+});
+```
+
+#### Example: IPv4 Outgoing Multicast Interface
+<!-- YAML
+added: REPLACEME
+-->
+All systems use an IP of the host on the desired physical interface:
+
+```js
+const socket = quic.createSocket({ type: 'udp4', port: 1234 });
+
+socket.on('ready', () => {
+  socket.setMulticastInterface('10.0.0.2');
+});
+```
+
+#### Call Results#
+
+A call on a socket that is not ready to send or no longer open may throw a Not running Error.
+
+If multicastInterface can not be parsed into an IP then an `EINVAL` System Error is thrown.
+
+On IPv4, if `multicastInterface` is a valid address but does not match any interface, or if
+the address does not match the family then a System Error such as `EADDRNOTAVAIL` or
+`EPROTONOSUP` is thrown.
+
+On IPv6, most errors with specifying or omitting scope will result in the socket continuing
+to use (or returning to) the system's default interface selection.
+
+A socket's address family's ANY address (IPv4 `'0.0.0.0'` or IPv6 `'::'`) can be used to
+return control of the sockets default outgoing interface to the system for future multicast packets.
+
 ### quicsocket.setMulticastTTL(ttl)
 <!-- YAML
 added: REPLACEME
 -->
 
 * `ttl` {number}
+
+Sets the `IP_MULTICAST_TTL` socket option. While TTL generally stands for "Time to Live",
+in this context it specifies the number of IP hops that a packet is allowed to travel through,
+specifically for multicast traffic. Each router or gateway that forwards a packet decrements
+the TTL. If the TTL is decremented to `0` by a router, it will not be forwarded.
+
+The argument passed to `socket.setMulticastTTL()` is a number of hops between `0` and `255`.
+The default on most systems is `1` but can vary.
 
 ### quicsocket.setTTL(ttl)
 <!-- YAML
@@ -574,13 +860,22 @@ added: REPLACEME
 
 * `ttl` {number}
 
+Sets the `IP_TTL` socket option. While TTL generally stands for "Time to Live", in this
+context it specifies the number of IP hops that a packet is allowed to travel through. Each
+router or gateway that forwards a packet decrements the TTL. If the TTL is decremented to `0`
+by a router, it will not be forwarded. Changing TTL values is typically done for network
+probes or when multicasting.
+
+The argument to `socket.setTTL()` is a number of hops between `1` and `255`. The default on
+most systems is `64` but can vary.
+
 ### quicsocket.unref();
 <!-- YAML
 added: REPLACEME
 -->
 
 
-### Class: QuicStream
+## Class: QuicStream extends stream.Duplex
 <!-- YAML
 added: REPLACEME
 -->
@@ -606,6 +901,24 @@ added: REPLACEME
 added: REPLACEME
 -->
 
+### quicstream.bidirectional
+<!--YAML
+added: REPLACEME
+-->
+
+* Type: {boolean}
+
+True if the `QuicStream` is bidirectional.
+
+### quicstream.clientInitiated
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {boolean}
+
+True if the `QuicStream` was initiated by a `QuicClientSession` instance.
+
 ### quicstream.id
 <!-- YAML
 added: REPLACEME
@@ -613,9 +926,36 @@ added: REPLACEME
 
 * Type: {number}
 
+The numeric identifier of the `QuicStream`.
+
+### quicstream.serverInitiated
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {boolean}
+
+True if the `QuicStream` was initiated by a `QuicServerSession` instance.
+
 ### quicstream.session
 <!-- YAML
 added: REPLACEME
 -->
 
 * Type: {QuicSession}
+
+The `QuicServerSession` or `QuicClientSession`.
+
+### quicstream.unidirectional
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {boolean}
+
+True if the `QuicStream` is unidirectional.
+
+
+
+[RFC 4007]: https://tools.ietf.org/html/rfc4007
+[Certificate Object]: https://nodejs.org/dist/latest-v12.x/docs/api/tls.html#tls_certificate_object
