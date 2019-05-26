@@ -843,7 +843,8 @@ void QuicSession::ExtendMaxStreamData(
   // TODO(@jasnell): Extend max stream data
 }
 
-// Forwards detailed debugging information from ngtcp2.
+// Forwards detailed(verbose) debugging information from ngtcp2. Enabled using
+// the NODE_DEBUG_NATIVE=NGTCP2_DEBUG category.
 void QuicSession::DebugLog(
     void* user_data,
     const char* fmt, ...) {
@@ -851,9 +852,8 @@ void QuicSession::DebugLog(
   char message[1024];
   va_list ap;
   va_start(ap, fmt);
-  vsnprintf(message, sizeof(message), fmt, ap);
+  Debug(session->env(), DebugCategory::NGTCP2_DEBUG, fmt, ap);
   va_end(ap);
-  Debug(session, message);
 }
 
 // Destroy the QuicSession and free it. The QuicSession
