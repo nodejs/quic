@@ -651,10 +651,8 @@ int QuicSession::VerifyRetryToken(
     SocketAddress::GetAddress(addr, &host);
   }
 
-  if (hd->tokenlen < TOKEN_RAND_DATALEN) {
-    // token is too short
+  if (hd->tokenlen < TOKEN_RAND_DATALEN)
     return  -1;
-  }
 
   uint8_t* rand_data = hd->token + hd->tokenlen - TOKEN_RAND_DATALEN;
   uint8_t* ciphertext = hd->token;
@@ -682,26 +680,19 @@ int QuicSession::VerifyRetryToken(
           params.iv.data(),
           params.ivlen,
           reinterpret_cast<const uint8_t*>(addr), addrlen);
-  if (n < 0) {
-    // Could not decrypt token
+  if (n < 0)
     return -1;
-  }
 
-  if (static_cast<size_t>(n) < addrlen + sizeof(uint64_t)) {
-    // Bad token construction
+  if (static_cast<size_t>(n) < addrlen + sizeof(uint64_t))
     return -1;
-  }
 
   ssize_t cil = static_cast<size_t>(n) - addrlen - sizeof(uint64_t);
-  if (cil != 0 && (cil < NGTCP2_MIN_CIDLEN || cil > NGTCP2_MAX_CIDLEN)) {
-    // Bad token construction
+  if (cil != 0 && (cil < NGTCP2_MIN_CIDLEN || cil > NGTCP2_MAX_CIDLEN))
     return -1;
-  }
 
-  if (memcmp(plaintext.data(), addr, addrlen) != 0) {
-    // Client address does not match
+  if (memcmp(plaintext.data(), addr, addrlen) != 0)
     return -1;
-  }
+
 
   uint64_t t;
   memcpy(&t, plaintext.data() + addrlen, sizeof(uint64_t));
@@ -711,10 +702,8 @@ int QuicSession::VerifyRetryToken(
   // 10-second window by default, but configurable for each
   // QuicSocket instance with a MIN_RETRYTOKEN_EXPIRATION second
   // minimum and a MAX_RETRYTOKEN_EXPIRATION second maximum.
-  if (t + verification_expiration * NGTCP2_SECONDS < now) {
-    // Token has expired
+  if (t + verification_expiration * NGTCP2_SECONDS < now)
     return -1;
-  }
 
   return 0;
 }
@@ -730,11 +719,11 @@ QuicSession::QuicSession(
     AsyncWrap(socket->env(), wrap, type),
     rx_crypto_level_(NGTCP2_CRYPTO_LEVEL_INITIAL),
     tx_crypto_level_(NGTCP2_CRYPTO_LEVEL_INITIAL),
+    last_error_(QUIC_ERROR_SESSION, NGTCP2_NO_ERROR),
     closing_(false),
     destroyed_(false),
     initial_(true),
     connection_(nullptr),
-    tls_alert_(0),
     max_pktlen_(0),
     idle_timer_(nullptr),
     socket_(socket),
@@ -771,10 +760,23 @@ QuicSession::~QuicSession() {
   ngtcp2_conn_del(connection_);
 }
 
+void QuicSession::SetLastError(QuicError error) {
+  last_error_ = error;
+}
+
+QuicError QuicSession::GetLastError() {
+  return last_error_;
+}
+
 const std::string& QuicSession::GetALPN() {
   return alpn_;
 }
 
+// TLS Keylogging is enabled per-QuicSession by attaching an handler to the
+// "keylog" event. Each keylog line is emitted to JavaScript where it can
+// be routed to whatever destination makes sense. Typically, this will be
+// to a keylog file that can be consumed by tools like Wireshark to intercept
+// and decrypt QUIC network traffic.
 void QuicSession::Keylog(const char* line) {
   if (LIKELY(state_[IDX_QUIC_SESSION_STATE_KEYLOG_ENABLED] == 0))
     return;
@@ -803,10 +805,9 @@ void QuicSession::AckedCryptoOffset(
     ngtcp2_crypto_level crypto_level,
     uint64_t offset,
     size_t datalen) {
-  CHECK(!IsDestroyed());
-  Debug(this,
-        "Received acknowledgement for crypto data. Offset %llu, Length %d",
-        offset, datalen);
+  if (IsDestroyed())
+    return;
+  Debug(this, "Received acknowledgement for %d bytes of crypto data.", datalen);
   handshake_.Consume(datalen);
 }
 
@@ -819,10 +820,10 @@ void QuicSession::AckedStreamDataOffset(
     int64_t stream_id,
     uint64_t offset,
     size_t datalen) {
-  CHECK(!IsDestroyed());
-  Debug(this,
-        "Received acknowledgement for stream %llu data. Offset %llu, Length %d",
-        stream_id, offset, datalen);
+  if (IsDestroyed())
+    return;
+  Debug(this, "Received acknowledgement for %d bytes of stream %llu data",
+        datalen, stream_id);
   QuicStream* stream = FindStream(stream_id);
   if (stream != nullptr)
     stream->AckedDataOffset(offset, datalen);
@@ -870,8 +871,7 @@ void QuicSession::Destroy() {
   // The first step is to transmit a CONNECTION_CLOSE to the connected peer.
   // This is going to be fire-and-forget because we're not going to wait
   // around for it to be received.
-  // TODO(@jasnell): Error code...
-  SendConnectionClose(0);
+  SendConnectionClose();
 
   // Hold on to a reference until the function exits
   // so the instance is not prematurely deleted when
@@ -1267,7 +1267,7 @@ int QuicSession::DoHandshakeWriteOnce() {
           max_pktlen_,
           uv_hrtime());
   if (nwrite <= 0)
-    return 0;
+    return nwrite;
 
   data.Realloc(nwrite);
   sendbuf_.Push(std::move(data));
@@ -1281,14 +1281,13 @@ int QuicSession::DoHandshakeReadOnce(
     const uint8_t* data,
     size_t datalen) {
   if (datalen > 0) {
-    int err = ngtcp2_conn_read_handshake(
-        connection_,
-        path,
-        data,
-        datalen,
-        uv_hrtime());
-    if (err != 0)
-      return err;
+    RETURN_RET_IF_FAIL(
+        ngtcp2_conn_read_handshake(
+            connection_,
+            path,
+            data,
+            datalen,
+            uv_hrtime()), 0);
   }
   return 0;
 }
@@ -1303,13 +1302,9 @@ int QuicSession::ReceiveCryptoData(
     size_t datalen) {
   CHECK(!IsDestroyed());
   Debug(this, "Receiving %d bytes of crypto data.", datalen);
-  int err = WritePeerHandshake(crypto_level, data, datalen);
-  if (err != 0)
-    return err;
+  RETURN_RET_IF_FAIL(WritePeerHandshake(crypto_level, data, datalen), 0);
   if (!IsHandshakeCompleted()) {
-    err = TLSHandshake();
-    if (err != 0)
-      return err;
+    RETURN_RET_IF_FAIL(TLSHandshake(), 0);
     return 0;
   }
   // It's possible that not all of the data was consumed. Anything
@@ -1458,7 +1453,8 @@ int QuicSession::Send0RTTStreamData(
       }
       if (should_break)
         break;
-      return HandleError(nwrite);
+      SetLastError(QUIC_ERROR_CRYPTO, nwrite);
+      return HandleError();
     }
 
     if (nwrite == 0)
@@ -1519,7 +1515,8 @@ int QuicSession::SendStreamData(
           nwrite == NGTCP2_ERR_STREAM_NOT_FOUND) {
         break;
       }
-      return HandleError(nwrite);
+      SetLastError(QUIC_ERROR_SESSION, nwrite);
+      return HandleError();
     }
 
     if (nwrite == 0)
@@ -1586,14 +1583,15 @@ void QuicSession::SetLocalAddress(const ngtcp2_addr* addr) {
 }
 
 void QuicSession::SetTLSAlert(int err) {
-  tls_alert_ = err;
+  SetLastError(InitQuicError(QUIC_ERROR_CRYPTO, err));
 }
 
 // Creates a new stream object and passes it off to the javascript side.
+// This has to be called from within a handlescope/contextscope.
 QuicStream* QuicSession::CreateStream(int64_t stream_id) {
   CHECK(!IsDestroyed());
   CHECK(!IsClosing());
-  Debug(this, "Stream %llu is new. Creating.", stream_id);
+  Debug(this, "Create new stream %llu", stream_id);
   QuicStream* stream = QuicStream::New(this, stream_id);
   CHECK_NOT_NULL(stream);
   Local<Value> argv[] = {
@@ -1724,8 +1722,7 @@ void QuicSession::StreamClose(int64_t stream_id, uint16_t app_error_code) {
   // Ignore if the session has already been destroyed
   if (IsDestroyed())
     return;
-  Debug(this, "Closing stream %llu with code %d",
-        stream_id, app_error_code);
+  Debug(this, "Closing stream %llu with code %d", stream_id, app_error_code);
   QuicStream* stream = FindStream(stream_id);
   if (stream != nullptr)
     stream->Close(app_error_code);
@@ -1887,13 +1884,20 @@ void QuicSession::WriteHandshake(const uint8_t* data, size_t datalen) {
 }
 
 // Called when the QuicSession is closed and we need to let the javascript
-// side know
+// side know. The error may be either a QUIC connection error code or an
+// application error code, with the type differentiating between the two.
+// The default type is QUIC_CLOSE_CONNECTION.
 void QuicSession::Close() {
   CHECK(!IsDestroyed());
   HandleScope scope(env()->isolate());
   Local<Context> context = env()->context();
   Context::Scope context_scope(context);
-  MakeCallback(env()->quic_on_session_close_function(), 0, nullptr);
+  QuicError last_error = GetLastError();
+  Local<Value> argv[] = {
+    Integer::New(env()->isolate(), last_error.code),
+    Integer::New(env()->isolate(), last_error.family)
+  };
+  MakeCallback(env()->quic_on_session_close_function(), arraysize(argv), argv);
 }
 
 // The QuicServerSession specializes the QuicSession with server specific
@@ -1954,8 +1958,12 @@ void QuicServerSession::AddToSocket(QuicSocket* socket) {
   }
 }
 
-int QuicServerSession::HandleError(int error) {
-  return SendConnectionClose(error);
+int QuicServerSession::HandleError() {
+  if (!SendConnectionClose()) {
+    SetLastError(QUIC_ERROR_SESSION, NGTCP2_ERR_INTERNAL);
+    Close();
+  }
+  return 0;
 }
 
 int QuicServerSession::OnKey(
@@ -2148,8 +2156,10 @@ int QuicServerSession::Receive(
   // TODO(@jasnell): Currently, send a CONNECTION_CLOSE on every
   // packet received. To be a bit nicer, however, we could
   // use an exponential backoff.
-  if (IsInClosingPeriod())
-    return SendConnectionClose(0);
+  if (IsInClosingPeriod()) {
+    SetLastError(QUIC_ERROR_SESSION, NGTCP2_ERR_CLOSING);
+    return HandleError();
+  }
 
   // Draining period starts once we've detected an idle timeout on
   // this session and we're in the process of shutting down. We
@@ -2165,8 +2175,10 @@ int QuicServerSession::Receive(
 
   if (!IsHandshakeCompleted()) {
     err = DoHandshake(*path, data, nread);
-    if (err != 0)
-      SendConnectionClose(err);
+    if (err != 0) {
+      SetLastError(InitQuicError(QUIC_ERROR_CRYPTO, err));
+      HandleError();
+    }
     return 0;
   }
 
@@ -2175,12 +2187,12 @@ int QuicServerSession::Receive(
       *path,
       data, nread,
       uv_hrtime());
-  if (err != 0) {
-    if (err == NGTCP2_ERR_DRAINING) {
-      StartDrainingPeriod();
-      return -1;  // Closing
-    }
-    SendConnectionClose(err);
+  if (err == NGTCP2_ERR_DRAINING) {
+    StartDrainingPeriod();
+    return -1;
+  } else if (ngtcp2_err_is_fatal(err)) {
+    SetLastError(QUIC_ERROR_SESSION, err);
+    HandleError();
   }
 
   return 0;
@@ -2213,9 +2225,9 @@ void QuicServerSession::RemoveFromSocket() {
 
 // Transmits the CONNECTION_CLOSE to the peer, signaling
 // the end of this QuicSession.
-int QuicServerSession::SendConnectionClose(int error) {
+bool QuicServerSession::SendConnectionClose() {
   CHECK(!IsDestroyed());
-  RETURN_IF_FAIL(StartClosingPeriod(error), 0, -1);
+  RETURN_IF_FAIL(StartClosingPeriod(), 0, false);
   StartIdleTimer(-1);
   CHECK_GT(conn_closebuf_.size, 0);
   sendbuf_.Cancel();
@@ -2227,7 +2239,7 @@ int QuicServerSession::SendConnectionClose(int error) {
           conn_closebuf_.size);
   sendbuf_.Push(&buf, 1);
   ScheduleMonitor();
-  return SendPacket();
+  return SendPacket() == 0;
 }
 
 int QuicServerSession::SendPendingData(bool retransmit) {
@@ -2264,42 +2276,39 @@ int QuicServerSession::SendPendingData(bool retransmit) {
   }
 
   err = WritePackets();
-  if (err < 0)
-    return HandleError(err);
+  if (err < 0) {
+    SetLastError(QUIC_ERROR_SESSION, err);
+    HandleError();
+    return 0;
+  }
 
   ScheduleMonitor();
   return 0;
 }
 
-int QuicServerSession::StartClosingPeriod(int error) {
+int QuicServerSession::StartClosingPeriod() {
   CHECK(!IsDestroyed());
   if (IsInClosingPeriod())
     return 0;
-
-  Debug(this, "Closing period has started. Error %d", error);
 
   StopRetransmitTimer();
   StartIdleTimer(-1);
 
   sendbuf_.Cancel();
 
-  uint16_t err_code;
-  if (tls_alert_) {
-    err_code = NGTCP2_CRYPTO_ERROR | tls_alert_;
-  } else {
-    err_code = ngtcp2_err_infer_quic_transport_error_code(error);
-  }
+  QuicError error = GetLastError();
+  Debug(this, "Closing period has started. Error %d", error.code);
 
   // Once the CONNECTION_CLOSE packet is written,
   // IsInClosingPeriod will return true.
   conn_closebuf_ = MallocedBuffer<uint8_t>(max_pktlen_);
   ssize_t nwrite =
-      ngtcp2_conn_write_connection_close(
+      SelectCloseFn(error.family)(
           connection_,
           nullptr,
           conn_closebuf_.data,
           max_pktlen_,
-          err_code,
+          error.code,
           uv_hrtime());
   if (nwrite < 0)
     return -1;
@@ -2440,6 +2449,7 @@ QuicClientSession::QuicClientSession(
     resumption_(false),
     hostname_(hostname),
     select_preferred_address_policy_(select_preferred_address_policy) {
+  // TODO(@jasnell): Init may fail. Need to handle the error conditions
   Init(addr, version, early_transport_params, session_ticket, dcid);
 }
 
@@ -2728,6 +2738,7 @@ int QuicClientSession::DoHandshake(
 
   int err = DoHandshakeReadOnce(path, data, datalen);
   if (err != 0) {
+    SetLastError(QUIC_ERROR_CRYPTO, err);
     Close();
     return -1;
   }
@@ -2745,38 +2756,35 @@ int QuicClientSession::DoHandshake(
   return nwrite;
 }
 
-int QuicClientSession::HandleError(int code) {
+int QuicClientSession::HandleError() {
   if (!connection_ || IsInClosingPeriod())
     return 0;
 
   sendbuf_.Cancel();
 
-  if (code == NGTCP2_ERR_RECV_VERSION_NEGOTIATION)
+  if (GetLastError().code == NGTCP2_ERR_RECV_VERSION_NEGOTIATION)
     return 0;
 
-  // TODO(danbev) Use error code
-  /*
-  uint16_t err_code =
-      tls_alert_ ?
-          NGTCP2_CRYPTO_ERROR | tls_alert_ :
-          ngtcp2_err_infer_quic_transport_error_code(code);
-  */
-
-  return SendConnectionClose(code);
+  if (!SendConnectionClose()) {
+    SetLastError(QUIC_ERROR_SESSION, NGTCP2_ERR_INTERNAL);
+    Close();
+  }
+  return 0;
 }
 
-int QuicClientSession::SendConnectionClose(int error) {
+bool QuicClientSession::SendConnectionClose() {
   CHECK(!IsDestroyed());
   StartIdleTimer(-1);
   MallocedBuffer<uint8_t> data(max_pktlen_);
   sendbuf_.Cancel();
+  QuicError error = GetLastError();
   ssize_t nwrite =
-      ngtcp2_conn_write_connection_close(
+      SelectCloseFn(error.family)(
         connection_,
         nullptr,
         data.data,
         max_pktlen_,
-        error,
+        error.code,
         uv_hrtime());
   if (nwrite < 0) {
     Debug(this, "Error writing connection close: %d", nwrite);
@@ -2785,7 +2793,7 @@ int QuicClientSession::SendConnectionClose(int error) {
   data.Realloc(nwrite);
   sendbuf_.Push(std::move(data));
   ScheduleMonitor();
-  return SendPacket();
+  return SendPacket() == 0;
 }
 
 void QuicClientSession::OnIdleTimeout() {
@@ -2809,13 +2817,17 @@ bool QuicClientSession::MaybeTimeout() {
     CHECK_EQ(ngtcp2_conn_on_loss_detection_timer(connection_, now), 0);
     Debug(this, "Retransmitting due to loss detection");
     err = SendPendingData(true);
-    if (err != 0)
-      HandleError(err);
+    if (err != 0) {
+      SetLastError(QUIC_ERROR_SESSION, err);
+      HandleError();
+    }
   } else if (ngtcp2_conn_ack_delay_expiry(connection_) <= now) {
     Debug(this, "Transmitting due to ack delay");
     err = SendPendingData();
-    if (err != 0)
-      HandleError(err);
+    if (err != 0) {
+      SetLastError(QUIC_ERROR_SESSION, err);
+      HandleError();
+    }
   }
   allow_retransmit_ = false;
   monitor_scheduled_ = false;
@@ -2913,14 +2925,12 @@ int QuicClientSession::SendPendingData(bool retransmit) {
   if (retransmit) {
     err = ngtcp2_conn_on_loss_detection_timer(connection_, uv_hrtime());
     if (err != 0) {
-      Debug(this, "Error resetting loss detection timer. Error %d", err);
-      // TODO(@jasnell): Close with error code
+      SetLastError(QUIC_ERROR_SESSION, err);
       Close();
       return -1;
     }
   }
 
-  // If the TLS handshake is not yet complete, do that and return.
   if (!IsHandshakeCompleted()) {
     Debug(this, "Handshake is not completed");
     err = DoHandshake(nullptr, nullptr, 0);
@@ -2929,8 +2939,10 @@ int QuicClientSession::SendPendingData(bool retransmit) {
   }
 
   err = WritePackets();
-  if (err < 0)
-    return HandleError(err);
+  if (err < 0) {
+    SetLastError(QUIC_ERROR_SESSION, err);
+    HandleError();
+  }
 
   if (!retransmit) {
     // For each stream, send any pending data
@@ -3048,9 +3060,11 @@ void QuicSessionDestroy(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   QuicSession* session;
   ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
-  int error_code = 0;
-  USE(args[0]->Int32Value(env->context()).To(&error_code));
-  // Use the error code
+  int code = 0;
+  int family = QUIC_ERROR_SESSION;
+  USE(args[0]->Int32Value(env->context()).To(&code));
+  USE(args[1]->Int32Value(env->context()).To(&family));
+  session->SetLastError(static_cast<QuicErrorFamily>(family), code);
   session->Destroy();
 }
 

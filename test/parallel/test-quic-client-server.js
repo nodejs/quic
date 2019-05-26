@@ -1,3 +1,4 @@
+// Flags: --expose-internals
 'use strict';
 
 // Tests a simple QUIC client/server round-trip
@@ -5,6 +6,14 @@
 const common = require('../common');
 if (!common.hasCrypto)
   common.skip('missing crypto');
+
+const { internalBinding } = require('internal/test/binding');
+const {
+  constants: {
+    NGTCP2_NO_ERROR,
+    QUIC_ERROR_APPLICATION,
+  }
+} = internalBinding('quic');
 
 const { Buffer } = require('buffer');
 const Countdown = require('../common/countdown');
@@ -88,6 +97,16 @@ server.on('session', common.mustCall((session) => {
     stream.on('close', common.mustCall());
     stream.on('finish', common.mustCall());
   }));
+
+  session.on('close', common.mustCall(() => {
+    const {
+      code,
+      family
+    } = session.closeCode;
+    debug(`Server sesion closed with code ${code} (family: ${family})`);
+    assert.strictEqual(code, NGTCP2_NO_ERROR);
+    assert.strictEqual(family, QUIC_ERROR_APPLICATION);
+  }));
 }));
 
 server.on('ready', common.mustCall(() => {
@@ -165,6 +184,15 @@ server.on('ready', common.mustCall(() => {
     }));
   }));
 
+  req.on('close', common.mustCall(() => {
+    const {
+      code,
+      family
+    } = req.closeCode;
+    debug(`Client sesion closed with code ${code} (family: ${family})`);
+    assert.strictEqual(code, NGTCP2_NO_ERROR);
+    assert.strictEqual(family, QUIC_ERROR_APPLICATION);
+  }));
 }));
 
 server.on('listening', common.mustCall());

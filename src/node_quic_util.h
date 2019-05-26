@@ -61,6 +61,39 @@ inline void hash_combine(size_t* seed, const T& value, Args... rest) {
     hash_combine(seed, rest...);
 }
 
+enum QuicErrorFamily {
+  QUIC_ERROR_SESSION,
+  QUIC_ERROR_CRYPTO,
+  QUIC_ERROR_APPLICATION
+};
+
+struct QuicError {
+  QuicErrorFamily family;
+  int code;
+  inline QuicError(
+      QuicErrorFamily family_ = QUIC_ERROR_SESSION,
+      int code_ = NGTCP2_NO_ERROR) :
+      family(family_), code(code_) {}
+};
+
+inline QuicError InitQuicError(
+    QuicErrorFamily family = QUIC_ERROR_SESSION,
+    int code_ = NGTCP2_NO_ERROR) {
+  QuicError error;
+  error.family = family;
+  switch (family) {
+    case QUIC_ERROR_CRYPTO:
+      code_ |= NGTCP2_CRYPTO_ERROR;
+      // Fall-through...
+    case QUIC_ERROR_SESSION:
+      error.code = ngtcp2_err_infer_quic_transport_error_code(code_);
+      break;
+    case QUIC_ERROR_APPLICATION:
+      error.code = code_;
+  }
+  return error;
+}
+
 class SocketAddress {
  public:
   // std::hash specialization for sockaddr instances (ipv4 or ipv6) used

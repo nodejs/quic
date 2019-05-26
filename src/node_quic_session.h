@@ -98,6 +98,7 @@ class QuicSession : public AsyncWrap,
   void Destroy();
   void ExtendStreamOffset(QuicStream* stream, size_t amount);
   const std::string& GetALPN();
+  inline QuicError GetLastError();
   void GetLocalTransportParams(
       ngtcp2_transport_params* params);
   uint32_t GetNegotiatedVersion();
@@ -125,6 +126,13 @@ class QuicSession : public AsyncWrap,
   int SendStreamData(
       QuicStream* stream,
       QuicBuffer::drain_from from = QuicBuffer::DRAIN_FROM_HEAD);
+  inline void SetLastError(
+      QuicError error = { QUIC_ERROR_SESSION, NGTCP2_NO_ERROR });
+  inline void SetLastError(
+    QuicErrorFamily family = QUIC_ERROR_SESSION,
+    int code = NGTCP2_NO_ERROR) {
+    SetLastError(InitQuicError(family, code));
+  }
   int SetRemoteTransportParams(
       ngtcp2_transport_params* params);
   void SetTLSAlert(
@@ -152,8 +160,7 @@ class QuicSession : public AsyncWrap,
       const ngtcp2_path* path,
       const uint8_t* data,
       size_t datalen) = 0;
-  virtual int HandleError(
-      int code) = 0;
+  virtual int HandleError() = 0;
   virtual bool MaybeTimeout() = 0;
   virtual void OnIdleTimeout() = 0;
   virtual int OnKey(
@@ -167,8 +174,7 @@ class QuicSession : public AsyncWrap,
       const struct sockaddr* addr,
       unsigned int flags) = 0;
   virtual void RemoveFromSocket() = 0;
-  virtual int SendConnectionClose(
-      int error) = 0;
+  virtual bool SendConnectionClose() = 0;
   virtual int SendPendingData(
       bool retransmit = false) = 0;
   virtual int TLSHandshake_Complete() = 0;
@@ -525,6 +531,20 @@ class QuicSession : public AsyncWrap,
   void SetLocalAddress(
       const ngtcp2_addr* addr);
 
+  typedef ssize_t(*ngtcp2_close_fn)(
+    ngtcp2_conn* conn,
+    ngtcp2_path* path,
+    uint8_t* dest,
+    size_t destlen,
+    uint16_t error_code,
+    ngtcp2_tstamp ts);
+
+  static inline ngtcp2_close_fn SelectCloseFn(QuicErrorFamily family) {
+    if (family == QUIC_ERROR_APPLICATION)
+      return ngtcp2_conn_write_application_close;
+    return ngtcp2_conn_write_connection_close;
+  }
+
   virtual ngtcp2_crypto_level GetServerCryptoLevel() = 0;
   virtual ngtcp2_crypto_level GetClientCryptoLevel() = 0;
   virtual void SetServerCryptoLevel(ngtcp2_crypto_level level) = 0;
@@ -537,13 +557,13 @@ class QuicSession : public AsyncWrap,
 
   ngtcp2_crypto_level rx_crypto_level_;
   ngtcp2_crypto_level tx_crypto_level_;
+  QuicError last_error_;
   bool closing_;
   bool destroyed_;
   bool initial_;
   crypto::SSLPointer ssl_;
   ngtcp2_conn* connection_;
   SocketAddress remote_address_;
-  uint8_t tls_alert_;
   size_t max_pktlen_;
   uv_timer_t* idle_timer_;
   QuicSocket* socket_;
@@ -668,8 +688,7 @@ class QuicServerSession : public QuicSession {
       const ngtcp2_path* path,
       const uint8_t* data,
       size_t datalen) override;
-  int HandleError(
-      int code) override;
+  int HandleError() override;
   void InitTLS_Post() override;
   void OnIdleTimeout() override;
   int OnKey(
@@ -683,15 +702,14 @@ class QuicServerSession : public QuicSession {
       const struct sockaddr* addr,
       unsigned int flags) override;
   void RemoveFromSocket() override;
-  int SendConnectionClose(
-      int error) override;
+  bool SendConnectionClose() override;
   int SendPendingData(
       bool retransmit = false) override;
   int TLSHandshake_Complete() override;
   int TLSHandshake_Initial() override;
   int TLSRead() override;
 
-  int StartClosingPeriod(int error);
+  int StartClosingPeriod();
   void StartDrainingPeriod();
 
   ngtcp2_crypto_level GetServerCryptoLevel() override;
@@ -805,8 +823,7 @@ class QuicClientSession : public QuicSession {
       uint64_t max_streams) override;
   int ExtendMaxStreamsBidi(
       uint64_t max_streams) override;
-  int HandleError(
-      int code) override;
+  int HandleError() override;
   void InitTLS_Post() override;
   void OnIdleTimeout() override;
   int OnKey(
@@ -824,8 +841,7 @@ class QuicClientSession : public QuicSession {
   int SelectPreferredAddress(
     ngtcp2_addr* dest,
     const ngtcp2_preferred_addr* paddr) override;
-  int SendConnectionClose(
-      int error) override;
+  bool SendConnectionClose() override;
   int SendPendingData(
       bool retransmit = false) override;
   int Start() override;
