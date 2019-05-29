@@ -348,6 +348,18 @@ decltype(auto) access(C* cls, T C::*member, Mems... rest) {
   return access((cls->*member), rest...);
 }
 
+template <typename A, typename... Members>
+void IncrementStat(
+    uint64_t amount,
+    A* a,
+    Members... mems) {
+  static uint64_t max = std::numeric_limits<uint64_t>::max();
+  uint64_t current = access(a, mems...);
+  uint64_t delta = std::min(amount, max - current);
+  access(a, mems...) += delta;
+}
+
+
 typedef int(*install_fn)(
     ngtcp2_conn* conn,
     const uint8_t* key,

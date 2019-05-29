@@ -567,7 +567,6 @@ class QuicSession : public AsyncWrap,
   size_t max_pktlen_;
   uv_timer_t* idle_timer_;
   QuicSocket* socket_;
-  size_t nkey_update_;
   CryptoContext hs_crypto_ctx_;
   CryptoContext crypto_ctx_;
   std::vector<uint8_t> tx_secret_;
@@ -614,6 +613,53 @@ class QuicSession : public AsyncWrap,
   std::string alpn_;
 
   mem::Allocator<ngtcp2_mem> allocator_;
+
+  struct session_stats {
+    // The timestamp at which the session was created
+    uint64_t created_at;
+    // The timestamp at which the handshake was started
+    uint64_t handshake_start_at;
+    // The timestamp at which the most recent handshake
+    // message was sent
+    uint64_t handshake_send_at;
+    // The timestamp at which the most recent handshake
+    // message was received
+    uint64_t handshake_continue_at;
+    // The timestamp at which handshake completed
+    uint64_t handshake_completed_at;
+    // The timestamp at which the most recently sent
+    // non-handshake packets were sent
+    uint64_t session_sent_at;
+    // The timestamp at which the most recently received
+    // non-handshake packets were received
+    uint64_t session_received_at;
+    // The timestamp at which a graceful close was started
+    uint64_t closing_at;
+    // The total number of bytes received (and not ignored)
+    // by this QuicSession
+    uint64_t bytes_received;
+    // The total number of bytes sent by this QuicSession
+    uint64_t bytes_sent;
+    // The total bidirectional stream count
+    uint64_t bidi_stream_count;
+    // The total unidirectional stream count
+    uint64_t uni_stream_count;
+    // The total number of peer-initiated streams
+    uint64_t streams_in_count;
+    // The total number of local-initiated streams
+    uint64_t streams_out_count;
+    // The total number of keyupdates
+    uint64_t keyupdate_count;
+  };
+  session_stats session_stats_{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+  template <typename... Members>
+  void IncrementSocketStat(
+      uint64_t amount,
+      session_stats* a,
+      Members... mems) {
+    IncrementStat<session_stats, Members>(amount, a, mems);
+  }
 
   // SendScope will cause the session to flush it's
   // current pending data queue to the underlying

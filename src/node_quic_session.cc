@@ -727,7 +727,6 @@ QuicSession::QuicSession(
     max_pktlen_(0),
     idle_timer_(nullptr),
     socket_(socket),
-    nkey_update_(0),
     hs_crypto_ctx_{},
     crypto_ctx_{},
     txbuf_(new QuicBuffer()),
@@ -749,6 +748,7 @@ QuicSession::QuicSession(
       env()->state_string(),
       state_.GetJSArray(),
       PropertyAttribute::ReadOnly));
+  session_stats_.created_at = uv_hrtime();
 
   // TODO(@jasnell): memory accounting
   // env_->isolate()->AdjustAmountOfExternalAllocatedMemory(kExternalSize);
@@ -809,6 +809,12 @@ void QuicSession::AckedCryptoOffset(
     return;
   Debug(this, "Received acknowledgement for %d bytes of crypto data.", datalen);
   handshake_.Consume(datalen);
+  // TODO(@jasnell): Check session_stats_.handshake_send_at to see how long
+  // handshake ack has taken. We will want to guard against Slow Handshake
+  // as a DOS vector.
+  // Likewise, we need to guard against malicious acknowledgements that trickle
+  // in acknowledgements with small datalen values. These could cause the
+  // session to retain memory and/or send extraneous retransmissions.
 }
 
 // Because of the fire-and-forget nature of UDP, the QuicSession must retain
@@ -827,6 +833,12 @@ void QuicSession::AckedStreamDataOffset(
   QuicStream* stream = FindStream(stream_id);
   if (stream != nullptr)
     stream->AckedDataOffset(offset, datalen);
+  // TODO(@jasnell): Check session_stats_.session_sent_at to see how long
+  // stream data ack has taken. We will want to guard against Slow Ack as a
+  // DOS vector.
+  // Likewise, we need to guard against malicious acknowledgements that trickle
+  // in acknowledgements with small datalen values. These could cause the
+  // session to retain memory and/or send extraneous retransmissions.
 }
 
 // Add the given QuicStream to this QuicSession's collection of streams. All
@@ -836,6 +848,29 @@ void QuicSession::AddStream(QuicStream* stream) {
   CHECK(!IsClosing());
   Debug(this, "Adding stream %llu to session.", stream->GetID());
   streams_.emplace(stream->GetID(), stream);
+
+  switch (stream->GetOrigin()) {
+    case QuicStream::QuicStreamOrigin::QUIC_STREAM_CLIENT:
+      if (IsServer())
+        IncrementStat(1, &session_stats_, &session_stats::streams_in_count);
+      else
+        IncrementStat(1, &session_stats_, &session_stats::streams_out_count);
+      break;
+    case QuicStream::QuicStreamOrigin::QUIC_STREAM_SERVER:
+      if (IsServer())
+        IncrementStat(1, &session_stats_, &session_stats::streams_out_count);
+      else
+        IncrementStat(1, &session_stats_, &session_stats::streams_in_count);
+  }
+  IncrementStat(1, &session_stats_, &session_stats::streams_out_count);
+  switch (stream->GetDirection()) {
+    case QuicStream::QuicStreamDirection::QUIC_STREAM_BIRECTIONAL:
+      IncrementStat(1, &session_stats_, &session_stats::bidi_stream_count);
+      break;
+    case QuicStream::QuicStreamDirection::QUIC_STREAM_UNIDIRECTIONAL:
+      IncrementStat(1, &session_stats_, &session_stats::uni_stream_count);
+      break;
+  }
 }
 
 void QuicSession::ExtendMaxStreamData(
@@ -850,7 +885,6 @@ void QuicSession::DebugLog(
     void* user_data,
     const char* fmt, ...) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
-  char message[1024];
   va_list ap;
   va_start(ap, fmt);
   Debug(session->env(), DebugCategory::NGTCP2_DEBUG, fmt, ap);
@@ -1064,6 +1098,7 @@ int QuicSession::PathValidation(
 // QuicSession is destroyed.
 void QuicSession::Closing() {
   closing_ = true;
+  session_stats_.closing_at = uv_hrtime();
 }
 
 // Copies the local transport params into the given struct
@@ -1198,6 +1233,8 @@ int QuicSession::ReceiveClientInitial(const ngtcp2_cid* dcid) {
 // determines that the TLS Handshake is done. The only thing we
 // need to do at this point is let the javascript side know.
 void QuicSession::HandshakeCompleted() {
+  session_stats_.handshake_completed_at = uv_hrtime();
+
   SetLocalCryptoLevel(NGTCP2_CRYPTO_LEVEL_APP);
   HandleScope scope(env()->isolate());
   Local<Context> context = env()->context();
@@ -1272,6 +1309,7 @@ int QuicSession::DoHandshakeWriteOnce() {
   data.Realloc(nwrite);
   sendbuf_.Push(std::move(data));
 
+  session_stats_.handshake_send_at = uv_hrtime();
   return SendPacket();
 }
 
@@ -1324,6 +1362,9 @@ int QuicSession::ReceiveStreamData(
     int fin,
     const uint8_t* data,
     size_t datalen) {
+  // TODO(@jasnell): Check datalen to guard against Slow Send DOS attack. A
+  // malicious sender may transmit very small packets very slowly to force
+  // us to keep a stream open for longer.
   CHECK(!IsDestroyed());
   HandleScope scope(env()->isolate());
   Local<Context> context = env()->context();
@@ -1546,9 +1587,15 @@ int QuicSession::SendStreamData(
 int QuicSession::SendPacket(bool retransmit) {
   CHECK(!IsDestroyed());
   // Move the contents of sendbuf_ to the tail of txbuf_ and reset sendbuf_
-  if (sendbuf_.Length() > 0)
+  if (sendbuf_.Length() > 0) {
+    IncrementStat(
+        sendbuf_.Length(),
+        &session_stats_,
+        &session_stats::bytes_sent);
     *txbuf_ += std::move(sendbuf_);
+  }
   Debug(this, "There are %llu bytes in txbuf_ to send", txbuf_->Length());
+  session_stats_.session_sent_at = uv_hrtime();
   return Socket()->SendPacket(
       &remote_address_,
       txbuf_,
@@ -1734,6 +1781,14 @@ void QuicSession::StreamClose(int64_t stream_id, uint16_t app_error_code) {
 int QuicSession::TLSHandshake() {
   CHECK(!IsDestroyed());
   Debug(this, "TLS handshake %s", initial_ ? "starting" : "continuing");
+
+  if (initial_)
+    session_stats_.handshake_start_at = uv_hrtime();
+  else {
+    // TODO(@jasnell): Check handshake_continue_at to guard against slow
+    // handshake attack
+  }
+  session_stats_.handshake_continue_at = uv_hrtime();
   ClearTLSError();
 
   if (initial_)
@@ -1768,7 +1823,7 @@ int QuicSession::UpdateKey() {
   ssize_t secretlen;
   CryptoParams params;
 
-  ++nkey_update_;
+  IncrementStat(1, &session_stats_, &session_stats::keyupdate_count);
 
   secretlen =
       UpdateTrafficSecret(
@@ -2143,6 +2198,7 @@ int QuicServerSession::Receive(
   SendScope scope(this);
 
   int err;
+  IncrementStat(nread, &session_stats_, &session_stats::bytes_received);
 
   // Closing period starts once ngtcp2 has detected that the session
   // is being shutdown locally. Note that this is different that the
@@ -2182,11 +2238,12 @@ int QuicServerSession::Receive(
     return 0;
   }
 
+  uint64_t now = uv_hrtime();
   err = ngtcp2_conn_read_pkt(
       connection_,
       *path,
       data, nread,
-      uv_hrtime());
+      now);
   if (err == NGTCP2_ERR_DRAINING) {
     StartDrainingPeriod();
     return -1;
@@ -2195,6 +2252,7 @@ int QuicServerSession::Receive(
     HandleError();
   }
 
+  session_stats_.session_received_at = now;
   return 0;
 }
 
@@ -2843,6 +2901,7 @@ int QuicClientSession::Receive(
   CHECK(!IsDestroyed());
 
   SendScope scope(this);
+  IncrementStat(nread, &session_stats_, &session_stats::bytes_received);
 
   // It's possible for the remote address to change from one
   // packet to the next
@@ -2852,16 +2911,18 @@ int QuicClientSession::Receive(
   if (!IsHandshakeCompleted())
     return DoHandshake(*path, data, nread);
 
+  uint64_t now = uv_hrtime();
   int err = ngtcp2_conn_read_pkt(
       connection_,
       *path,
       data, nread,
-      uv_hrtime());
+      now);
   if (err != 0) {
     Close();
     return err;
   }
 
+  session_stats_.session_received_at = now;
   return 0;
 }
 
