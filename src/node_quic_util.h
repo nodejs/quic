@@ -61,6 +61,17 @@ inline void hash_combine(size_t* seed, const T& value, Args... rest) {
     hash_combine(seed, rest...);
 }
 
+// QUIC error codes generally fall into two distinct namespaces:
+// Connection Errors and Application Errors. Connection errors
+// are further subdivided into Crypto and non-Crypto. Application
+// errors are entirely specific to the QUIC application being
+// used. An easy rule of thumb is that Application errors are
+// semantically associated with the ALPN identifier negotiated
+// for the QuicSession. So, if a connection is closed with
+// family: QUIC_ERROR_APPLICATION and code: 123, you have to
+// look at the ALPN identifier to determine exactly what it
+// means. Connection (Session) and Crypto errors, on the other
+// hand, share the same meaning regardless of the ALPN.
 enum QuicErrorFamily {
   QUIC_ERROR_SESSION,
   QUIC_ERROR_CRYPTO,

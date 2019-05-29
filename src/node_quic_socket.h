@@ -178,6 +178,12 @@ class QuicSocket : public HandleWrap {
     addr_counts_;
 
   struct socket_stats {
+    // The timestamp at which the socket was created
+    uint64_t created_at;
+    // The timestamp at which the socket was bound
+    uint64_t bound_at;
+    // The timestamp at which the socket began listening
+    uint64_t listen_at;
     // The total number of bytes received (and not ignored)
     // by this QuicSocket instance.
     uint64_t bytes_received;
@@ -206,7 +212,7 @@ class QuicSocket : public HandleWrap {
     // retransmitted by this QuicSocket instance.
     uint64_t retransmit_count;
   };
-  socket_stats socket_stats_{0, 0, 0, 0, 0, 0, 0};
+  socket_stats socket_stats_{0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
   template <typename... Members>
   void IncrementSocketStat(

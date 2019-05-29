@@ -75,13 +75,18 @@ QuicSocket::QuicSocket(
 
   QuicSession::SetupTokenContext(&token_crypto_ctx_);
   EntropySource(token_secret_.data(), token_secret_.size());
+  socket_stats_.created_at = uv_hrtime();
 }
 
 QuicSocket::~QuicSocket() {
   CHECK(sessions_.empty());
   CHECK(dcid_to_scid_.empty());
+  uint64_t now = uv_hrtime();
   Debug(this,
         "QuicSocket destroyed.\n"
+        "  Duration: %llu\n"
+        "  Bound Duration: %llu\n"
+        "  Listen Duration: %llu\n"
         "  Bytes Received: %llu\n"
         "  Bytes Sent: %llu\n"
         "  Packets Received: %llu\n"
@@ -89,6 +94,9 @@ QuicSocket::~QuicSocket() {
         "  Server Sessions: %llu\n"
         "  Client Sessions: %llu\n"
         "  Retransmit Count: %llu",
+        now - socket_stats_.created_at,
+        socket_stats_.bound_at > 0 ? now - socket_stats_.bound_at : 0,
+        socket_stats_.listen_at > 0 ? now - socket_stats_.listen_at : 0,
         socket_stats_.bytes_received,
         socket_stats_.bytes_sent,
         socket_stats_.packets_received,
@@ -152,6 +160,7 @@ int QuicSocket::Bind(
 #endif
   arg = Integer::New(env()->isolate(), fd);
   MakeCallback(env()->quic_on_socket_ready_function(), 1, &arg);
+  socket_stats_.bound_at = uv_hrtime();
   Debug(this, "Bind successful.");
   return 0;
 }
@@ -179,6 +188,7 @@ void QuicSocket::Listen(
   server_secure_context_ = sc;
   server_alpn_ = alpn;
   server_listening_ = true;
+  socket_stats_.listen_at = uv_hrtime();
   ReceiveStart();
 }
 
