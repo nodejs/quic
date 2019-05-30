@@ -127,10 +127,10 @@ class QuicSession : public AsyncWrap,
       QuicStream* stream,
       QuicBuffer::drain_from from = QuicBuffer::DRAIN_FROM_HEAD);
   inline void SetLastError(
-      QuicError error = { QUIC_ERROR_SESSION, NGTCP2_NO_ERROR });
-  inline void SetLastError(
-    QuicErrorFamily family = QUIC_ERROR_SESSION,
-    int code = NGTCP2_NO_ERROR) {
+      QuicError error = { QUIC_ERROR_SESSION, NGTCP2_NO_ERROR }) {
+    last_error_ = error;
+  }
+  inline void SetLastError(QuicErrorFamily family, int code) {
     SetLastError(InitQuicError(family, code));
   }
   int SetRemoteTransportParams(

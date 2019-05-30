@@ -794,10 +794,6 @@ QuicSession::~QuicSession() {
         session_stats_.streams_out_count);
 }
 
-void QuicSession::SetLastError(QuicError error) {
-  last_error_ = error;
-}
-
 QuicError QuicSession::GetLastError() {
   return last_error_;
 }
