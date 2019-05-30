@@ -235,6 +235,25 @@ class QuicStream : public AsyncWrap,
   QuicBuffer streambuf_;
   size_t available_outbound_length_;
   size_t inbound_consumed_data_while_paused_;
+
+  struct stream_stats {
+    // The timestamp at which the stream was created
+    uint64_t created_at;
+    // The timestamp at which the stream most recently sent data
+    uint64_t stream_sent_at;
+    // The timestamp at which the stream most recently received data
+    uint64_t stream_received_at;
+    // The timestamp at which the stream most recently received an
+    // acknowledgement for data
+    uint64_t stream_acked_at;
+    // The timestamp at which a graceful close started
+    uint64_t closing_at;
+    // The total number of bytes received
+    uint64_t bytes_received;
+    // The total number of bytes sent
+    uint64_t bytes_sent;
+  };
+  stream_stats stream_stats_{0, 0, 0, 0, 0, 0, 0};
 };
 
 }  // namespace quic

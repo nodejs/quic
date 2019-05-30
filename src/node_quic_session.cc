@@ -758,6 +758,29 @@ QuicSession::~QuicSession() {
   CHECK(destroyed_);
   ssl_.reset();
   ngtcp2_conn_del(connection_);
+
+  uint64_t now = uv_hrtime();
+  Debug(this,
+        "Quic%sSession destroyed.\n"
+        "  Duration: %llu\n"
+        "  Handshake Started: %llu\n"
+        "  Handshake Completed: %llu\n"
+        "  Bytes Received: %llu\n"
+        "  Bytes Sent: %llu\n"
+        "  Bidi Stream Count: %llu\n"
+        "  Uni Stream Count: %llu\n"
+        "  Streams In Count: %llu\n"
+        "  Streams Out Count: %llu\n",
+        IsServer() ? "Server" : "Client",
+        now - session_stats_.created_at,
+        session_stats_.handshake_start_at,
+        session_stats_.handshake_completed_at,
+        session_stats_.bytes_received,
+        session_stats_.bytes_sent,
+        session_stats_.bidi_stream_count,
+        session_stats_.uni_stream_count,
+        session_stats_.streams_in_count,
+        session_stats_.streams_out_count);
 }
 
 void QuicSession::SetLastError(QuicError error) {

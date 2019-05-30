@@ -68,12 +68,23 @@ QuicStream::QuicStream(
   session->AddStream(this);
   StreamBase::AttachToObject(GetObject());
   PushStreamListener(&stream_listener_);
+  stream_stats_.created_at = uv_hrtime();
 }
 
 QuicStream::~QuicStream() {
   // Check that Destroy() has been called
   CHECK_NULL(session_);
   CHECK_EQ(0, streambuf_.Length());
+  uint64_t now = uv_hrtime();
+  Debug(this,
+        "QuicStream %llu destroyed.\n"
+        "  Duration: %llu\n"
+        "  Bytes Received: %llu\n"
+        "  Bytes Sent: %llu\n",
+        GetID(),
+        now - stream_stats_.created_at,
+        stream_stats_.bytes_received,
+        stream_stats_.bytes_sent);
 }
 
 inline void QuicStream::SetInitialFlags() {
@@ -155,6 +166,7 @@ int QuicStream::DoShutdown(ShutdownWrap* req_wrap) {
   // we should not attempt to send anything on the QuicSession
   if (!IsWritable())
     return 1;
+  stream_stats_.closing_at = uv_hrtime();
   SetWriteClose();
   session_->SendStreamData(this);
   return 1;
@@ -215,8 +227,10 @@ int QuicStream::DoWrite(
   // to be careful not to allow the internal buffer to grow
   // too large, or we'll run into several other problems.
 
-  streambuf_.Copy(bufs, nbufs);
+  uint64_t len = streambuf_.Copy(bufs, nbufs);
+  IncrementStat(len, &stream_stats_, &stream_stats::bytes_sent);
   req_wrap->Done(0);
+  stream_stats_.stream_sent_at = uv_hrtime();
   session_->SendStreamData(this);
 
   // IncrementAvailableOutboundLength(len);
@@ -227,6 +241,7 @@ void QuicStream::AckedDataOffset(uint64_t offset,  size_t datalen) {
   if (IsDestroyed())
     return;
   streambuf_.Consume(datalen);
+  stream_stats_.stream_acked_at = uv_hrtime();
 }
 
 size_t QuicStream::DrainInto(
@@ -276,6 +291,10 @@ void QuicStream::ReceiveData(int fin, const uint8_t* data, size_t datalen) {
 
   if (!IsReadable())
     return;
+
+  IncrementStat(datalen, &stream_stats_, &stream_stats::bytes_received);
+
+  stream_stats_.stream_received_at = uv_hrtime();
 
   while (datalen > 0) {
     uv_buf_t buf = EmitAlloc(datalen);
