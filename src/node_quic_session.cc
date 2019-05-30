@@ -738,7 +738,11 @@ QuicSession::QuicSession(
     max_cid_len_(NGTCP2_MAX_CIDLEN),
     min_cid_len_(NGTCP2_MIN_CIDLEN),
     alpn_(alpn),
-    allocator_(this) {
+    allocator_(this),
+    stats_buffer_(
+      socket->env()->isolate(),
+      sizeof(session_stats_) / sizeof(uint64_t),
+      reinterpret_cast<uint64_t*>(&session_stats_)) {
   ssl_.reset(SSL_new(ctx->ctx_.get()));
   SSL_CTX_set_keylog_callback(ctx->ctx_.get(), OnKeylog);
   CHECK(ssl_);
@@ -748,7 +752,14 @@ QuicSession::QuicSession(
       env()->state_string(),
       state_.GetJSArray(),
       PropertyAttribute::ReadOnly));
+
   session_stats_.created_at = uv_hrtime();
+
+  USE(wrap->DefineOwnProperty(
+      env()->context(),
+      env()->stats_string(),
+      stats_buffer_.GetJSArray(),
+      PropertyAttribute::ReadOnly));
 
   // TODO(@jasnell): memory accounting
   // env_->isolate()->AdjustAmountOfExternalAllocatedMemory(kExternalSize);

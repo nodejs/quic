@@ -62,13 +62,23 @@ QuicStream::QuicStream(
     stream_id_(stream_id),
     flags_(QUICSTREAM_FLAG_INITIAL),
     available_outbound_length_(0),
-    inbound_consumed_data_while_paused_(0) {
+    inbound_consumed_data_while_paused_(0),
+    stats_buffer_(
+      session->env()->isolate(),
+      sizeof(stream_stats_) / sizeof(uint64_t),
+      reinterpret_cast<uint64_t*>(&stream_stats_)) {
   CHECK_NOT_NULL(session);
   SetInitialFlags();
   session->AddStream(this);
   StreamBase::AttachToObject(GetObject());
   PushStreamListener(&stream_listener_);
   stream_stats_.created_at = uv_hrtime();
+
+  USE(wrap->DefineOwnProperty(
+      env()->context(),
+      env()->stats_string(),
+      stats_buffer_.GetJSArray(),
+      PropertyAttribute::ReadOnly));
 }
 
 QuicStream::~QuicStream() {
@@ -281,10 +291,14 @@ int QuicStream::ReadStop() {
 // Passes chunks of data on to the JavaScript side as soon as they are
 // received but only if we're still readable. The caller of this must have a
 // HandleScope.
-// TODO(@jasnell): There's currently no flow control here. The data is pushed
-// up to the JavaScript side regardless of whether the JS stream is flowing and
-// the connected peer is told to keep sending. We need to implement back
-// pressure.
+//
+// Note that this is pushing data to the JS side regardless of whether
+// anything is listening. For flow-control, we only send window updates
+// to the sending peer if the stream is in flowing mode, so the sender
+// should not be sending too much data.
+// TODO(@jasnell): We may need to be more defensive here with regards to
+// flow control to keep the buffer from growing too much. ngtcp2 may give
+// us some protection but we need to verify.
 void QuicStream::ReceiveData(int fin, const uint8_t* data, size_t datalen) {
   Debug(this, "Receiving %d bytes of data. Final? %s. Readable? %s",
         datalen, fin ? "yes" : "no", IsReadable() ? "yes" : "no");

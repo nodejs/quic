@@ -214,6 +214,8 @@ class QuicSocket : public HandleWrap {
   };
   socket_stats socket_stats_{0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
+  AliasedBigUint64Array stats_buffer_;
+
   template <typename... Members>
   void IncrementSocketStat(
       uint64_t amount,

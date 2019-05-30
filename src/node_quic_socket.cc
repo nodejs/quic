@@ -24,6 +24,7 @@ using v8::Integer;
 using v8::Isolate;
 using v8::Local;
 using v8::Object;
+using v8::PropertyAttribute;
 using v8::String;
 using v8::Value;
 
@@ -69,13 +70,23 @@ QuicSocket::QuicSocket(
     server_secure_context_(nullptr),
     server_alpn_(NGTCP2_ALPN_H3),
     token_crypto_ctx_{},
-    retry_token_expiration_(retry_token_expiration) {
+    retry_token_expiration_(retry_token_expiration),
+    stats_buffer_(
+      env->isolate(),
+      sizeof(socket_stats_) / sizeof(uint64_t),
+      reinterpret_cast<uint64_t*>(&socket_stats_)) {
   CHECK_EQ(uv_udp_init(env->event_loop(), &handle_), 0);
   Debug(this, "New QuicSocket created.");
 
   QuicSession::SetupTokenContext(&token_crypto_ctx_);
   EntropySource(token_secret_.data(), token_secret_.size());
   socket_stats_.created_at = uv_hrtime();
+
+  USE(wrap->DefineOwnProperty(
+      env->context(),
+      env->stats_string(),
+      stats_buffer_.GetJSArray(),
+      PropertyAttribute::ReadOnly));
 }
 
 QuicSocket::~QuicSocket() {

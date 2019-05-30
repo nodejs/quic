@@ -254,6 +254,8 @@ class QuicStream : public AsyncWrap,
     uint64_t bytes_sent;
   };
   stream_stats stream_stats_{0, 0, 0, 0, 0, 0, 0};
+
+  AliasedBigUint64Array stats_buffer_;
 };
 
 }  // namespace quic
