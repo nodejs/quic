@@ -660,7 +660,7 @@ class QuicSession : public AsyncWrap,
       uint64_t amount,
       session_stats* a,
       Members... mems) {
-    IncrementStat<session_stats, Members>(amount, a, mems);
+    IncrementStat<session_stats, Members...>(amount, a, mems...);
   }
 
   // SendScope will cause the session to flush it's
