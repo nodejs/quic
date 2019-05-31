@@ -75,6 +75,8 @@ class QuicSessionConfig {
 enum QuicSessionState {
   IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT,
   IDX_QUIC_SESSION_STATE_KEYLOG_ENABLED,
+  IDX_QUIC_SESSION_STATE_CLIENT_HELLO_ENABLED,
+  IDX_QUIC_SESSION_STATE_CERT_ENABLED,
   IDX_QUIC_SESSION_STATE_COUNT
 };
 
@@ -153,6 +155,8 @@ class QuicSession : public AsyncWrap,
 
   // These may be implemented by QuicSession types
   virtual bool IsServer() const { return false; }
+  virtual int OnClientHello() { return 0; }
+  virtual void OnClientHelloDone() {}
 
   // These must be implemented by QuicSession types
   virtual void AddToSocket(QuicSocket* socket) = 0;
@@ -162,6 +166,8 @@ class QuicSession : public AsyncWrap,
       size_t datalen) = 0;
   virtual int HandleError() = 0;
   virtual bool MaybeTimeout() = 0;
+  virtual int OnCert() = 0;
+  virtual void OnCertDone(crypto::SecureContext* context) = 0;
   virtual void OnIdleTimeout() = 0;
   virtual int OnKey(
       int name,
@@ -545,6 +551,10 @@ class QuicSession : public AsyncWrap,
     return ngtcp2_conn_write_connection_close;
   }
 
+  inline bool IsHandshakeSuspended() {
+    return client_hello_cb_running_ || cert_cb_running_;
+  }
+
   virtual ngtcp2_crypto_level GetServerCryptoLevel() = 0;
   virtual ngtcp2_crypto_level GetClientCryptoLevel() = 0;
   virtual void SetServerCryptoLevel(ngtcp2_crypto_level level) = 0;
@@ -613,6 +623,9 @@ class QuicSession : public AsyncWrap,
   std::string alpn_;
 
   mem::Allocator<ngtcp2_mem> allocator_;
+  bool cert_cb_running_;
+  bool client_hello_cb_running_;
+  bool is_tls_callback_;
 
   struct session_stats {
     // The timestamp at which the session was created
@@ -663,6 +676,57 @@ class QuicSession : public AsyncWrap,
     IncrementStat<session_stats, Members...>(amount, a, mems...);
   }
 
+  class TLSHandshakeCallbackScope {
+   public:
+    explicit TLSHandshakeCallbackScope(QuicSession* session) :
+        session_(session) {
+      session_->is_tls_callback_ = true;
+    }
+
+    ~TLSHandshakeCallbackScope() {
+      session_->is_tls_callback_ = false;
+    }
+
+    static bool IsInTLSHandshakeCallback(QuicSession* session) {
+      return session->is_tls_callback_;
+    }
+
+   private:
+    QuicSession* session_;
+  };
+
+  class TLSHandshakeScope {
+   public:
+    TLSHandshakeScope(QuicSession* session, bool* monitor) :
+        session_{session},
+        monitor_(monitor) {}
+
+    ~TLSHandshakeScope() {
+      if (session_->IsHandshakeSuspended()) {
+        // There are a couple of monitor fields in QuicSession
+        // (cert_cb_running_ and client_hello_cb_running_).
+        // When one of those are true, IsHandshakeSuspended
+        // will be true. We set the monitor to false so we
+        // can keep the handshake going when the TLS Handshake
+        // is continued.
+        *monitor_ = false;
+        // Only continue the TLS handshake if we are not currently running
+        // synchronously within the TLS handshake function. This can happen
+        // when the callback function passed to the clientHello and cert
+        // event handlers is called synchronously. If the function is called
+        // asynchronously, then we have to manually continue the handshake.
+        if (!TLSHandshakeCallbackScope::IsInTLSHandshakeCallback(session_)) {
+          session_->TLSHandshake();
+          session_->SendPendingData();
+        }
+      }
+    }
+
+   private:
+    QuicSession* session_;
+    bool* monitor_;
+  };
+
   // SendScope will cause the session to flush it's
   // current pending data queue to the underlying
   // socket.
@@ -709,8 +773,13 @@ class QuicServerSession : public QuicSession {
 
   bool IsDraining();
   bool IsServer() const override { return true; }
+  int OnClientHello() override;
+  void OnClientHelloDone() override;
 
   bool MaybeTimeout() override;
+
+  int OnCert() override;
+  void OnCertDone(crypto::SecureContext* context) override;
 
   const ngtcp2_cid* rcid() const;
   ngtcp2_cid* pscid();
@@ -846,6 +915,9 @@ class QuicClientSession : public QuicSession {
   void AddToSocket(QuicSocket* socket) override;
 
   bool MaybeTimeout() override;
+
+  int OnCert() override;
+  void OnCertDone(crypto::SecureContext* context) override;
 
   int SetSocket(
       QuicSocket* socket,

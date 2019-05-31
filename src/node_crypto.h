@@ -73,6 +73,12 @@ using ECPointPointer = DeleteFnPtr<EC_POINT, EC_POINT_free>;
 using ECKeyPointer = DeleteFnPtr<EC_KEY, EC_KEY_free>;
 using DHPointer = DeleteFnPtr<DH, DH_free>;
 
+// OPENSSL_free is a macro, so we need a wrapper function.
+struct OpenSSLBufferDeleter {
+  void operator()(char* pointer) const { OPENSSL_free(pointer); }
+};
+using OpenSSLBuffer = std::unique_ptr<char[], OpenSSLBufferDeleter>;
+
 extern int VerifyCallback(int preverify_ok, X509_STORE_CTX* ctx);
 
 extern void UseExtraCaCerts(const std::string& file);

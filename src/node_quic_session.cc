@@ -27,9 +27,12 @@ namespace node {
 using crypto::EntropySource;
 using crypto::SecureContext;
 
+using v8::Array;
 using v8::ArrayBufferView;
+using v8::Boolean;
 using v8::Context;
 using v8::Float64Array;
+using v8::Function;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
 using v8::HandleScope;
@@ -40,6 +43,7 @@ using v8::Object;
 using v8::ObjectTemplate;
 using v8::PropertyAttribute;
 using v8::String;
+using v8::Undefined;
 using v8::Value;
 
 namespace quic {
@@ -739,6 +743,9 @@ QuicSession::QuicSession(
     min_cid_len_(NGTCP2_MIN_CIDLEN),
     alpn_(alpn),
     allocator_(this),
+    cert_cb_running_(false),
+    client_hello_cb_running_(false),
+    is_tls_callback_(false),
     stats_buffer_(
       socket->env()->isolate(),
       sizeof(session_stats_) / sizeof(uint64_t),
@@ -1188,6 +1195,7 @@ void QuicSession::InitTLS() {
   SSL_set_msg_callback(ssl(), MessageCB);
   SSL_set_msg_callback_arg(ssl(), this);
   SSL_set_key_callback(ssl(), KeyCB, this);
+  SSL_set_cert_cb(ssl(), CertCB, this);
 
   // Servers and Clients do slightly different things at
   // this point. Both QuicClientSession and QuicServerSession
@@ -1825,7 +1833,7 @@ int QuicSession::TLSHandshake() {
     RETURN_RET_IF_FAIL(TLSHandshake_Initial(), 0);
 
   int err = DoTLSHandshake(ssl());
-  if (err > 0) {
+ if (err > 0) {
     RETURN_RET_IF_FAIL(TLSHandshake_Complete(), 0);
     Debug(this, "TLS Handshake completed.");
     SetHandshakeCompleted();
@@ -1985,6 +1993,107 @@ void QuicSession::Close() {
   MakeCallback(env()->quic_on_session_close_function(), arraysize(argv), argv);
 }
 
+namespace {
+void OnServerClientHelloCB(const FunctionCallbackInfo<Value>& args) {
+  QuicSession* session;
+  ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
+  session->OnClientHelloDone();
+}
+}  // namespace
+
+void QuicServerSession::OnClientHelloDone() {
+  // Continue the TLS handshake when this function exits
+  // otherwise it will stall and fail.
+  TLSHandshakeScope handshake_scope(this, &client_hello_cb_running_);
+  // Disable the callback at this point so we don't loop continuously
+  state_[IDX_QUIC_SESSION_STATE_CLIENT_HELLO_ENABLED] = 0;
+}
+
+// If a 'clientHello' event listener is registered on the JavaScript
+// QuicServerSession object, the STATE_CLIENT_HELLO_ENABLED state
+// will be set and the OnClientHello will cause the 'clientHello'
+// event to be emitted.
+//
+// The 'clientHello' callback will be given it's own callback function
+// that must be called when the client has completed handling the event.
+// The handshake will not continue until it is called.
+//
+// The intent here is to allow user code the ability to modify or
+// replace the SecurityContext based on the server name, ALPN, or
+// other handshake characteristics.
+//
+// The user can also set a 'cert' event handler that will be called
+// when the peer certificate is received, allowing additional tweaks
+// and verifications to be performed.
+int QuicServerSession::OnClientHello() {
+  if (LIKELY(state_[IDX_QUIC_SESSION_STATE_CLIENT_HELLO_ENABLED] == 0))
+    return 0;
+
+  TLSHandshakeCallbackScope callback_scope(this);
+
+  // Not an error but does suspend the handshake until we're ready to go.
+  // A callback function is passed to the JavaScript function below that
+  // must be called in order to set client_hello_cb_running_ to false.
+  // Once that callback is invoked, the TLS Handshake will resume.
+  // It is recommended that the user not take a long time to invoke the
+  // callback in order to avoid stalling out the QUIC connection.
+  if (client_hello_cb_running_)
+    return -1;
+
+  HandleScope scope(env()->isolate());
+  Context::Scope context_scope(env()->context());
+  client_hello_cb_running_ = true;
+
+  const char* server_name;
+  const char* alpn;
+  int* exts;
+  size_t len;
+  SSL_client_hello_get1_extensions_present(ssl(), &exts, &len);
+  for (size_t n = 0; n < len; n++) {
+    switch (exts[n]) {
+      case TLSEXT_TYPE_server_name:
+        server_name = GetClientHelloServerName(ssl());
+        break;
+      case TLSEXT_TYPE_application_layer_protocol_negotiation:
+        alpn = GetClientHelloALPN(ssl());
+        break;
+    }
+  }
+
+  Local<Value> argv[] = {
+    Undefined(env()->isolate()),
+    Undefined(env()->isolate()),
+    GetClientHelloCiphers(env(), ssl()),
+    Function::New(
+        env()->context(),
+        OnServerClientHelloCB,
+        object(), 0,
+        v8::ConstructorBehavior::kThrow,
+        v8::SideEffectType::kHasNoSideEffect).ToLocalChecked()
+  };
+
+  if (alpn != nullptr) {
+    argv[0] = String::NewFromUtf8(
+        env()->isolate(),
+        alpn,
+        v8::NewStringType::kNormal).ToLocalChecked();
+  }
+  if (server_name != nullptr) {
+    argv[1] = String::NewFromUtf8(
+        env()->isolate(),
+        server_name,
+        v8::NewStringType::kNormal).ToLocalChecked();
+  }
+
+  MakeCallback(
+      env()->quic_on_session_client_hello_function(),
+      arraysize(argv), argv);
+
+  OPENSSL_free(exts);
+  //return 0;
+  return client_hello_cb_running_ ? -1 : 0;
+}
+
 // The QuicServerSession specializes the QuicSession with server specific
 // behaviors. The key differentiator between client and server lies with
 // the TLS Handshake and certain aspects of stream state management.
@@ -2049,6 +2158,88 @@ int QuicServerSession::HandleError() {
     Close();
   }
   return 0;
+}
+
+namespace {
+void OnServerCertCB(const FunctionCallbackInfo<Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  QuicServerSession* session;
+  ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
+
+  Local<FunctionTemplate> cons = env->secure_context_constructor_template();
+  crypto::SecureContext* context = nullptr;
+  if (!args[0]->IsUndefined() && cons->HasInstance(args[0]))
+    ASSIGN_OR_RETURN_UNWRAP(&context, args[0].As<Object>());
+  session->OnCertDone(context);
+}
+}  // namespace
+
+void QuicServerSession::OnCertDone(crypto::SecureContext* context) {
+  // Continue the TLS handshake when this function exits
+  // otherwise it will stall and fail.
+  TLSHandshakeScope handshake_scope(this, &cert_cb_running_);
+  // Disable the callback at this point so we don't loop continuously
+  state_[IDX_QUIC_SESSION_STATE_CERT_ENABLED] = 0;
+  if (context == nullptr)
+    return;
+  // TODO(@jasnell): Do something with the new context...
+}
+
+int QuicServerSession::OnCert() {
+  if (LIKELY(state_[IDX_QUIC_SESSION_STATE_CERT_ENABLED] == 0))
+    return 1;
+
+  TLSHandshakeCallbackScope callback_scope(this);
+
+  // As in node_crypto.cc, this is not an error, but does suspend the
+  // handshake to continue when OnCerb is complete.
+  if (cert_cb_running_)
+    return -1;
+
+  HandleScope handle_scope(env()->isolate());
+  Context::Scope context_scope(env()->context());
+  cert_cb_running_ = true;
+
+  Local<Value> servername_str;
+  const char* servername = SSL_get_servername(ssl(), TLSEXT_NAMETYPE_host_name);
+  const bool ocsp =
+      (SSL_get_tlsext_status_type(ssl()) == TLSEXT_STATUSTYPE_ocsp);
+
+  Local<Value> argv[] = {
+    servername == nullptr ?
+        String::Empty(env()->isolate()) :
+        OneByteString(
+            env()->isolate(),
+            servername,
+            strlen(servername)),
+    Boolean::New(env()->isolate(), ocsp),
+    Function::New(
+        env()->context(),
+        OnServerCertCB,
+        object(), 0,
+        v8::ConstructorBehavior::kThrow,
+        v8::SideEffectType::kHasNoSideEffect).ToLocalChecked()
+  };
+
+  MakeCallback(env()->quic_on_session_cert_function(), arraysize(argv), argv);
+
+  return cert_cb_running_ ? -1 : 1;
+}
+
+void QuicClientSession::OnCertDone(crypto::SecureContext* context) {
+  // Continue the TLS handshake when this function exits
+  // otherwise it will stall and fail.
+  TLSHandshakeScope handshake_scope(this, &cert_cb_running_);
+  // Disable the callback at this point so we don't loop continuously
+  state_[IDX_QUIC_SESSION_STATE_CERT_ENABLED] = 0;
+  if (context == nullptr)
+    return;
+  // TODO(@jasnell): Do something with the new context...
+}
+
+int QuicClientSession::OnCert() {
+  // TODO(@jasnell): Implement
+  return 1;
 }
 
 int QuicServerSession::OnKey(

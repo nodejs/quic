@@ -943,6 +943,10 @@ inline void LogSecret(
   }
 }
 
+inline int CertCB(SSL* ssl, void* arg) {
+  QuicSession* session = static_cast<QuicSession*>(arg);
+  return session->OnCert();
+}
 
 // KeyCB provides a hook into the keying process of the TLS handshake,
 // triggering registration of the keys associated with the TLS session.
@@ -992,6 +996,12 @@ inline int DoTLSHandshake(SSL* ssl) {
     switch (err) {
       case SSL_ERROR_WANT_READ:
       case SSL_ERROR_WANT_WRITE:
+        // For the next two, the handshake has been suspended but
+        // the data was otherwise successfully read, so return 0
+        // here but the handshake won't continue until we trigger
+        // things on our side.
+        case SSL_ERROR_WANT_CLIENT_HELLO_CB:
+        case SSL_ERROR_WANT_X509_LOOKUP:
         return 0;
       case SSL_ERROR_SSL:
         return NGTCP2_ERR_CRYPTO;
@@ -1012,6 +1022,12 @@ inline int DoTLSReadEarlyData(SSL* ssl) {
       switch (code) {
         case SSL_ERROR_WANT_READ:
         case SSL_ERROR_WANT_WRITE:
+        // For the next two, the handshake has been suspended but
+        // the data was otherwise successfully read, so return 0
+        // here but the handshake won't continue until we trigger
+        // things on our side.
+        case SSL_ERROR_WANT_CLIENT_HELLO_CB:
+        case SSL_ERROR_WANT_X509_LOOKUP:
           return 0;
         case SSL_ERROR_SSL:
           return NGTCP2_ERR_CRYPTO;
@@ -1028,6 +1044,105 @@ inline int DoTLSReadEarlyData(SSL* ssl) {
       break;
   }
   return 0;
+}
+
+inline crypto::OpenSSLBuffer GetClientHelloRandom(SSL* ssl) {
+  const unsigned char* buf;
+  SSL_client_hello_get0_random(ssl, &buf);
+  return crypto::OpenSSLBuffer(
+      const_cast<char*>(reinterpret_cast<const char*>(buf)));
+}
+
+inline crypto::OpenSSLBuffer GetClientHelloSessionID(SSL* ssl) {
+  const unsigned char* buf;
+  SSL_client_hello_get0_session_id(ssl, &buf);
+  return crypto::OpenSSLBuffer(
+      const_cast<char*>(reinterpret_cast<const char*>(buf)));
+}
+
+inline v8::Local<v8::Array> GetClientHelloCiphers(
+    Environment* env,
+    SSL* ssl) {
+  v8::Local<v8::Array> ciphers_array;
+  const unsigned char* buf;
+  size_t len = SSL_client_hello_get0_ciphers(ssl, &buf);
+  if (len == 0)
+    return ciphers_array;
+
+  ciphers_array = v8::Array::New(env->isolate(), len / 2);
+  size_t pos = 0;
+  for (size_t n = 0; n < len; n += 2) {
+    auto cipher = SSL_CIPHER_find(ssl, buf);
+    buf += 2;
+    const char* cipher_name = SSL_CIPHER_get_name(cipher);
+    const char* cipher_version = SSL_CIPHER_get_version(cipher);
+    v8::Local<v8::Object> obj = v8::Object::New(env->isolate());
+    USE(obj->Set(
+        env->context(),
+        env->name_string(),
+        OneByteString(env->isolate(), cipher_name)));
+    USE(obj->Set(
+        env->context(),
+        env->version_string(),
+        OneByteString(env->isolate(), cipher_version)));
+    USE(ciphers_array->Set(env->context(), pos++, obj));
+  }
+
+  return ciphers_array;
+}
+
+inline crypto::OpenSSLBuffer GetClientHelloCompressionMethods(SSL* ssl) {
+  const unsigned char* buf;
+  SSL_client_hello_get0_compression_methods(ssl, &buf);
+  return crypto::OpenSSLBuffer(
+      const_cast<char*>(reinterpret_cast<const char*>(buf)));
+}
+
+inline const char* GetClientHelloServerName(SSL* ssl) {
+    const unsigned char* buf;
+    size_t len;
+    size_t rem;
+
+    if (!SSL_client_hello_get0_ext(ssl, TLSEXT_TYPE_server_name, &buf, &rem) ||
+        rem <= 2)
+        return nullptr;
+
+    len = (*(buf++) << 8);
+    len += *(buf++);
+    if (len + 2 != rem)
+      return nullptr;
+    rem = len;
+
+    if (rem == 0 || *buf++ != TLSEXT_NAMETYPE_host_name)
+      return nullptr;
+    rem--;
+    if (rem <= 2)
+      return nullptr;
+    len = (*(buf++) << 8);
+    len += *(buf++);
+    if (len + 2 > rem)
+      return nullptr;
+    rem = len;
+    return reinterpret_cast<const char*>(buf);
+}
+
+inline const char* GetClientHelloALPN(SSL* ssl) {
+    const unsigned char* buf;
+    size_t len;
+    size_t rem;
+
+    if (!SSL_client_hello_get0_ext(
+            ssl,
+            TLSEXT_TYPE_application_layer_protocol_negotiation,
+            &buf, &rem) || rem < 2) {
+      return nullptr;
+    }
+
+    len = (buf[0] << 8) | buf[1];
+    if (len + 2 != rem)
+      return nullptr;
+    buf += 3;
+    return reinterpret_cast<const char*>(buf);
 }
 
 }  // namespace quic

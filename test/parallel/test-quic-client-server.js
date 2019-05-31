@@ -60,6 +60,20 @@ server.listen({ key, cert, alpn: kALPN });
 server.on('session', common.mustCall((session) => {
   debug('QuicServerSession Created');
 
+  session.on('clientHello', common.mustCall(
+    (alpn, servername, ciphers, cert, issuer, cb) => {
+      assert.strictEqual(alpn, kALPN);
+      assert.strictEqual(servername, kServerName);
+      cb();
+    }));
+
+  session.on('cert', common.mustCall(
+    (servername, ocsp, cb) => {
+      assert.strictEqual(servername, kServerName);
+      assert.strictEqual(ocsp, false);
+      cb();
+  }));
+
   session.on('keylog', common.mustCall((line) => {
     assert(kKeylogs.shift().test(line));
   }, kKeylogs.length));
@@ -127,6 +141,8 @@ server.on('ready', common.mustCall(() => {
   client.on('close', () => debug('Client closing'));
 
   assert.strictEqual(req.servername, kServerName);
+
+  req.on('cert', console.log);
 
   req.on('sessionTicket', common.mustCall((id, ticket, params) => {
     debug('Session ticket received');

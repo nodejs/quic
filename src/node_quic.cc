@@ -47,6 +47,8 @@ void QuicSetCallbacks(const FunctionCallbackInfo<Value>& args) {
   SETFUNCTION("onSocketClose", socket_close);
   SETFUNCTION("onSocketError", socket_error);
   SETFUNCTION("onSessionReady", session_ready);
+  SETFUNCTION("onSessionCert", session_cert);
+  SETFUNCTION("onSessionClientHello", session_client_hello);
   SETFUNCTION("onSessionClose", session_close);
   SETFUNCTION("onSessionError", session_error);
   SETFUNCTION("onSessionExtend", session_extend);
@@ -69,6 +71,23 @@ void QuicProtocolVersion(const FunctionCallbackInfo<Value>& args) {
 void QuicALPNVersion(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   args.GetReturnValue().Set(OneByteString(env->isolate(), NGTCP2_ALPN_H3));
+}
+
+inline int Client_Hello_CB(
+    SSL* ssl,
+    int* tls_alert,
+    void* arg) {
+  QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
+  int ret = session->OnClientHello();
+  switch (ret) {
+    case 0:
+      return 1;
+    case -1:
+      return -1;
+    default:
+      *tls_alert = ret;
+      return 0;
+  }
 }
 
 int ALPN_Select_Proto_CB(SSL* ssl,
@@ -270,6 +289,7 @@ void QuicInitSecureContext(const FunctionCallbackInfo<Value>& args) {
   SSL_CTX_set_default_verify_paths(**sc);
   SSL_CTX_set_max_early_data(**sc, std::numeric_limits<uint32_t>::max());
   SSL_CTX_set_alpn_select_cb(**sc, ALPN_Select_Proto_CB, nullptr);
+  SSL_CTX_set_client_hello_cb(**sc, Client_Hello_CB, nullptr);
   CHECK_EQ(
       SSL_CTX_add_custom_ext(
           **sc,
@@ -381,6 +401,8 @@ void Initialize(Local<Object> target,
   NODE_DEFINE_CONSTANT(constants, ERR_INVALID_REMOTE_TRANSPORT_PARAMS);
   NODE_DEFINE_CONSTANT(constants, ERR_INVALID_TLS_SESSION_TICKET);
   NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT);
+  NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_STATE_CERT_ENABLED);
+  NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_STATE_CLIENT_HELLO_ENABLED);
   NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_STATE_KEYLOG_ENABLED);
   NODE_DEFINE_CONSTANT(constants, MAX_RETRYTOKEN_EXPIRATION);
   NODE_DEFINE_CONSTANT(constants, MIN_RETRYTOKEN_EXPIRATION);
