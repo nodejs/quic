@@ -47,18 +47,34 @@ constexpr int ERR_INVALID_TLS_SESSION_TICKET = -2;
   QUICSESSION_CONFIG(V)
 #undef V
 
+// The QuicSessionConfig class holds the initial transport parameters and
+// configuration options set by the JavaScript side when either a
+// QuicClientSession or QuicServerSession is created. Instances are
+// stack created and use a combination of an AliasedBuffer to pass
+// the numeric settings quickly (see node_quic_state.h) and passed
+// in non-numeric settings (e.g. preferred_addr).
 class QuicSessionConfig {
  public:
   QuicSessionConfig() = default;
 
   void ResetToDefaults();
+
+  // QuicSessionConfig::Set() is where the magic happens. It pulls
+  // values out of the AliasedBuffer defined in node_quic_state.h
+  // and stores the values. If the preferred_addr is set, it will
+  // be copied into preferred_address_.
   void Set(
       Environment* env,
       const struct sockaddr* preferred_addr = nullptr);
+
+  // When a ngtcp2 connection is created, ToSettings is used to
+  // populate the given ngtcp2_settings object with the stored
+  // parameters. These are translated into QUIC transport params.
   void ToSettings(
       ngtcp2_settings* settings,
       ngtcp2_cid* pscid,
       bool stateless_reset_token = false);
+
   size_t GetMaxCidLen() { return max_cid_len_; }
   size_t GetMinCidLen() { return min_cid_len_; }
 
@@ -72,14 +88,60 @@ class QuicSessionConfig {
   SocketAddress preferred_address_;
 };
 
+// The QuicSessionState enums are used with the QuicSession's
+// private state_ array. This is exposed to JavaScript via an
+// aliased buffer and is used to communicate various types of
+// state efficiently across the native/JS boundary.
 enum QuicSessionState {
+  // Communicates the number of available connection ID's that
+  // have been created and associated with the session. This
+  // is used, for instance, to enable migration of a QuicSession
+  // from one QuicSocket to another (when count > 0).
   IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT,
+
+  // Communicates whether a 'keylog' event listener has been
+  // registered on the JavaScript QuicSession object. The
+  // value will be either 1 or 0. When set to 1, the native
+  // code will emit TLS keylog entries to the JavaScript
+  // side triggering the 'keylog' event once for each line.
   IDX_QUIC_SESSION_STATE_KEYLOG_ENABLED,
+
+  // Communicates whether a 'clientHello' event listener has
+  // been registered on the JavaScript QuicServerSession.
+  // The value will be either 1 or 0. When set to 1, the
+  // native code will callout to the JavaScript side causing
+  // the 'clientHello' event to be emitted. This is only
+  // used on QuicServerSession instances.
   IDX_QUIC_SESSION_STATE_CLIENT_HELLO_ENABLED,
+
+  // Communicates whether a 'cert' event listener has been
+  // registered on the JavaScript QuicSession. The value will
+  // be either 1 or 0. When set to 1, then native code will
+  // callout to the JavaScript side causing the 'cert' event
+  // to be emitted.
   IDX_QUIC_SESSION_STATE_CERT_ENABLED,
+
+  // Just the number of session state enums for use when
+  // creating the AliasedBuffer.
   IDX_QUIC_SESSION_STATE_COUNT
 };
 
+// The QuicSession class is an virtual class that serves as
+// the basis for both QuicServerSession and QuicClientSession.
+// It implements the functionality that is shared for both
+// QUIC clients and servers.
+//
+// QUIC sessions are virtual connections that exchange data
+// back and forth between peer endpoints via UDP. Every QuicSession
+// has an associated TLS context and all data transfered between
+// the peers is always encrypted. Unlike TLS over TCP, however,
+// The QuicSession uses a session identifier that is independent
+// of both the local *and* peer IP address, allowing a QuicSession
+// to persist across changes in the network (one of the key features
+// of QUIC). QUIC sessions also support 0RTT, implement error
+// correction mechanisms to recover from lost packets, and flow
+// control. In other words, there's quite a bit going on within
+// a QuicSession object.
 class QuicSession : public AsyncWrap,
                     public std::enable_shared_from_this<QuicSession>,
                     public mem::Tracker {
@@ -87,10 +149,19 @@ class QuicSession : public AsyncWrap,
   static const int kInitialClientBufferLength = 4096;
 
   QuicSession(
+      // The QuicSocket that created this session. Note that
+      // it is possible to replace this socket later, after
+      // the TLS handshake has completed. The QuicSession
+      // should never assume that the socket will always
+      // remain the same.
       QuicSocket* socket,
       v8::Local<v8::Object> wrap,
       crypto::SecureContext* ctx,
       AsyncWrap::ProviderType provider,
+      // QUIC is generally just a transport. The ALPN identifier
+      // is used to specify the application protocol that is
+      // layered on top. If not specified, this will default
+      // to the HTTP/3 identifier.
       const std::string& alpn);
   ~QuicSession() override;
 
