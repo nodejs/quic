@@ -66,7 +66,9 @@ class QuicSocket : public HandleWrap {
   void Listen(
       crypto::SecureContext* context,
       const sockaddr* preferred_address = nullptr,
-      const std::string& alpn = NGTCP2_ALPN_H3);
+      const std::string& alpn = NGTCP2_ALPN_H3,
+      bool reject_unauthorized = true,
+      bool request_cert = false);
   int ReceiveStart();
   int ReceiveStop();
   void RemoveSession(
@@ -160,6 +162,8 @@ class QuicSocket : public HandleWrap {
   QuicSessionConfig server_session_config_;
   crypto::SecureContext* server_secure_context_;
   std::string server_alpn_;
+  bool reject_unauthorized_;
+  bool request_cert_;
   std::unordered_map<std::string, std::shared_ptr<QuicSession>> sessions_;
   std::unordered_map<std::string, std::string> dcid_to_scid_;
   CryptoContext token_crypto_ctx_;

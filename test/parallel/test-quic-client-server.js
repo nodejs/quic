@@ -20,8 +20,9 @@ const Countdown = require('../common/countdown');
 const assert = require('assert');
 const fs = require('fs');
 const fixtures = require('../common/fixtures');
-const key = fixtures.readKey('agent8-key.pem', 'binary');
-const cert = fixtures.readKey('agent8-cert.pem', 'binary');
+const key = fixtures.readKey('agent1-key.pem', 'binary');
+const cert = fixtures.readKey('agent1-cert.pem', 'binary');
+const ca = fixtures.readKey('fake-startcom-root-cert.pem', 'binary');
 const { debuglog } = require('util');
 const debug = debuglog('test');
 
@@ -56,7 +57,14 @@ const countdown = new Countdown(2, () => {
   client.close();
 });
 
-server.listen({ key, cert, alpn: kALPN });
+server.listen({
+  key,
+  cert,
+  ca,
+  requestCert: true,
+  rejectUnauthorized: false,
+  alpn: kALPN
+});
 server.on('session', common.mustCall((session) => {
   debug('QuicServerSession Created');
 
@@ -86,6 +94,7 @@ server.on('session', common.mustCall((session) => {
     assert.strictEqual(session.servername, servername);
     assert.strictEqual(servername, kServerName);
     assert.strictEqual(session.alpnProtocol, alpn);
+    assert.strictEqual(session.getPeerCertificate().subject.CN, 'agent1');
 
     const uni = session.openStream({ halfOpen: true });
     uni.write(unidata[0]);
@@ -125,24 +134,30 @@ server.on('session', common.mustCall((session) => {
 
 server.on('ready', common.mustCall(() => {
   debug('Server is listening on port %d', server.address.port);
-  client = createSocket({ type: 'udp4', port: 0 });
-  const req = client.connect({
+  client = createSocket({
     type: 'udp4',
+    port: 0,
+    client: {
+      type: 'udp4',
+      key,
+      cert,
+      ca,
+      maxStreamsUni: 1000,
+      minCidLen: 5,
+      maxCidLen: 10,
+      alpn: kALPN,
+    }
+  });
+
+  const req = client.connect({
     address: 'localhost',
     port: server.address.port,
-    rejectUnauthorized: false,
-    maxStreamsUni: 1000,
     servername: kServerName,
-    minCidLen: 5,
-    maxCidLen: 10,
-    alpn: kALPN,
   });
 
   client.on('close', () => debug('Client closing'));
 
   assert.strictEqual(req.servername, kServerName);
-
-  req.on('cert', console.log);
 
   req.on('sessionTicket', common.mustCall((id, ticket, params) => {
     debug('Session ticket received');

@@ -761,7 +761,9 @@ class QuicServerSession : public QuicSession {
       const ngtcp2_cid* dcid,
       const ngtcp2_cid* ocid,
       uint32_t version,
-      const std::string& alpn = NGTCP2_ALPN_H3);
+      const std::string& alpn = NGTCP2_ALPN_H3,
+      bool reject_unauthorized = true,
+      bool request_cert_ = true);
 
   void AddToSocket(QuicSocket* socket) override;
 
@@ -797,7 +799,9 @@ class QuicServerSession : public QuicSession {
       const ngtcp2_cid* dcid,
       const ngtcp2_cid* ocid,
       uint32_t version,
-      const std::string& alpn);
+      const std::string& alpn,
+      bool reject_unauthorized,
+      bool request_cert);
 
   void DisassociateCID(
       const ngtcp2_cid* cid) override;
@@ -838,6 +842,8 @@ class QuicServerSession : public QuicSession {
   ngtcp2_cid pscid_;
   ngtcp2_cid rcid_;
   bool draining_;
+  bool reject_unauthorized_;
+  bool request_cert_;
 
   MallocedBuffer<uint8_t> conn_closebuf_;
 

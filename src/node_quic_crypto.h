@@ -978,6 +978,8 @@ inline int ClearTLS(SSL* ssl, bool continue_on_error = false) {
     switch (code) {
       case SSL_ERROR_WANT_READ:
       case SSL_ERROR_WANT_WRITE:
+      case SSL_ERROR_WANT_CLIENT_HELLO_CB:
+      case SSL_ERROR_WANT_X509_LOOKUP:
         return 0;
       case SSL_ERROR_SSL:
       case SSL_ERROR_ZERO_RETURN:
@@ -1000,8 +1002,8 @@ inline int DoTLSHandshake(SSL* ssl) {
         // the data was otherwise successfully read, so return 0
         // here but the handshake won't continue until we trigger
         // things on our side.
-        case SSL_ERROR_WANT_CLIENT_HELLO_CB:
-        case SSL_ERROR_WANT_X509_LOOKUP:
+      case SSL_ERROR_WANT_CLIENT_HELLO_CB:
+      case SSL_ERROR_WANT_X509_LOOKUP:
         return 0;
       case SSL_ERROR_SSL:
         return NGTCP2_ERR_CRYPTO;

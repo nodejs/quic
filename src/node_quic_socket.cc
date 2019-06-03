@@ -69,6 +69,8 @@ QuicSocket::QuicSocket(
     max_connections_per_host_(max_connections_per_host),
     server_secure_context_(nullptr),
     server_alpn_(NGTCP2_ALPN_H3),
+    reject_unauthorized_(false),
+    request_cert_(false),
     token_crypto_ctx_{},
     retry_token_expiration_(retry_token_expiration),
     stats_buffer_(
@@ -188,7 +190,9 @@ SocketAddress* QuicSocket::GetLocalAddress() {
 void QuicSocket::Listen(
     SecureContext* sc,
     const sockaddr* preferred_address,
-    const std::string& alpn) {
+    const std::string& alpn,
+    bool reject_unauthorized,
+    bool request_cert) {
   // TODO(@jasnell): Should we allow calling listen multiple times?
   // For now, we guard against it, but we may want to allow it later.
   CHECK_NOT_NULL(sc);
@@ -198,6 +202,8 @@ void QuicSocket::Listen(
   server_session_config_.Set(env(), preferred_address);
   server_secure_context_ = sc;
   server_alpn_ = alpn;
+  reject_unauthorized_ = reject_unauthorized;
+  request_cert_ = request_cert;
   server_listening_ = true;
   socket_stats_.listen_at = uv_hrtime();
   ReceiveStart();
@@ -480,8 +486,9 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
           &hd->scid,
           pocid,
           hd->version,
-          server_alpn_);
-
+          server_alpn_,
+          reject_unauthorized_,
+          request_cert_);
   Local<Value> arg = session->object();
   MakeCallback(env()->quic_on_session_ready_function(), 1, &arg);
 
@@ -795,7 +802,10 @@ void QuicSocketListen(const FunctionCallbackInfo<Value>& args) {
     alpn += *val;
   }
 
-  socket->Listen(sc, preferred_address, alpn);
+  bool reject_unauthorized = args[5]->IsTrue();
+  bool request_cert = args[6]->IsTrue();
+
+  socket->Listen(sc, preferred_address, alpn, reject_unauthorized, request_cert);
 }
 
 void QuicSocketReceiveStart(const FunctionCallbackInfo<Value>& args) {

@@ -957,7 +957,6 @@ static X509_STORE* NewRootCertStore() {
       X509_STORE_add_cert(store, cert);
     }
   }
-
   return store;
 }
 

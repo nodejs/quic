@@ -1196,6 +1196,8 @@ void QuicSession::InitTLS() {
   SSL_set_msg_callback_arg(ssl(), this);
   SSL_set_key_callback(ssl(), KeyCB, this);
   SSL_set_cert_cb(ssl(), CertCB, this);
+  // The verification may be overriden in InitTLS_Post
+  SSL_set_verify(ssl(), SSL_VERIFY_NONE, crypto::VerifyCallback);
 
   // Servers and Clients do slightly different things at
   // this point. Both QuicClientSession and QuicServerSession
@@ -1831,9 +1833,8 @@ int QuicSession::TLSHandshake() {
 
   if (initial_)
     RETURN_RET_IF_FAIL(TLSHandshake_Initial(), 0);
-
   int err = DoTLSHandshake(ssl());
- if (err > 0) {
+  if (err > 0) {
     RETURN_RET_IF_FAIL(TLSHandshake_Complete(), 0);
     Debug(this, "TLS Handshake completed.");
     SetHandshakeCompleted();
@@ -2107,7 +2108,9 @@ QuicServerSession::QuicServerSession(
     const ngtcp2_cid* dcid,
     const ngtcp2_cid* ocid,
     uint32_t version,
-    const std::string& alpn) :
+    const std::string& alpn,
+    bool reject_unauthorized,
+    bool request_cert) :
     QuicSession(
         socket,
         wrap,
@@ -2116,7 +2119,9 @@ QuicServerSession::QuicServerSession(
         alpn),
     pscid_{},
     rcid_(*rcid),
-    draining_(false) {
+    draining_(false),
+    reject_unauthorized_(reject_unauthorized),
+    request_cert_(request_cert) {
   Init(addr, dcid, ocid, version);
 }
 
@@ -2301,6 +2306,13 @@ int QuicServerSession::OnKey(
 
 void QuicServerSession::InitTLS_Post() {
   SSL_set_accept_state(ssl());
+
+  if (request_cert_) {
+    int verify_mode = SSL_VERIFY_PEER;
+    if (reject_unauthorized_)
+      verify_mode |= SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
+    SSL_set_verify(ssl(), verify_mode, crypto::VerifyCallback);
+  }
 }
 
 void QuicServerSession::Init(
@@ -2353,7 +2365,9 @@ std::shared_ptr<QuicSession> QuicServerSession::New(
     const ngtcp2_cid* dcid,
     const ngtcp2_cid* ocid,
     uint32_t version,
-    const std::string& alpn) {
+    const std::string& alpn,
+    bool reject_unauthorized,
+    bool request_cert) {
   std::shared_ptr<QuicSession> session;
   Local<Object> obj;
   if (!socket->env()
@@ -2370,7 +2384,9 @@ std::shared_ptr<QuicSession> QuicServerSession::New(
           dcid,
           ocid,
           version,
-          alpn));
+          alpn,
+          reject_unauthorized,
+          request_cert));
 
   session->AddToSocket(socket);
   return session;
