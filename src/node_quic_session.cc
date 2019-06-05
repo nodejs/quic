@@ -2171,10 +2171,12 @@ void OnServerCertCB(const FunctionCallbackInfo<Value>& args) {
   QuicServerSession* session;
   ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
 
+  // TODO(@jasnell): Args[0] is possibly an error?
+
   Local<FunctionTemplate> cons = env->secure_context_constructor_template();
   crypto::SecureContext* context = nullptr;
-  if (!args[0]->IsUndefined() && cons->HasInstance(args[0]))
-    ASSIGN_OR_RETURN_UNWRAP(&context, args[0].As<Object>());
+  if (args[1]->IsObject() && cons->HasInstance(args[1]))
+    ASSIGN_OR_RETURN_UNWRAP(&context, args[1].As<Object>());
   session->OnCertDone(context);
 }
 }  // namespace
@@ -2185,9 +2187,17 @@ void QuicServerSession::OnCertDone(crypto::SecureContext* context) {
   TLSHandshakeScope handshake_scope(this, &cert_cb_running_);
   // Disable the callback at this point so we don't loop continuously
   state_[IDX_QUIC_SESSION_STATE_CERT_ENABLED] = 0;
+
   if (context == nullptr)
     return;
-  // TODO(@jasnell): Do something with the new context...
+
+  int err = UseSNIContext(ssl(), context);
+  if (!err) {
+    unsigned long err = ERR_get_error();  // NOLINT(runtime/int)
+    if (!err)
+      return env()->ThrowError("CertCbDone");  // TODO(@jasnell): revisit
+    return crypto::ThrowCryptoError(env(), err);
+  }
 }
 
 int QuicServerSession::OnCert() {

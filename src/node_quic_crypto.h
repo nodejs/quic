@@ -1147,6 +1147,22 @@ inline const char* GetClientHelloALPN(SSL* ssl) {
     return reinterpret_cast<const char*>(buf);
 }
 
+inline int UseSNIContext(SSL* ssl, crypto::SecureContext* context) {
+  SSL_CTX* ctx = context->ctx_.get();
+  X509* x509 = SSL_CTX_get0_certificate(ctx);
+  EVP_PKEY* pkey = SSL_CTX_get0_privatekey(ctx);
+  STACK_OF(X509)* chain;
+
+  int err = SSL_CTX_get0_chain_certs(ctx, &chain);
+  if (err)
+    err = SSL_use_certificate(ssl, x509);
+  if (err)
+    err = SSL_use_PrivateKey(ssl, pkey);
+  if (err && chain != nullptr)
+    err = SSL_set1_chain(ssl, chain);
+  return err;
+}
+
 }  // namespace quic
 }  // namespace node
 
