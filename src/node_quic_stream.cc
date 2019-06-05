@@ -330,7 +330,7 @@ void QuicStream::ReceiveData(int fin, const uint8_t* data, size_t datalen) {
       inbound_consumed_data_while_paused_ += avail;
     else
       session_->ExtendStreamOffset(this, avail);
-  };
+  }
 
   // When fin != 0, we've received that last chunk of data for this
   // stream, indicating that the stream is no longer readable.

@@ -88,9 +88,13 @@ server.on('session', common.mustCall((session) => {
       // TODO(@jasnell): Using setImmediate here causes the test
       // to fail, but it shouldn't. Investigate why.
       process.nextTick(() => {
+        // The first argument is a potential error
+        // The second is an optional new SecureContext
+        // The third is the ocsp response.
+        // All arguments are optional
         cb(null, null, Buffer.from('hello'));
       });
-  }));
+    }));
 
   session.on('keylog', common.mustCall((line) => {
     assert(kKeylogs.shift().test(line));

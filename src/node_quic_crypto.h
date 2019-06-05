@@ -896,7 +896,7 @@ inline void MessageCB(
   }
 }
 
-inline std::string ToHex(const uint8_t *s, size_t len) {
+inline std::string ToHex(const uint8_t* s, size_t len) {
   static constexpr char LOWER_XDIGITS[] = "0123456789abcdef";
   std::string res;
   res.resize(len * 2);
@@ -909,9 +909,9 @@ inline std::string ToHex(const uint8_t *s, size_t len) {
 }
 
 inline void LogSecret(
-    SSL *ssl,
+    SSL* ssl,
     int name,
-    const unsigned char *secret,
+    const unsigned char* secret,
     size_t secretlen) {
   if (auto keylog_cb = SSL_CTX_get_keylog_callback(SSL_get_SSL_CTX(ssl))) {
     unsigned char crandom[32];

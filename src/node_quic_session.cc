@@ -29,7 +29,6 @@ using crypto::SecureContext;
 
 using v8::Array;
 using v8::ArrayBufferView;
-using v8::Boolean;
 using v8::Context;
 using v8::Float64Array;
 using v8::Function;
@@ -1822,9 +1821,9 @@ int QuicSession::TLSHandshake() {
   CHECK(!IsDestroyed());
   Debug(this, "TLS handshake %s", initial_ ? "starting" : "continuing");
 
-  if (initial_)
+  if (initial_) {
     session_stats_.handshake_start_at = uv_hrtime();
-  else {
+  } else {
     // TODO(@jasnell): Check handshake_continue_at to guard against slow
     // handshake attack
   }
@@ -2091,7 +2090,6 @@ int QuicServerSession::OnClientHello() {
       arraysize(argv), argv);
 
   OPENSSL_free(exts);
-  //return 0;
   return client_hello_cb_running_ ? -1 : 0;
 }
 
@@ -3036,9 +3034,9 @@ int QuicClientSession::OnTLSStatus() {
   int len = SSL_get_tlsext_status_ocsp_resp(ssl(), &resp);
   Debug(this, "An OCSP Response of %d bytes has been received.", len);
   Local<Value> arg;
-  if (resp == nullptr)
+  if (resp == nullptr) {
     arg = Undefined(env()->isolate());
-  else {
+  } else {
     arg = Buffer::Copy(env(), reinterpret_cast<const char*>(resp), len)
         .ToLocalChecked();
   }

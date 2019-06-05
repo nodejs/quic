@@ -802,10 +802,12 @@ void QuicSocketListen(const FunctionCallbackInfo<Value>& args) {
     alpn += *val;
   }
 
-  bool reject_unauthorized = args[5]->IsTrue();
-  bool request_cert = args[6]->IsTrue();
-
-  socket->Listen(sc, preferred_address, alpn, reject_unauthorized, request_cert);
+  socket->Listen(
+      sc,
+      preferred_address,
+      alpn,
+      args[5]->IsTrue(),   // reject_unauthorized
+      args[6]->IsTrue());  // request_cert
 }
 
 void QuicSocketReceiveStart(const FunctionCallbackInfo<Value>& args) {

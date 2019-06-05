@@ -1599,6 +1599,11 @@ compiled with ICU support.
 
 A given value is out of the accepted range.
 
+<a id="ERR_QUIC_ERROR"></a>
+### ERR_QUIC_ERROR
+
+TBD
+
 <a id="ERR_QUICCLIENTSESSION_FAILED"></a>
 ### ERR_QUICCLIENTSESSION_FAILED
 
