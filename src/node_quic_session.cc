@@ -69,6 +69,11 @@ void QuicSessionConfig::Set(
       env->quic_state()->quicsessionconfig_buffer;
   uint64_t flags = buffer[IDX_QUIC_SESSION_CONFIG_COUNT];
 
+// The following might be non-obvious. The QUICSESSION_CONFIG macro defines
+// the set of numeric configuration values for the QuicSessionConfig. They
+// are defined this way to avoid code duplicate in a couple of places. The
+// following macro expands out to set each member value in the QuicSessionConfig
+// to the corresponding value in the AliasedBuffer
 #define V(idx, name, def)                                                      \
   if (flags & (1 << IDX_QUIC_SESSION_##idx))                                   \
     name##_ = static_cast<uint64_t>(buffer[IDX_QUIC_SESSION_##idx]);
