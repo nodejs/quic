@@ -77,18 +77,27 @@ server.on('session', common.mustCall((session) => {
     }));
 
   session.on('OCSPRequest', common.mustCall(
-    (servername, cert, issuer, cb) => {
+    (servername, context, cb) => {
       debug('QuicServerSession received a OCSP request');
       assert.strictEqual(servername, kServerName);
-      if (cert)
-        assert(cert instanceof Buffer);
-      if (issuer)
-        assert(issuer instanceof Buffer);
+
+      // This will be a SecureContext. By default it will
+      // be the SecureContext used to create the QuicSession.
+      // If the user wishes to do something with it, it can,
+      // but if it wishes to pass in a new SecureContext,
+      // it can pass it in as the second argument to the
+      // callback below.
+      assert(context);
+      debug('QuicServerSession Certificate: ', context.getCertificate());
+      debug('QuicServerSession Issuer: ', context.getIssuer());
+
       // The callback can be invoked asynchronously
       // TODO(@jasnell): Using setImmediate here causes the test
       // to fail, but it shouldn't. Investigate why.
       process.nextTick(() => {
-        // The first argument is a potential error
+        // The first argument is a potential error,
+        // in which case the session will be destroyed
+        // immediately.
         // The second is an optional new SecureContext
         // The third is the ocsp response.
         // All arguments are optional
