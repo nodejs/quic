@@ -228,6 +228,10 @@ class QuicSession : public AsyncWrap,
   virtual bool IsServer() const { return false; }
   virtual int OnClientHello() { return 0; }
   virtual void OnClientHelloDone() {}
+  virtual int OnCert() { return 1; }
+  virtual void OnCertDone(
+      crypto::SecureContext* context,
+      v8::Local<v8::Value> ocsp_response) {}
 
   // These must be implemented by QuicSession types
   virtual void AddToSocket(QuicSocket* socket) = 0;
@@ -237,8 +241,6 @@ class QuicSession : public AsyncWrap,
       size_t datalen) = 0;
   virtual int HandleError() = 0;
   virtual bool MaybeTimeout() = 0;
-  virtual int OnCert() = 0;
-  virtual void OnCertDone(crypto::SecureContext* context) = 0;
   virtual void OnIdleTimeout() = 0;
   virtual int OnKey(
       int name,
@@ -257,6 +259,7 @@ class QuicSession : public AsyncWrap,
   virtual int TLSHandshake_Complete() = 0;
   virtual int TLSHandshake_Initial() = 0;
   virtual int TLSRead() = 0;
+  virtual int OnTLSStatus() = 0;
 
   static void SetupTokenContext(
       CryptoContext* context);
@@ -848,11 +851,14 @@ class QuicServerSession : public QuicSession {
   bool IsServer() const override { return true; }
   int OnClientHello() override;
   void OnClientHelloDone() override;
+  int OnTLSStatus() override;
 
   bool MaybeTimeout() override;
 
   int OnCert() override;
-  void OnCertDone(crypto::SecureContext* context) override;
+  void OnCertDone(
+      crypto::SecureContext* context,
+      v8::Local<v8::Value> ocsp_response) override;
 
   const ngtcp2_cid* rcid() const;
   ngtcp2_cid* pscid();
@@ -917,6 +923,7 @@ class QuicServerSession : public QuicSession {
   bool request_cert_;
 
   MallocedBuffer<uint8_t> conn_closebuf_;
+  v8::Global<v8::ArrayBufferView> ocsp_response_;
 
   const ngtcp2_conn_callbacks callbacks_ = {
     nullptr,
@@ -973,7 +980,8 @@ class QuicClientSession : public QuicSession {
       v8::Local<v8::Value> dcid,
       int select_preferred_address_policy =
           QUIC_PREFERRED_ADDRESS_IGNORE,
-      const std::string& alpn = NGTCP2_ALPN_H3);
+      const std::string& alpn = NGTCP2_ALPN_H3,
+      bool request_ocsp = false);
 
   QuicClientSession(
       QuicSocket* socket,
@@ -987,14 +995,14 @@ class QuicClientSession : public QuicSession {
       v8::Local<v8::Value> session_ticket,
       v8::Local<v8::Value> dcid,
       int select_preferred_address_policy,
-      const std::string& alpn);
+      const std::string& alpn,
+      bool request_ocsp);
 
   void AddToSocket(QuicSocket* socket) override;
 
   bool MaybeTimeout() override;
 
-  int OnCert() override;
-  void OnCertDone(crypto::SecureContext* context) override;
+  int OnTLSStatus() override;
 
   int SetSocket(
       QuicSocket* socket,
@@ -1071,6 +1079,7 @@ class QuicClientSession : public QuicSession {
 
   MaybeStackBuffer<char> transportParams_;
   int select_preferred_address_policy_;
+  bool request_ocsp_;
 
   const ngtcp2_conn_callbacks callbacks_ = {
     OnClientInitial,

@@ -69,18 +69,28 @@ server.on('session', common.mustCall((session) => {
   debug('QuicServerSession Created');
 
   session.on('clientHello', common.mustCall(
-    (alpn, servername, ciphers, cert, issuer, cb) => {
+    (alpn, servername, ciphers, cb) => {
       assert.strictEqual(alpn, kALPN);
       assert.strictEqual(servername, kServerName);
+      assert.strictEqual(ciphers.length, 4);
       cb();
     }));
 
-  // session.on('cert', common.mustCall(
-  //   (servername, ocsp, cb) => {
-  //     assert.strictEqual(servername, kServerName);
-  //     assert.strictEqual(ocsp, false);
-  //     cb();
-  // }));
+  session.on('OCSPRequest', common.mustCall(
+    (servername, cert, issuer, cb) => {
+      debug('QuicServerSession received a OCSP request');
+      assert.strictEqual(servername, kServerName);
+      if (cert)
+        assert(cert instanceof Buffer);
+      if (issuer)
+        assert(issuer instanceof Buffer);
+      // The callback can be invoked asynchronously
+      // TODO(@jasnell): Using setImmediate here causes the test
+      // to fail, but it shouldn't. Investigate why.
+      process.nextTick(() => {
+        cb(null, null, Buffer.from('hello'));
+      });
+  }));
 
   session.on('keylog', common.mustCall((line) => {
     assert(kKeylogs.shift().test(line));
@@ -153,11 +163,17 @@ server.on('ready', common.mustCall(() => {
     address: 'localhost',
     port: server.address.port,
     servername: kServerName,
+    requestOCSP: true,
   });
 
   client.on('close', () => debug('Client closing'));
 
   assert.strictEqual(req.servername, kServerName);
+
+  req.on('OCSPResponse', common.mustCall((response) => {
+    debug(`QuicClientSession OCSP response: "${response.toString()}"`);
+    assert.strictEqual(response.toString(), 'hello');
+  }));
 
   req.on('sessionTicket', common.mustCall((id, ticket, params) => {
     debug('Session ticket received');

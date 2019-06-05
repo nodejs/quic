@@ -458,15 +458,6 @@ bool EntropySource(unsigned char* buffer, size_t length) {
   return RAND_bytes(buffer, length) != -1;
 }
 
-
-template <typename T>
-static T* MallocOpenSSL(size_t count) {
-  void* mem = OPENSSL_malloc(MultiplyWithOverflowCheck(count, sizeof(T)));
-  CHECK_IMPLIES(mem == nullptr, count == 0);
-  return static_cast<T*>(mem);
-}
-
-
 void SecureContext::Initialize(Environment* env, Local<Object> target) {
   Local<FunctionTemplate> t = env->NewFunctionTemplate(New);
   t->InstanceTemplate()->SetInternalFieldCount(1);

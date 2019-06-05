@@ -2166,41 +2166,63 @@ int QuicServerSession::HandleError() {
 }
 
 namespace {
+// This callback is invoked by user code after completing handling
+// of the 'OCSPRequest' event. The callback is invoked with two
+// possible arguments, both of which are optional
+//   1. A replacement SecureContext
+//   2. An OCSP response
 void OnServerCertCB(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   QuicServerSession* session;
   ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
 
-  // TODO(@jasnell): Args[0] is possibly an error?
-
   Local<FunctionTemplate> cons = env->secure_context_constructor_template();
   crypto::SecureContext* context = nullptr;
-  if (args[1]->IsObject() && cons->HasInstance(args[1]))
-    ASSIGN_OR_RETURN_UNWRAP(&context, args[1].As<Object>());
-  session->OnCertDone(context);
+  if (args[0]->IsObject() && cons->HasInstance(args[0]))
+    ASSIGN_OR_RETURN_UNWRAP(&context, args[0].As<Object>());
+  session->OnCertDone(context, args[1]);
 }
 }  // namespace
 
-void QuicServerSession::OnCertDone(crypto::SecureContext* context) {
+// The OnCertDone function is called by the OnServerCertCB
+// function when usercode is done handling the OCSPRequest event.
+void QuicServerSession::OnCertDone(
+    crypto::SecureContext* context,
+    Local<Value> ocsp_response) {
+  Debug(this, "OCSPRequest completed. Context Provided? %s, OCSP Provided? %s",
+        context != nullptr ? "Yes" : "No",
+        ocsp_response->IsArrayBufferView() ? "Yes" : "No");
   // Continue the TLS handshake when this function exits
   // otherwise it will stall and fail.
   TLSHandshakeScope handshake_scope(this, &cert_cb_running_);
   // Disable the callback at this point so we don't loop continuously
   state_[IDX_QUIC_SESSION_STATE_CERT_ENABLED] = 0;
 
-  if (context == nullptr)
-    return;
-
-  int err = UseSNIContext(ssl(), context);
-  if (!err) {
-    unsigned long err = ERR_get_error();  // NOLINT(runtime/int)
-    if (!err)
-      return env()->ThrowError("CertCbDone");  // TODO(@jasnell): revisit
-    return crypto::ThrowCryptoError(env(), err);
+  if (context != nullptr) {
+    int err = UseSNIContext(ssl(), context);
+    if (!err) {
+      unsigned long err = ERR_get_error();  // NOLINT(runtime/int)
+      if (!err)
+        return env()->ThrowError("CertCbDone");  // TODO(@jasnell): revisit
+      return crypto::ThrowCryptoError(env(), err);
+    }
   }
+
+  if (ocsp_response->IsArrayBufferView())
+    ocsp_response_.Reset(env()->isolate(), ocsp_response.As<ArrayBufferView>());
 }
 
+// The OnCert callback provides an opportunity to prompt the server to
+// perform on OCSP request on behalf of the client (when the client
+// requests it). If there is a listener for the 'OCSPRequest' event
+// on the JavaScript side, the IDX_QUIC_SESSION_STATE_CERT_ENABLED
+// session state slot will equal 1, which will cause the callback to
+// be invoked. The callback will be given a reference to a JavaScript
+// function that must be called in order for the TLS handshake to
+// continue.
 int QuicServerSession::OnCert() {
+  Debug(this, "Is there an OCSPRequest handler registered? %s",
+        state_[IDX_QUIC_SESSION_STATE_CERT_ENABLED] == 0 ? "No" : "Yes");
   if (LIKELY(state_[IDX_QUIC_SESSION_STATE_CERT_ENABLED] == 0))
     return 1;
 
@@ -2213,13 +2235,21 @@ int QuicServerSession::OnCert() {
 
   HandleScope handle_scope(env()->isolate());
   Context::Scope context_scope(env()->context());
-  cert_cb_running_ = true;
 
   Local<Value> servername_str;
-  const char* servername = SSL_get_servername(ssl(), TLSEXT_NAMETYPE_host_name);
   const bool ocsp =
       (SSL_get_tlsext_status_type(ssl()) == TLSEXT_STATUSTYPE_ocsp);
+  Debug(this, "Is the client requesting OCSP? %s", ocsp ? "Yes" : "No");
 
+  // If status type is not ocsp, there's nothing further to do here.
+  // Save ourselves the callback into JavaScript and continue the
+  // handshake.
+  if (!ocsp)
+    return 1;
+
+  const char* servername = SSL_get_servername(ssl(), TLSEXT_NAMETYPE_host_name);
+
+  cert_cb_running_ = true;
   Local<Value> argv[] = {
     servername == nullptr ?
         String::Empty(env()->isolate()) :
@@ -2227,7 +2257,6 @@ int QuicServerSession::OnCert() {
             env()->isolate(),
             servername,
             strlen(servername)),
-    Boolean::New(env()->isolate(), ocsp),
     Function::New(
         env()->context(),
         OnServerCertCB,
@@ -2241,20 +2270,35 @@ int QuicServerSession::OnCert() {
   return cert_cb_running_ ? -1 : 1;
 }
 
-void QuicClientSession::OnCertDone(crypto::SecureContext* context) {
-  // Continue the TLS handshake when this function exits
-  // otherwise it will stall and fail.
-  TLSHandshakeScope handshake_scope(this, &cert_cb_running_);
-  // Disable the callback at this point so we don't loop continuously
-  state_[IDX_QUIC_SESSION_STATE_CERT_ENABLED] = 0;
-  if (context == nullptr)
-    return;
-  // TODO(@jasnell): Do something with the new context...
-}
+// When the client has requested OSCP, this function will be called to provide
+// the OSCP response. The OnCert() callback should have already been called
+// by this point if any data is to be provided. If it hasn't, and ocsp_response_
+// is empty, no OCSP response will be sent.
+int QuicServerSession::OnTLSStatus() {
+  Debug(this, "Asking for OCSP status to send. Is there a response? %s",
+        ocsp_response_.IsEmpty() ? "No" : "Yes");
 
-int QuicClientSession::OnCert() {
-  // TODO(@jasnell): Implement
-  return 1;
+  if (ocsp_response_.IsEmpty())
+    return SSL_TLSEXT_ERR_NOACK;
+
+  HandleScope scope(env()->isolate());
+
+  Local<ArrayBufferView> obj =
+      PersistentToLocal::Default(
+        env()->isolate(),
+        ocsp_response_);
+  size_t len = obj->ByteLength();
+
+  unsigned char* data = crypto::MallocOpenSSL<unsigned char>(len);
+  obj->CopyContents(data, len);
+
+  Debug(this, "The OCSP Response is %d bytes in length.", len);
+
+  if (!SSL_set_tlsext_status_ocsp_resp(ssl(), data, len))
+    OPENSSL_free(data);
+  ocsp_response_.Reset();
+
+  return SSL_TLSEXT_ERR_OK;
 }
 
 int QuicServerSession::OnKey(
@@ -2702,7 +2746,8 @@ std::shared_ptr<QuicSession> QuicClientSession::New(
     Local<Value> session_ticket,
     Local<Value> dcid,
     int select_preferred_address_policy,
-    const std::string& alpn) {
+    const std::string& alpn,
+    bool request_ocsp) {
   std::shared_ptr<QuicSession> session;
   Local<Object> obj;
   if (!socket->env()
@@ -2724,7 +2769,8 @@ std::shared_ptr<QuicSession> QuicClientSession::New(
           session_ticket,
           dcid,
           select_preferred_address_policy,
-          alpn);
+          alpn,
+          request_ocsp);
 
   session->AddToSocket(socket);
   session->Start();
@@ -2744,7 +2790,8 @@ QuicClientSession::QuicClientSession(
     Local<Value> session_ticket,
     Local<Value> dcid,
     int select_preferred_address_policy,
-    const std::string& alpn) :
+    const std::string& alpn,
+    bool request_ocsp) :
     QuicSession(
         socket,
         wrap,
@@ -2753,7 +2800,8 @@ QuicClientSession::QuicClientSession(
         alpn),
     resumption_(false),
     hostname_(hostname),
-    select_preferred_address_policy_(select_preferred_address_policy) {
+    select_preferred_address_policy_(select_preferred_address_policy),
+    request_ocsp_(request_ocsp) {
   // TODO(@jasnell): Init may fail. Need to handle the error conditions
   Init(addr, version, early_transport_params, session_ticket, dcid);
 }
@@ -2956,6 +3004,7 @@ int QuicClientSession::SetSession(SSL_SESSION* session) {
 void QuicClientSession::InitTLS_Post() {
   SSL_set_connect_state(ssl());
 
+  Debug(this, "Using %s as the ALPN protocol.", GetALPN().c_str() + 1);
   const uint8_t* alpn = reinterpret_cast<const uint8_t*>(GetALPN().c_str());
   size_t alpnlen = GetALPN().length();
   SSL_set_alpn_protos(ssl(), alpn, alpnlen);
@@ -2963,10 +3012,39 @@ void QuicClientSession::InitTLS_Post() {
   // If the hostname is an IP address and we have no additional
   // information, use localhost.
   if (SocketAddress::numeric_host(hostname_)) {
+    Debug(this, "Using localhost as fallback hostname.");
     SSL_set_tlsext_host_name(ssl(), "localhost");
   } else {
     SSL_set_tlsext_host_name(ssl(), hostname_);
   }
+
+  // Are we going to request OCSP status?
+  if (request_ocsp_) {
+    Debug(this, "Request OCSP status from the server.");
+    SSL_set_tlsext_status_type(ssl(), TLSEXT_STATUSTYPE_ocsp);
+  }
+}
+
+// During TLS handshake, if the client has requested OCSP status, this
+// function will be invoked when the response has been received from
+// the server.
+int QuicClientSession::OnTLSStatus() {
+  HandleScope scope(env()->isolate());
+  Context::Scope context_scope(env()->context());
+
+  const unsigned char* resp;
+  int len = SSL_get_tlsext_status_ocsp_resp(ssl(), &resp);
+  Debug(this, "An OCSP Response of %d bytes has been received.", len);
+  Local<Value> arg;
+  if (resp == nullptr)
+    arg = Undefined(env()->isolate());
+  else {
+    arg = Buffer::Copy(env(), reinterpret_cast<const char*>(resp), len)
+        .ToLocalChecked();
+  }
+
+  MakeCallback(env()->quic_on_session_status_function(), 1, &arg);
+  return 1;
 }
 
 int QuicClientSession::OnKey(
@@ -3553,7 +3631,8 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
           args[8],
           args[9],
           select_preferred_address_policy,
-          alpn);
+          alpn,
+          args[12]->IsTrue());    // request_oscp
 
   session->SendPendingData();
 

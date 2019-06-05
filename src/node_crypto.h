@@ -852,6 +852,14 @@ v8::Local<v8::Object> GetLastIssuedCert(
     SSL* ssl,
     v8::Local<v8::Object> issuer_chain,
     Environment* const env);
+
+template <typename T>
+inline T* MallocOpenSSL(size_t count) {
+  void* mem = OPENSSL_malloc(MultiplyWithOverflowCheck(count, sizeof(T)));
+  CHECK_IMPLIES(mem == nullptr, count == 0);
+  return static_cast<T*>(mem);
+}
+
 }  // namespace crypto
 }  // namespace node
 
