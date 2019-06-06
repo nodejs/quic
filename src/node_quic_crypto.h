@@ -1163,6 +1163,209 @@ inline int UseSNIContext(SSL* ssl, crypto::SecureContext* context) {
   return err;
 }
 
+inline int Client_Hello_CB(
+    SSL* ssl,
+    int* tls_alert,
+    void* arg) {
+  QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
+  int ret = session->OnClientHello();
+  switch (ret) {
+    case 0:
+      return 1;
+    case -1:
+      return -1;
+    default:
+      *tls_alert = ret;
+      return 0;
+  }
+}
+
+inline int ALPN_Select_Proto_CB(
+    SSL* ssl,
+    const unsigned char** out,
+    unsigned char* outlen,
+    const unsigned char* in,
+    unsigned int inlen,
+    void* arg) {
+  QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
+  const uint8_t* alpn;
+  size_t alpnlen;
+  uint32_t version = session->GetNegotiatedVersion();
+
+  switch (version) {
+  case NGTCP2_PROTO_VER:
+    alpn = reinterpret_cast<const uint8_t*>(session->GetALPN().c_str());
+    alpnlen = session->GetALPN().length();
+    break;
+  default:
+    // Unexpected QUIC protocol version
+    return SSL_TLSEXT_ERR_NOACK;
+  }
+
+  for (auto p = in, end = in + inlen; p + alpnlen <= end; p += *p + 1) {
+    if (std::equal(alpn, alpn + alpnlen, p)) {
+      *out = p + 1;
+      *outlen = *p;
+      return SSL_TLSEXT_ERR_OK;
+    }
+  }
+
+  *out = alpn + 1;
+  *outlen = alpn[0];
+
+  return SSL_TLSEXT_ERR_OK;
+}
+
+inline int Client_Transport_Params_Add_CB(
+    SSL* ssl,
+    unsigned int ext_type,
+    unsigned int context,
+    const unsigned char** out,
+    size_t* outlen,
+    X509* x,
+    size_t chainidx,
+    int* al,
+    void* add_arg) {
+  QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
+
+  ngtcp2_transport_params params;
+  session->GetLocalTransportParams(&params);
+
+  constexpr size_t bufsize = 64;
+  auto buf = std::make_unique<uint8_t[]>(bufsize);
+
+  auto nwrite = ngtcp2_encode_transport_params(
+      buf.get(), bufsize,
+      NGTCP2_TRANSPORT_PARAMS_TYPE_CLIENT_HELLO,
+      &params);
+  if (nwrite < 0) {
+    // Error encoding transport params
+    *al = SSL_AD_INTERNAL_ERROR;
+    return -1;
+  }
+
+  *out = buf.release();
+  *outlen = static_cast<size_t>(nwrite);
+
+  return 1;
+}
+
+inline int TLS_Status_Callback(SSL* ssl, void* arg) {
+  QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
+  return session->OnTLSStatus();
+}
+
+inline int Server_Transport_Params_Add_CB(
+    SSL* ssl,
+    unsigned int ext_type,
+    unsigned int context,
+    const unsigned char** out,
+    size_t* outlen,
+    X509* x,
+    size_t chainidx,
+    int* al,
+    void* add_arg) {
+  QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
+
+  ngtcp2_transport_params params;
+  session->GetLocalTransportParams(&params);
+
+  constexpr size_t bufsize = 512;
+
+  auto buf = std::make_unique<uint8_t[]>(bufsize);
+
+  ssize_t nwrite = ngtcp2_encode_transport_params(
+      buf.get(), bufsize,
+      NGTCP2_TRANSPORT_PARAMS_TYPE_ENCRYPTED_EXTENSIONS,
+      &params);
+  if (nwrite < 0) {
+    // Error encoding transport params
+    *al = SSL_AD_INTERNAL_ERROR;
+    return -1;
+  }
+
+  *out = buf.release();
+  *outlen = static_cast<size_t>(nwrite);
+
+  return 1;
+}
+
+inline void Transport_Params_Free_CB(
+    SSL* ssl,
+    unsigned int ext_type,
+    unsigned int context,
+    const unsigned char* out,
+    void* add_arg) {
+  delete[] const_cast<unsigned char*>(out);
+}
+
+inline int Client_Transport_Params_Parse_CB(
+    SSL* ssl,
+    unsigned int ext_type,
+    unsigned int context,
+    const unsigned char* in,
+    size_t inlen,
+    X509* x,
+    size_t chainidx,
+    int* al,
+    void* parse_arg) {
+  QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
+
+  ngtcp2_transport_params params;
+
+  if (ngtcp2_decode_transport_params(
+          &params,
+          NGTCP2_TRANSPORT_PARAMS_TYPE_ENCRYPTED_EXTENSIONS,
+          in, inlen) != 0) {
+    *al = SSL_AD_ILLEGAL_PARAMETER;
+    return -1;
+  }
+
+  if (session->SetRemoteTransportParams(&params) != 0) {
+    *al = SSL_AD_ILLEGAL_PARAMETER;
+    return -1;
+  }
+
+  return 1;
+}
+
+inline int Server_Transport_Params_Parse_CB(
+    SSL* ssl,
+    unsigned int ext_type,
+    unsigned int context,
+    const unsigned char* in,
+    size_t inlen,
+    X509* x,
+    size_t chainidx,
+    int* al,
+    void* parse_arg) {
+  if (context != SSL_EXT_CLIENT_HELLO) {
+    *al = SSL_AD_ILLEGAL_PARAMETER;
+    return -1;
+  }
+
+  QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
+
+  ngtcp2_transport_params params;
+
+  if (ngtcp2_decode_transport_params(
+          &params,
+          NGTCP2_TRANSPORT_PARAMS_TYPE_CLIENT_HELLO,
+          in, inlen) != 0) {
+    // Error decoding transport params
+    *al = SSL_AD_ILLEGAL_PARAMETER;
+    return -1;
+  }
+
+  if (session->SetRemoteTransportParams(&params) != 0) {
+    *al = SSL_AD_ILLEGAL_PARAMETER;
+    return -1;
+  }
+
+  return 1;
+}
+
+
 }  // namespace quic
 }  // namespace node
 
