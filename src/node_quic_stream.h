@@ -3,6 +3,7 @@
 
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
+#include "memory_tracker-inl.h"
 #include "async_wrap.h"
 #include "env.h"
 #include "node_quic_util.h"
