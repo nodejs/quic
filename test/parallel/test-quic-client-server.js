@@ -68,6 +68,17 @@ server.listen({
 server.on('session', common.mustCall((session) => {
   debug('QuicServerSession Created');
 
+  {
+    const {
+      address,
+      family,
+      port
+    } = session.remoteAddress;
+    assert.strictEqual(port, client.address.port);
+    assert.strictEqual(family, client.address.family);
+    debug(`QuicServerSession Client ${family} address ${address}:${port}`);
+  }
+
   session.on('clientHello', common.mustCall(
     (alpn, servername, ciphers, cb) => {
       assert.strictEqual(alpn, kALPN);
@@ -209,6 +220,17 @@ server.on('ready', common.mustCall(() => {
     assert.strictEqual(req.alpnProtocol, kALPN);
     assert(req.ephemeralKeyInfo);
     assert(req.getPeerCertificate());
+
+    {
+      const {
+        address,
+        family,
+        port
+      } = req.remoteAddress;
+      assert.strictEqual(port, server.address.port);
+      assert.strictEqual(family, server.address.family);
+      debug(`QuicClientSession Server ${family} address ${address}:${port}`);
+    }
 
     const file = fs.createReadStream(__filename);
     const stream = req.openStream();

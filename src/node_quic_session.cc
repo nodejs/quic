@@ -3564,6 +3564,16 @@ void QuicSessionGetPeerCertificate(const FunctionCallbackInfo<Value>& args) {
   args.GetReturnValue().Set(result);
 }
 
+void QuicSessionGetRemoteAddress(
+    const FunctionCallbackInfo<Value>& args) {
+  QuicSession* session;
+  ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
+  Environment* env = session->env();
+  CHECK(args[0]->IsObject());
+  args.GetReturnValue().Set(
+      AddressToJS(env, **session->GetRemoteAddress(), args[0].As<Object>()));
+}
+
 // TODO(@jasnell): Reconcile with shared code in node_crypto
 void QuicSessionGetCertificate(
     const FunctionCallbackInfo<Value>& args) {
@@ -3647,6 +3657,7 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
 void AddMethods(Environment* env, Local<FunctionTemplate> session) {
   env->SetProtoMethod(session, "close", QuicSessionClose);
   env->SetProtoMethod(session, "destroy", QuicSessionDestroy);
+  env->SetProtoMethod(session, "getRemoteAddress", QuicSessionGetRemoteAddress);
   env->SetProtoMethod(session, "getCertificate", QuicSessionGetCertificate);
   env->SetProtoMethod(session,
                       "getPeerCertificate",

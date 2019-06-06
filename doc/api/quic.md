@@ -183,9 +183,10 @@ added: REPLACEME
 * `code` {number} The error code to when closing the session. Default: `0`.
 * `callback` {Function} Callback invoked when the close operation is completed
 
-Begins a graceful close of the `QuicSession`. Existing `QuicStream` instances will be
-permitted to close naturally. New `QuicStream` instances will not be permitted. Once
-all `QuicStream` instances have closed, the `QuicSession` instance will be destroyed.
+Begins a graceful close of the `QuicSession`. Existing `QuicStream` instances
+will be permitted to close naturally. New `QuicStream` instances will not be
+permitted. Once all `QuicStream` instances have closed, the `QuicSession`
+instance will be destroyed.
 
 ### quicsession.closing
 <!-- YAML
@@ -204,8 +205,8 @@ added: REPLACEME
 * `error` {any}
 
 Destroys the `QuicSession` immediately causing the `close` event to be emitted.
-If `error` is not `undefined`, the `error` event will be emitted following the `close`
-event.
+If `error` is not `undefined`, the `error` event will be emitted following the
+`close` event.
 
 Any `QuicStream` instances that are still opened will be abruptly closed.
 
@@ -225,26 +226,28 @@ added: REPLACEME
 
 * Returns: {Object} A [Certificate Object][].
 
-Returns an object representing the local certificate. The returned object has some
-properties corresponding to the fields of the certificate.
+Returns an object representing the local certificate. The returned object has
+some properties corresponding to the fields of the certificate.
 
-If there is no local certificate, or if the `QuicSession` has been destroyed, an empty
-object will be returned.
+If there is no local certificate, or if the `QuicSession` has been destroyed,
+an empty object will be returned.
 
 ### quicsession.getPeerCertificate([detailed])
 <!-- YAML
 added: REPLACEME
 -->
 
-* `detailed` {boolean} Include the full certificate chain if `true`, otherwise include
-  just the peer's certificate.
+* `detailed` {boolean} Include the full certificate chain if `true`, otherwise
+  include just the peer's certificate.
 * Returns: {Object} A [Certificate Object][].
 
-Returns an object representing the peer's certificate. If the peer does not provide a
-certificate, or if the `QuicSession` has been destroyed, an empty object will be returned.
+Returns an object representing the peer's certificate. If the peer does not
+provide a certificate, or if the `QuicSession` has been destroyed, an empty
+object will be returned.
 
-If the full certificate chain was requested, each certificate will include an `issuerCertificate`
-property containing an object representing its issuer's certificate.
+If the full certificate chain was requested, each certificate will include an
+`issuerCertificate` property containing an object representing its issuer's
+certificate.
 
 ### quicsession.handshakeComplete
 <!-- YAML
@@ -267,8 +270,8 @@ added: REPLACEME
 
 Returns a new `QuicStream`.
 
-An error will be thrown if the `QuicSession` has been destroyed or is in the process
-of a graceful shutdown.
+An error will be thrown if the `QuicSession` has been destroyed or is in the
+process of a graceful shutdown.
 
 ### quicsession.servername
 <!-- YAML
@@ -322,7 +325,8 @@ added: REPLACEME
 An object representing the type, name, and size of parameter of an ephemeral
 key exchange in Perfect Forward Secrecy on a client connection. It is an
 empty object when the key exchange is not ephemeral. The supported types are
-`'DH'` and `'ECDH'`. The `name` property is available only when type is `'ECDH'`.
+`'DH'` and `'ECDH'`. The `name` property is available only when type is
+`'ECDH'`.
 
 For example: `{ type: 'ECDH', name: 'prime256v1', size: 256 }`.
 
@@ -333,8 +337,8 @@ added: REPLACEME
 
 * Type: {boolean}
 
-True if the `QuicClientSession` is ready for use. False if the `QuicSocket` has not
-yet been bound.
+True if the `QuicClientSession` is ready for use. False if the `QuicSocket` has
+not yet been bound.
 
 ### quicclientsession.readyToMigrate
 <!-- YAML
@@ -343,10 +347,11 @@ added: REPLACEME
 
 * Type: {boolean}
 
-Once established, a `QuicClientSession` can be migrated from one `QuicSocket` instance
-to another, without requiring the TLS handshake to be reestablished. Migration, however,
-can only occur once the TLS handshake is complete and the underlying session has had an
-opportunity to generate a pool of extra connection identifiers.
+Once established, a `QuicClientSession` can be migrated from one `QuicSocket`
+instance to another, without requiring the TLS handshake to be reestablished.
+Migration, however, can only occur once the TLS handshake is complete and the
+underlying session has had an opportunity to generate a pool of extra
+connection identifiers.
 
 ### quicclientsession.setSocket(socket, callback])
 <!-- YAML
@@ -354,12 +359,13 @@ added: REPLACEME
 -->
 
 * `socket` {QuicSocket} A `QuicSocket` instance to move this session to.
-* `callback` {Function} A callback function that will be invoked once the migration to
-  the new `QuicSocket` is complete.
+* `callback` {Function} A callback function that will be invoked once the
+  migration to the new `QuicSocket` is complete.
 
-Migrates the `QuicClientSession` to the given `QuicSocket` instance. If the new `QuicSocket`
-has not yet been bound to a local UDP port, it will be bound prior to attempting the
-migration. If `quicclientsession.readyToMigrate` is `false`, an error will be thrown.
+Migrates the `QuicClientSession` to the given `QuicSocket` instance. If the new
+`QuicSocket` has not yet been bound to a local UDP port, it will be bound prior
+to attempting the migration. If `quicclientsession.readyToMigrate` is `false`,
+an error will be thrown.
 
 ## Class: QuicServerSession extends QuicSession
 <!-- YAML
@@ -369,17 +375,19 @@ added: REPLACEME
 * Extends: {QuicSession}
 
 The `QuicServerSession` class implements the server side of a QUIC connection.
-Instances are created internally and are emitted using the `QuicSocket` `'session'`
-event.
+Instances are created internally and are emitted using the `QuicSocket`
+`'session'` event.
 
 ## Class: QuicSocket
 <!-- YAML
 added: REPLACEME
 -->
 
-New instances of `QuicSocket` are created using the `quic.createSocket()` method.
+New instances of `QuicSocket` are created using the `quic.createSocket()`
+method.
 
-Once created, a `QuicSocket` can be configured to work as both a client and a server.
+Once created, a `QuicSocket` can be configured to work as both a client and a
+server.
 
 ### Event: `'close'`
 <!-- YAML
@@ -393,7 +401,8 @@ Emitted after the `QuicSocket` has been destroyed and is no longer usable.
 added: REPLACEME
 -->
 
-Emitted before the `'close'` event if the `QuicSocket` was destroyed with an `error`.
+Emitted before the `'close'` event if the `QuicSocket` was destroyed with an
+`error`.
 
 ### Event: `'ready'`
 <!-- YAML
@@ -436,7 +445,8 @@ An object containing the address information for a bound `QuicSocket`.
 
 The object will contain the properties:
 
-* `address` {string} The local IPv4 or IPv6 address to which the `QuicSocket` is bound.
+* `address` {string} The local IPv4 or IPv6 address to which the `QuicSocket` is
+  bound.
 * `family` {string} Either `'IPv4'` or `'IPv6'`.
 * `port` {number} The local IP port to which the `QuicSocket` is bound.
 
@@ -459,9 +469,9 @@ added: REPLACEME
 
 * `callback` {Function}
 
-Gracefully closes the `QuicSocket`. Existing `QuicSession` instances will be permitted to
-close naturally. New `QuicClientSession` and `QuicServerSession` instances will not be
-allowed.
+Gracefully closes the `QuicSocket`. Existing `QuicSession` instances will be
+permitted to close naturally. New `QuicClientSession` and `QuicServerSession`
+instances will not be allowed.
 
 ### quicsocket.connect([options])
 <!-- YAML
@@ -747,8 +757,8 @@ added: REPLACEME
 
 * `on` {boolean}
 
-Sets or clears the `SO_BROADCAST` socket option. When set to `true`, UDP packets may be sent
-to a local interface's broadcast address.
+Sets or clears the `SO_BROADCAST` socket option. When set to `true`, UDP
+packets may be sent to a local interface's broadcast address.
 
 ### quicsocket.setMulticastLoopback([on])
 <!-- YAML
@@ -757,8 +767,8 @@ added: REPLACEME
 
 * `on` {boolean}
 
-Sets or clears the `IP_MULTICAST_LOOP` socket option. When set to `true`, multicast packets
-will also be received on the local interface.
+Sets or clears the `IP_MULTICAST_LOOP` socket option. When set to `true`,
+multicast packets will also be received on the local interface.
 
 ### quicsocket.setMulticastInterface(iface)
 <!-- YAML
@@ -767,22 +777,24 @@ added: REPLACEME
 
 * `iface` {string}
 
-All references to scope in this section are referring to IPv6 Zone Indices, which are
-defined by [RFC 4007][]. In string form, an IP with a scope index is written as `'IP%scope'`
-where scope is an interface name or interface number.
+All references to scope in this section are referring to IPv6 Zone Indices,
+which are defined by [RFC 4007][]. In string form, an IP with a scope index
+is written as `'IP%scope'` where scope is an interface name or interface
+number.
 
-Sets the default outgoing multicast interface of the socket to a chosen interface or back to
-system interface selection. The multicastInterface must be a valid string representation of
-an IP from the socket's family.
+Sets the default outgoing multicast interface of the socket to a chosen
+interface or back to system interface selection. The multicastInterface must
+be a valid string representation of an IP from the socket's family.
 
-For IPv4 sockets, this should be the IP configured for the desired physical interface. All
-packets sent to multicast on the socket will be sent on the interface determined by the most
-recent successful use of this call.
+For IPv4 sockets, this should be the IP configured for the desired physical
+interface. All packets sent to multicast on the socket will be sent on the
+interface determined by the most recent successful use of this call.
 
-For IPv6 sockets, multicastInterface should include a scope to indicate the interface as in
-the examples that follow. In IPv6, individual send calls can also use explicit scope in
-addresses, so only packets sent to a multicast address without specifying an explicit scope
-are affected by the most recent successful use of this call.
+For IPv6 sockets, multicastInterface should include a scope to indicate the
+interface as in the examples that follow. In IPv6, individual send calls can
+also use explicit scope in addresses, so only packets sent to a multicast
+address without specifying an explicit scope are affected by the most recent
+successful use of this call.
 
 #### Examples: IPv6 Outgoing Multicast Interface
 <!-- YAML
@@ -824,19 +836,23 @@ socket.on('ready', () => {
 
 #### Call Results#
 
-A call on a socket that is not ready to send or no longer open may throw a Not running Error.
+A call on a socket that is not ready to send or no longer open may throw a
+Not running Error.
 
-If multicastInterface can not be parsed into an IP then an `EINVAL` System Error is thrown.
+If multicastInterface can not be parsed into an IP then an `EINVAL` System
+Error is thrown.
 
-On IPv4, if `multicastInterface` is a valid address but does not match any interface, or if
-the address does not match the family then a System Error such as `EADDRNOTAVAIL` or
-`EPROTONOSUP` is thrown.
+On IPv4, if `multicastInterface` is a valid address but does not match any
+interface, or if the address does not match the family then a System Error
+such as `EADDRNOTAVAIL` or `EPROTONOSUP` is thrown.
 
-On IPv6, most errors with specifying or omitting scope will result in the socket continuing
-to use (or returning to) the system's default interface selection.
+On IPv6, most errors with specifying or omitting scope will result in the
+socket continuing to use (or returning to) the system's default interface
+selection.
 
-A socket's address family's ANY address (IPv4 `'0.0.0.0'` or IPv6 `'::'`) can be used to
-return control of the sockets default outgoing interface to the system for future multicast packets.
+A socket's address family's ANY address (IPv4 `'0.0.0.0'` or IPv6 `'::'`)
+can be used to return control of the sockets default outgoing interface to
+the system for future multicast packets.
 
 ### quicsocket.setMulticastTTL(ttl)
 <!-- YAML
@@ -845,13 +861,14 @@ added: REPLACEME
 
 * `ttl` {number}
 
-Sets the `IP_MULTICAST_TTL` socket option. While TTL generally stands for "Time to Live",
-in this context it specifies the number of IP hops that a packet is allowed to travel through,
-specifically for multicast traffic. Each router or gateway that forwards a packet decrements
-the TTL. If the TTL is decremented to `0` by a router, it will not be forwarded.
+Sets the `IP_MULTICAST_TTL` socket option. While TTL generally stands for
+"Time to Live", in this context it specifies the number of IP hops that a
+packet is allowed to travel through, specifically for multicast traffic. Each
+router or gateway that forwards a packet decrements the TTL. If the TTL is
+decremented to `0` by a router, it will not be forwarded.
 
-The argument passed to `socket.setMulticastTTL()` is a number of hops between `0` and `255`.
-The default on most systems is `1` but can vary.
+The argument passed to `socket.setMulticastTTL()` is a number of hops between
+`0` and `255`. The default on most systems is `1` but can vary.
 
 ### quicsocket.setTTL(ttl)
 <!-- YAML
@@ -860,14 +877,14 @@ added: REPLACEME
 
 * `ttl` {number}
 
-Sets the `IP_TTL` socket option. While TTL generally stands for "Time to Live", in this
-context it specifies the number of IP hops that a packet is allowed to travel through. Each
-router or gateway that forwards a packet decrements the TTL. If the TTL is decremented to `0`
-by a router, it will not be forwarded. Changing TTL values is typically done for network
-probes or when multicasting.
+Sets the `IP_TTL` socket option. While TTL generally stands for "Time to Live",
+in this context it specifies the number of IP hops that a packet is allowed to
+travel through. Each router or gateway that forwards a packet decrements the
+TTL. If the TTL is decremented to `0` by a router, it will not be forwarded.
+Changing TTL values is typically done for network probes or when multicasting.
 
-The argument to `socket.setTTL()` is a number of hops between `1` and `255`. The default on
-most systems is `64` but can vary.
+The argument to `socket.setTTL()` is a number of hops between `1` and `255`.
+The default on most systems is `64` but can vary.
 
 ### quicsocket.unref();
 <!-- YAML
