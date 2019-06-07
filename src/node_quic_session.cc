@@ -1324,12 +1324,27 @@ void QuicSession::HandshakeCompleted() {
 
   Local<Value> maxPacketLength = Integer::New(env()->isolate(), max_pktlen_);
 
+  // Verify the identity of the peer (this check varies based on whether
+  // or not this is a client or server session. See the specific implementation
+  // of VerifyPeerIdentity() for either.
+  Local<Value> verifyErrorReason = v8::Null(env()->isolate());
+  Local<Value> verifyErrorCode = v8::Null(env()->isolate());
+  int verifyError = VerifyPeerIdentity(host_name);
+  if (verifyError != 0) {
+    const char* reason = X509_verify_cert_error_string(verifyError);
+    verifyErrorReason = OneByteString(env()->isolate(), reason);
+    verifyErrorCode =
+        OneByteString(env()->isolate(),X509ErrorCode(verifyError));
+  }
+
   Local<Value> argv[] = {
     servername,
     alpn,
     cipher,
     version,
-    maxPacketLength
+    maxPacketLength,
+    verifyErrorReason,
+    verifyErrorCode
   };
 
   MakeCallback(env()->quic_on_session_handshake_function(),
@@ -2686,6 +2701,14 @@ int QuicServerSession::TLSHandshake_Complete() {
   return 0;
 }
 
+// For the server-side, we only care that the client provided
+// certificate is signed by some entity the server trusts.
+// Any additional checks can be performed in usercode on the
+// JavaScript side.
+int QuicServerSession::VerifyPeerIdentity(const char* hostname) {
+  return VerifyPeerCertificate(ssl());  // NOLINT(runtime/int)
+}
+
 ngtcp2_cid* QuicServerSession::pscid() {
   return &pscid_;
 }
@@ -3014,11 +3037,12 @@ void QuicClientSession::InitTLS_Post() {
 
   // If the hostname is an IP address and we have no additional
   // information, use localhost.
-  if (SocketAddress::numeric_host(hostname_)) {
+
+  if (SocketAddress::numeric_host(hostname_.c_str())) {
     Debug(this, "Using localhost as fallback hostname.");
     SSL_set_tlsext_host_name(ssl(), "localhost");
   } else {
-    SSL_set_tlsext_host_name(ssl(), hostname_);
+    SSL_set_tlsext_host_name(ssl(), hostname_.c_str());
   }
 
   // Are we going to request OCSP status?
@@ -3421,6 +3445,23 @@ int QuicClientSession::SetSession(Local<Value> buffer) {
     return ERR_INVALID_TLS_SESSION_TICKET;
   return 0;
 }
+
+// TODO(@jasnell): QUIC requires clients to verify the identity of the
+// server. We will allow relaxing of that requirement on a selective basis
+// but a warning will be emitted
+int QuicClientSession::VerifyPeerIdentity(const char* hostname) {
+  // First, check that the certificate is signed by an entity the client
+  // trusts (as configured in the secure context). If not, return early.
+  int err = VerifyPeerCertificate(ssl());
+  if (err)
+    return err;
+
+  // Second, check that the hostname matches the cert subject/altnames
+  return VerifyHostnameIdentity(
+      ssl(),
+      hostname != nullptr ? hostname : hostname_.c_str());
+}
+
 
 // JavaScript API
 namespace {

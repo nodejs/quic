@@ -6,6 +6,7 @@
 #include "node_crypto.h"
 #include "node_quic_session.h"
 #include "node_quic_util.h"
+#include "node_url.h"
 
 #include <ngtcp2/ngtcp2.h>
 #include <openssl/bio.h>
@@ -14,6 +15,12 @@
 #include <openssl/kdf.h>
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
+
+#include <iterator>
+#include <numeric>
+#include <unordered_map>
+#include <string>
+#include <sstream>
 
 namespace node {
 
@@ -1365,6 +1372,346 @@ inline int Server_Transport_Params_Parse_CB(
   return 1;
 }
 
+
+
+inline int VerifyPeerCertificate(SSL* ssl) {
+  int err = X509_V_ERR_UNSPECIFIED;
+  if (X509* peer_cert = SSL_get_peer_certificate(ssl)) {
+    X509_free(peer_cert);
+    err = SSL_get_verify_result(ssl);
+  }
+  return err;
+}
+
+inline std::string GetCertificateCN(X509* cert) {
+  X509_NAME* subject = X509_get_subject_name(cert);
+  if (subject != nullptr) {
+    int nid = OBJ_txt2nid("CN");
+    int idx = X509_NAME_get_index_by_NID(subject, nid, -1);
+    if (idx != -1) {
+      X509_NAME_ENTRY* cn = X509_NAME_get_entry(subject, idx);
+      if (cn != nullptr) {
+        ASN1_STRING* cn_str = X509_NAME_ENTRY_get_data(cn);
+        if (cn_str != nullptr) {
+          return std::string(reinterpret_cast<char*>(ASN1_STRING_data(cn_str)));
+        }
+      }
+    }
+  }
+  return std::string();
+}
+
+inline void GetCertificateAltNames(
+    X509* cert,
+    std::unordered_multimap<std::string,std::string>* map) {
+  crypto::BIOPointer bio(BIO_new(BIO_s_mem()));
+  BUF_MEM* mem;
+  int idx = X509_get_ext_by_NID(cert, NID_subject_alt_name, -1);
+  if (idx < 0)  // There is no subject alt name
+    return;
+
+  X509_EXTENSION* ext = X509_get_ext(cert, idx);
+  CHECK_NOT_NULL(ext);
+  const X509V3_EXT_METHOD* method = X509V3_EXT_get(ext);
+  CHECK_EQ(method, X509V3_EXT_get_nid(NID_subject_alt_name));
+
+  GENERAL_NAMES* names = static_cast<GENERAL_NAMES*>(X509V3_EXT_d2i(ext));
+  if (names == nullptr)  // There are no names
+    return;
+
+  for (int i = 0; i < sk_GENERAL_NAME_num(names); i++) {
+    USE(BIO_reset(bio.get()));
+    GENERAL_NAME* gen = sk_GENERAL_NAME_value(names, i);
+    if (gen->type == GEN_DNS) {
+      ASN1_IA5STRING* name = gen->d.dNSName;
+      BIO_write(bio.get(), name->data, name->length);
+      BIO_get_mem_ptr(bio.get(), &mem);
+      map->emplace("dns", std::string(mem->data, mem->length));
+    } else {
+      STACK_OF(CONF_VALUE)* nval = i2v_GENERAL_NAME(
+          const_cast<X509V3_EXT_METHOD*>(method), gen, nullptr);
+      if (nval == nullptr)
+        continue;
+      X509V3_EXT_val_prn(bio.get(), nval, 0, 0);
+      sk_CONF_VALUE_pop_free(nval, X509V3_conf_free);
+      BIO_get_mem_ptr(bio.get(), &mem);
+      std::string value(mem->data, mem->length);
+      if (value.compare(0, 11, "IP Address:") == 0) {
+        map->emplace("ip", value.substr(11));
+      } else if (value.compare(0, 4, "URI:") == 0) {
+        url::URL url(value.substr(4));
+        if (url.flags() & url::URL_FLAGS_CANNOT_BE_BASE ||
+            url.flags() & url::URL_FLAGS_FAILED) {
+          continue; // Skip this one
+        }
+        map->emplace("uri", url.host());
+      }
+    }
+  }
+  sk_GENERAL_NAME_pop_free(names, GENERAL_NAME_free);
+  bio.reset();
+}
+
+inline bool SplitHostname(
+    const char* hostname,
+    std::vector<std::string>* parts,
+    const char delim = '.') {
+  static std::string check_str =
+      "\x21\x22\x23\x24\x25\x26\x27\x28\x29\x2A\x2B\x2C\x2D\x2E\x2F\x30"
+      "\x31\x32\x33\x34\x35\x36\x37\x38\x39\x3A\x3B\x3C\x3D\x3E\x3F\x40"
+      "\x41\x42\x43\x44\x45\x46\x47\x48\x49\x4A\x4B\x4C\x4D\x4E\x4F\x50"
+      "\x51\x52\x53\x54\x55\x56\x57\x58\x59\x5A\x5B\x5C\x5D\x5E\x5F\x60"
+      "\x61\x62\x63\x64\x65\x66\x67\x68\x69\x6A\x6B\x6C\x6D\x6E\x6F\x70"
+      "\x71\x72\x73\x74\x75\x76\x77\x78\x79\x7A\x7B\x7C\x7D\x7E\x7F";
+
+  std::stringstream str(hostname);
+  std::string part;
+  while (getline(str, part, delim)) {
+    // if (part.length() == 0 ||
+    //     part.find_first_not_of(check_str) != std::string::npos) {
+    //   return false;
+    // }
+    for (size_t n = 0; n < part.length(); n++) {
+      if (part[n] >= 'A' && part[n] <= 'Z')
+        part[n] = (part[n] | 0x20);  // Lower case the letter
+      if (check_str.find(part[n]) == std::string::npos)
+        return false;
+    }
+    parts->push_back(part);
+  }
+  return true;
+}
+
+
+inline bool CheckCertNames(
+    const std::vector<std::string>& host_parts,
+    const std::string& name,
+    bool use_wildcard = true) {
+
+  if (name.length() == 0)
+    return false;
+
+  std::vector<std::string> name_parts;
+  if (!SplitHostname(name.c_str(), &name_parts))
+    return false;
+
+  if (name_parts.size() != host_parts.size())
+    return false;
+
+  for (size_t n = host_parts.size() - 1; n > 0; --n) {
+    if (host_parts[n] != name_parts[n])
+      return false;
+  }
+
+  if (name_parts[0].find("*") == std::string::npos ||
+      name_parts[0].find("xn--") != std::string::npos) {
+    return host_parts[0] == name_parts[0];
+  }
+
+  if (!use_wildcard)
+    return false;
+
+  std::vector<std::string> sub_parts;
+  SplitHostname(name_parts[0].c_str(), &sub_parts, '*');
+
+  if (sub_parts.size() > 2)
+    return false;
+
+  if (name_parts.size() <= 2)
+    return false;
+
+  std::string prefix;
+  std::string suffix;
+  if (sub_parts.size() == 2) {
+    prefix = sub_parts[0];
+    suffix = sub_parts[1];
+  } else {
+    prefix = "";
+    suffix = sub_parts[0];
+  }
+
+  if (prefix.length() + suffix.length() > host_parts[0].length())
+    return false;
+
+  if (host_parts[0].compare(0, prefix.length(), prefix))
+    return false;
+
+  if (host_parts[0].compare(
+          host_parts[0].length() - suffix.length(),
+          suffix.length(), suffix)) {
+    return false;
+  }
+
+  return true;
+}
+
+inline int VerifyHostnameIdentity(
+    const char* hostname,
+    std::string& cert_cn,
+    std::unordered_multimap<std::string,std::string>& altnames) {
+
+  int err = X509_V_ERR_HOSTNAME_MISMATCH;
+
+  // 1. If the hostname is an IP address (v4 or v6), the certificate is valid
+  //    if and only if there is an 'IP Address:' alt name specifying the same
+  //    IP address. The IP address must be canonicalized to ensure a proper
+  //    check. It's possible that the X509_check_ip_asc covers this. If so,
+  //    we can remove this check.
+
+  if (SocketAddress::numeric_host(hostname)) {
+    auto ips = altnames.equal_range("ip");
+    for (auto ip = ips.first; ip != ips.second; ++ip) {
+      if (ip->second.compare(hostname) == 0) {
+        // Success!
+        return 0;
+      }
+    }
+    // No match, and since the hostname is an IP address, skip any
+    // further checks
+    return err;
+  }
+
+  auto dns_names = altnames.equal_range("dns");
+  auto uri_names = altnames.equal_range("uri");
+
+  size_t dns_count = std::distance(dns_names.first, dns_names.second);
+  size_t uri_count = std::distance(uri_names.first, uri_names.second);
+
+  std::vector<std::string> host_parts;
+  SplitHostname(hostname, &host_parts);
+
+  // 2. If there no 'DNS:' or 'URI:' Alt names, if the certificate has a
+  //    Subject, then we need to extract the CN field from the Subject. and
+  //    check that the hostname matches the CN, taking into consideration
+  //    the possibility of a wildcard in the CN. If there is a match, congrats,
+  //    we have a valid certificate. Return and be happy.
+
+  if (dns_count == 0 && uri_count == 0) {
+    if (cert_cn.length() > 0 && CheckCertNames(host_parts, cert_cn))
+        return 0;
+    // No match, and since there are no dns or uri entries, return
+    return err;
+  }
+
+  // 3. If, however, there are 'DNS:' and 'URI:' Alt names, things become more
+  //    complicated. Essentially, we need to iterate through each 'DNS:' and
+  //    'URI:' Alt name to find one that matches. The 'DNS:' Alt names are
+  //    relatively simple but may include wildcards. The 'URI:' Alt names
+  //    require the name to be parsed as a URL, then extract the hostname from
+  //    the URL, which is then checked against the hostname. If you find a
+  //    match, yay! Return and be happy. (Note, it's possible that the 'DNS:'
+  //    check in this step is redundant to the X509_check_host check. If so,
+  //    we can simplify by removing those checks here.)
+
+  // First, let's check dns names
+  for (auto name = dns_names.first; name != dns_names.second; ++name) {
+    if (name->first.length() > 0 &&
+        CheckCertNames(host_parts, name->second)) {
+      return 0;
+    }
+  }
+
+  // Then, check uri names
+  for (auto name = uri_names.first; name != uri_names.second; ++name) {
+    if (name->first.length() > 0 &&
+        CheckCertNames(host_parts, name->second, false)) {
+      return 0;
+    }
+  }
+
+  // 4. Failing all of the previous checks, we assume the certificate is
+  //    invalid for an unspecified reason.
+  return err;
+
+}
+
+inline int VerifyHostnameIdentity(SSL* ssl, const char* hostname) {
+  int err = X509_V_ERR_HOSTNAME_MISMATCH;
+  crypto::X509Pointer cert(SSL_get_peer_certificate(ssl));
+  if (!cert)
+    return err;
+
+  // There are several pieces of information we need from the cert at this point
+  // 1. The Subject (if it exists)
+  // 2. The collection of Alt Names (if it exists)
+  //
+  // The certificate may have many Alt Names. We only care about the ones that
+  // are prefixed with 'DNS:', 'URI:', or 'IP Address:'. We might check
+  // additional ones later but we'll start with these.
+  //
+  // Ideally, we'd be able to *just* use OpenSSL's built in name checking for
+  // this (SSL_set1_host and X509_check_host) but it does not appear to do
+  // checking on URI or IP Address Alt names, which is unfortunate. We need
+  // both of those to retain compatibility with the peer identity verification
+  // Node.js already does elsewhere. At the very least, we'll use
+  // X509_check_host here first as a first step. If it is successful, awesome,
+  // there's nothing else for us to do. Return and be happy!
+  if (X509_check_host(
+          cert.get(),
+          hostname,
+          strlen(hostname),
+          X509_CHECK_FLAG_ALWAYS_CHECK_SUBJECT |
+          X509_CHECK_FLAG_MULTI_LABEL_WILDCARDS |
+          X509_CHECK_FLAG_SINGLE_LABEL_SUBDOMAINS,
+          nullptr) > 0) {
+    return 0;
+  }
+
+  if (X509_check_ip_asc(
+          cert.get(),
+          hostname,
+          X509_CHECK_FLAG_ALWAYS_CHECK_SUBJECT) > 0) {
+    return 0;
+  }
+
+  // If we've made it this far, then we have to perform a more manual check
+
+  // First, grab the Subject Alt Name Extension
+  std::unordered_multimap<std::string,std::string> altnames;
+  GetCertificateAltNames(cert.get(), &altnames);
+
+  return VerifyHostnameIdentity(
+      hostname,
+      GetCertificateCN(cert.get()),
+      altnames);
+}
+
+inline const char* X509ErrorCode(int err) {
+  const char* code = "UNSPECIFIED";
+#define CASE_X509_ERR(CODE) case X509_V_ERR_##CODE: code = #CODE; break;
+  switch (err) {
+    CASE_X509_ERR(UNABLE_TO_GET_ISSUER_CERT)
+    CASE_X509_ERR(UNABLE_TO_GET_CRL)
+    CASE_X509_ERR(UNABLE_TO_DECRYPT_CERT_SIGNATURE)
+    CASE_X509_ERR(UNABLE_TO_DECRYPT_CRL_SIGNATURE)
+    CASE_X509_ERR(UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY)
+    CASE_X509_ERR(CERT_SIGNATURE_FAILURE)
+    CASE_X509_ERR(CRL_SIGNATURE_FAILURE)
+    CASE_X509_ERR(CERT_NOT_YET_VALID)
+    CASE_X509_ERR(CERT_HAS_EXPIRED)
+    CASE_X509_ERR(CRL_NOT_YET_VALID)
+    CASE_X509_ERR(CRL_HAS_EXPIRED)
+    CASE_X509_ERR(ERROR_IN_CERT_NOT_BEFORE_FIELD)
+    CASE_X509_ERR(ERROR_IN_CERT_NOT_AFTER_FIELD)
+    CASE_X509_ERR(ERROR_IN_CRL_LAST_UPDATE_FIELD)
+    CASE_X509_ERR(ERROR_IN_CRL_NEXT_UPDATE_FIELD)
+    CASE_X509_ERR(OUT_OF_MEM)
+    CASE_X509_ERR(DEPTH_ZERO_SELF_SIGNED_CERT)
+    CASE_X509_ERR(SELF_SIGNED_CERT_IN_CHAIN)
+    CASE_X509_ERR(UNABLE_TO_GET_ISSUER_CERT_LOCALLY)
+    CASE_X509_ERR(UNABLE_TO_VERIFY_LEAF_SIGNATURE)
+    CASE_X509_ERR(CERT_CHAIN_TOO_LONG)
+    CASE_X509_ERR(CERT_REVOKED)
+    CASE_X509_ERR(INVALID_CA)
+    CASE_X509_ERR(PATH_LENGTH_EXCEEDED)
+    CASE_X509_ERR(INVALID_PURPOSE)
+    CASE_X509_ERR(CERT_UNTRUSTED)
+    CASE_X509_ERR(CERT_REJECTED)
+    CASE_X509_ERR(HOSTNAME_MISMATCH)
+  }
+#undef CASE_X509_ERR
+  return code;
+}
 
 }  // namespace quic
 }  // namespace node

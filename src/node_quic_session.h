@@ -246,6 +246,7 @@ class QuicSession : public AsyncWrap,
       int name,
       const uint8_t* secret,
       size_t secretlen) = 0;
+  virtual int OnTLSStatus() = 0;
   virtual int Receive(
       ngtcp2_pkt_hd* hd,
       ssize_t nread,
@@ -259,7 +260,7 @@ class QuicSession : public AsyncWrap,
   virtual int TLSHandshake_Complete() = 0;
   virtual int TLSHandshake_Initial() = 0;
   virtual int TLSRead() = 0;
-  virtual int OnTLSStatus() = 0;
+  virtual int VerifyPeerIdentity(const char* hostname) = 0;
 
   static void SetupTokenContext(
       CryptoContext* context);
@@ -860,6 +861,8 @@ class QuicServerSession : public QuicSession {
       crypto::SecureContext* context,
       v8::Local<v8::Value> ocsp_response) override;
 
+  int VerifyPeerIdentity(const char* hostname) override;
+
   const ngtcp2_cid* rcid() const;
   ngtcp2_cid* pscid();
 
@@ -1014,6 +1017,8 @@ class QuicClientSession : public QuicSession {
   int SetSession(
       v8::Local<v8::Value> buffer);
 
+  int VerifyPeerIdentity(const char* hostname) override;
+
   void MemoryInfo(MemoryTracker* tracker) const override {}
 
   SET_MEMORY_INFO_NAME(QuicClientSession)
@@ -1074,7 +1079,7 @@ class QuicClientSession : public QuicSession {
   void SetLocalCryptoLevel(ngtcp2_crypto_level level) override;
 
   bool resumption_;
-  const char* hostname_;
+  std::string hostname_;
   uint32_t port_;
 
   MaybeStackBuffer<char> transportParams_;

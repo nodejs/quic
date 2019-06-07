@@ -22,7 +22,7 @@ const fs = require('fs');
 const fixtures = require('../common/fixtures');
 const key = fixtures.readKey('agent1-key.pem', 'binary');
 const cert = fixtures.readKey('agent1-cert.pem', 'binary');
-const ca = fixtures.readKey('fake-startcom-root-cert.pem', 'binary');
+const ca = fixtures.readKey('ca1-cert.pem', 'binary');
 const { debuglog } = require('util');
 const debug = debuglog('test');
 
@@ -34,7 +34,7 @@ let client;
 const server = createSocket({ type: 'udp4', port: 0 });
 
 const unidata = ['I wonder if it worked.', 'test'];
-const kServerName = 'test';
+const kServerName = 'agent2';  // Intentionally the wrong servername
 const kALPN = 'zzz';  // ALPN can be overriden to whatever we want
 
 
@@ -130,6 +130,11 @@ server.on('session', common.mustCall((session) => {
     assert.strictEqual(session.alpnProtocol, alpn);
     assert.strictEqual(session.getPeerCertificate().subject.CN, 'agent1');
 
+    debug('QuicServerSession client is %sauthenticated',
+          session.authenticated ? '' : 'not ');
+    assert(session.authenticated);
+    assert.strictEqual(session.authenticationError, undefined);
+
     const uni = session.openStream({ halfOpen: true });
     uni.write(unidata[0]);
     uni.end(unidata[1]);
@@ -220,6 +225,16 @@ server.on('ready', common.mustCall(() => {
     assert.strictEqual(req.alpnProtocol, kALPN);
     assert(req.ephemeralKeyInfo);
     assert(req.getPeerCertificate());
+
+    // The server's identity won't be valid because the requested
+    // SNI hostname does not match the certificate used.
+    debug('QuicClientSession server is %sauthenticated',
+          req.authenicated ? '' : 'not ');
+    assert(!req.authenicated);
+    common.expectsError(() => { throw req.authenticationError; }, {
+      code: 'ERR_QUIC_VERIFY_HOSTNAME_MISMATCH',
+      message: 'Hostname mismatch'
+    })
 
     {
       const {
