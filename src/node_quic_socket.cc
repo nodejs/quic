@@ -105,8 +105,7 @@ QuicSocket::~QuicSocket() {
         "  Packets Received: %llu\n"
         "  Packets Sent: %llu\n"
         "  Server Sessions: %llu\n"
-        "  Client Sessions: %llu\n"
-        "  Retransmit Count: %llu",
+        "  Client Sessions: %llu\n",
         now - socket_stats_.created_at,
         socket_stats_.bound_at > 0 ? now - socket_stats_.bound_at : 0,
         socket_stats_.listen_at > 0 ? now - socket_stats_.listen_at : 0,
@@ -115,11 +114,11 @@ QuicSocket::~QuicSocket() {
         socket_stats_.packets_received,
         socket_stats_.packets_sent,
         socket_stats_.server_sessions,
-        socket_stats_.client_sessions,
-        socket_stats_.retransmit_count);
+        socket_stats_.client_sessions);
 }
 
 void QuicSocket::MemoryInfo(MemoryTracker* tracker) const {
+  // TODO(@jasnell): Implement memory tracking information
 }
 
 void QuicSocket::AddSession(
@@ -127,6 +126,10 @@ void QuicSocket::AddSession(
     std::shared_ptr<QuicSession> session) {
   sessions_[cid->ToStr()] = session;
   IncrementSocketAddressCounter(**session->GetRemoteAddress());
+  if (session->IsServer())
+    IncrementSocketStat(1, &socket_stats_, &socket_stats::server_sessions);
+  else
+    IncrementSocketStat(1, &socket_stats_, &socket_stats::client_sessions);
 }
 
 void QuicSocket::AssociateCID(
@@ -297,7 +300,6 @@ void QuicSocket::Receive(
         // TODO(@jasnell): Should this be fatal for the QuicSocket?
         return;
       }
-      IncrementSocketStat(1, &socket_stats_, &socket_stats::server_sessions);
     } else {
       session_it = sessions_.find((*scid_it).second);
       session = (*session_it).second;

@@ -211,12 +211,8 @@ class QuicSocket : public HandleWrap {
     // The total number of QuicClientSessions that have been
     // associated with this QuicSocket instance.
     uint64_t client_sessions;
-
-    // The total number of times packets have had to be
-    // retransmitted by this QuicSocket instance.
-    uint64_t retransmit_count;
   };
-  socket_stats socket_stats_{0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+  socket_stats socket_stats_{0, 0, 0, 0, 0, 0, 0, 0, 0};
 
   AliasedBigUint64Array stats_buffer_;
 

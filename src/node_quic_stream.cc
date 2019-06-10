@@ -93,7 +93,7 @@ QuicStream::QuicStream(
     data_rx_rate_(1, std::numeric_limits<int64_t>::max()),
     data_rx_size_(1, NGTCP2_MAX_PKT_SIZE),
     data_rx_ack_(1, std::numeric_limits<int64_t>::max()),
-    data_rx_acksize_(1, NGTCP2_MAX_PKT_SIZE);
+    data_rx_acksize_(1, NGTCP2_MAX_PKT_SIZE),
     stats_buffer_(
       session->env()->isolate(),
       sizeof(stream_stats_) / sizeof(uint64_t),

@@ -165,7 +165,7 @@ server.on('session', common.mustCall((session) => {
       code,
       family
     } = session.closeCode;
-    debug(`Server sesion closed with code ${code} (family: ${family})`);
+    debug(`Server session closed with code ${code} (family: ${family})`);
     assert.strictEqual(code, NGTCP2_NO_ERROR);
     assert.strictEqual(family, QUIC_ERROR_APPLICATION);
   }));
@@ -195,7 +195,18 @@ server.on('ready', common.mustCall(() => {
     requestOCSP: true,
   });
 
-  client.on('close', () => debug('Client closing'));
+  client.on('close', () => {
+    debug('Client closing. Duration', client.duration);
+    debug('  Bound duration',
+          client.boundDuration);
+    debug('  Bytes Sent/Received: %d/%d',
+        client.bytesSent,
+        client.bytesReceived);
+    debug('  Packets Sent/Received: %d/%d',
+        client.packetsSent,
+        client.packetsReceived);
+    debug('  Sessions:', client.clientSessions);
+  });
 
   assert.strictEqual(req.servername, kServerName);
 
@@ -286,11 +297,24 @@ server.on('ready', common.mustCall(() => {
       code,
       family
     } = req.closeCode;
-    debug(`Client sesion closed with code ${code} (family: ${family})`);
+    debug(`Client session closed with code ${code} (family: ${family})`);
     assert.strictEqual(code, NGTCP2_NO_ERROR);
     assert.strictEqual(family, QUIC_ERROR_APPLICATION);
   }));
 }));
 
 server.on('listening', common.mustCall());
-server.on('close', () => debug('Server closing'));
+server.on('close', () => {
+  debug('Server closing. Duration', server.duration);
+  debug('  Bound duration',
+        server.boundDuration);
+  debug('  Listen duration',
+        server.listenDuration);
+  debug('  Bytes Sent/Received: %d/%d',
+        server.bytesSent,
+        server.bytesReceived);
+  debug('  Packets Sent/Received: %d/%d',
+        server.packetsSent,
+        server.packetsReceived);
+  debug('  Sessions:', server.serverSessions);
+});
