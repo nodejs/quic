@@ -3182,6 +3182,9 @@ int QuicClientSession::HandleError() {
   return 0;
 }
 
+// Transmits either a protocol or application connection
+// close to the peer. The choice of which is send is
+// based on the current value of last_error_.
 bool QuicClientSession::SendConnectionClose() {
   CHECK(!IsDestroyed());
   StartIdleTimer(-1);
@@ -3256,7 +3259,12 @@ int QuicClientSession::Receive(
   IncrementStat(nread, &session_stats_, &session_stats::bytes_received);
 
   // It's possible for the remote address to change from one
-  // packet to the next
+  // packet to the next so we have to look at the addr on
+  // every packet.
+  // TODO(@jasnell): Currently, this requires us to memcopy on
+  // every packet, which is expensive. It would be ideal to have
+  // a cheap/easy way of detecting if there is a change and only
+  // copy when necessary.
   remote_address_.Copy(addr);
   QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
 
@@ -3278,6 +3286,8 @@ int QuicClientSession::Receive(
   return 0;
 }
 
+// A HelloRetry will effectively restart the TLS handshake process
+// by generating new initial crypto material.
 int QuicClientSession::ReceiveRetry() {
   CHECK(!IsDestroyed());
   Debug(this, "Received retry");
@@ -3311,6 +3321,12 @@ int QuicClientSession::ExtendMaxStreamsBidi(
   return ExtendMaxStreams(true, max_streams);
 }
 
+// Removes the QuicClientSession from the current socket. This is
+// done with when the client session is being destroyed or being
+// migrated to another QuicSocket. It is important to keep in mind
+// that the QuicSocket uses a shared_ptr for the QuicClientSession.
+// If the session is removed and there are no other references held,
+// the client session object will be destroyed automatically.
 void QuicClientSession::RemoveFromSocket() {
   std::vector<ngtcp2_cid> cids(ngtcp2_conn_get_num_scid(connection_));
   ngtcp2_conn_get_scid(connection_, cids.data());
@@ -3358,7 +3374,7 @@ int QuicClientSession::SendPendingData(bool retransmit) {
   }
 
   if (!retransmit) {
-    // For each stream, send any pending data
+    // For each stream, send any pending data.
     for (auto stream : streams_)
       RETURN_RET_IF_FAIL(SendStreamData(stream.second), 0);
   }
@@ -3403,6 +3419,9 @@ int QuicClientSession::TLSHandshake_Initial() {
   return 0;
 }
 
+// The TLS handshake kicks off when the QuicClientSession is created.
+// The very first step is to setup the initial crypto context on the
+// client side by creating the initial keying material.
 int QuicClientSession::SetupInitialCryptoContext() {
   CHECK(!IsDestroyed());
 
@@ -3427,6 +3446,9 @@ int QuicClientSession::SetupInitialCryptoContext() {
   return 0;
 }
 
+// When resuming a client session, the serialized transport parameters from
+// the prior session must be provided. This is set during construction
+// of the QuicClientSession object.
 int QuicClientSession::SetEarlyTransportParams(Local<Value> buffer) {
   ArrayBufferViewContents<uint8_t> sbuf(buffer.As<ArrayBufferView>());
   ngtcp2_transport_params params;
@@ -3437,6 +3459,9 @@ int QuicClientSession::SetEarlyTransportParams(Local<Value> buffer) {
   return 0;
 }
 
+// When resuming a client session, the serialized session ticket from
+// the prior session must be provided. This is set during construction
+// of the QuicClientSession object.
 int QuicClientSession::SetSession(Local<Value> buffer) {
   ArrayBufferViewContents<unsigned char> sbuf(buffer.As<ArrayBufferView>());
   const unsigned char* p = sbuf.data();
@@ -3446,9 +3471,6 @@ int QuicClientSession::SetSession(Local<Value> buffer) {
   return 0;
 }
 
-// TODO(@jasnell): QUIC requires clients to verify the identity of the
-// server. We will allow relaxing of that requirement on a selective basis
-// but a warning will be emitted
 int QuicClientSession::VerifyPeerIdentity(const char* hostname) {
   // First, check that the certificate is signed by an entity the client
   // trusts (as configured in the secure context). If not, return early.
@@ -3457,6 +3479,9 @@ int QuicClientSession::VerifyPeerIdentity(const char* hostname) {
     return err;
 
   // Second, check that the hostname matches the cert subject/altnames
+  // TODO(@jasnell): This check is a QUIC requirement. However, for
+  // debugging purposes, we should allow it to be turned off via config.
+  // When turned off, a process warning should be emitted.
   return VerifyHostnameIdentity(
       ssl(),
       hostname != nullptr ? hostname : hostname_.c_str());
