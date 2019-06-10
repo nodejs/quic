@@ -1421,27 +1421,52 @@ int QuicSession::ReceiveStreamData(
     int fin,
     const uint8_t* data,
     size_t datalen) {
-  // TODO(@jasnell): Check datalen to guard against Slow Send DOS attack. A
-  // malicious sender may transmit very small packets very slowly to force
-  // us to keep a stream open for longer.
+  // QUIC does not permit zero-length stream packets if
+  // fin is not set. ngtcp2 prevents these from coming
+  // through but just in case of regression in that impl,
+  // let's double check and simply ignore such packets
+  // so we do not commit any resources.
+  if (UNLIKELY(fin == 0 && datalen == 0))
+    return 0;
+
   CHECK(!IsDestroyed());
   HandleScope scope(env()->isolate());
-  Local<Context> context = env()->context();
-  Context::Scope context_scope(context);
+  Context::Scope context_scope(env()->context());
 
   QuicStream* stream = FindStream(stream_id);
   if (stream == nullptr) {
+    // Shutdown the stream explicitly if the session is being closed.
     if (IsClosing()) {
       return ngtcp2_conn_shutdown_stream(
           connection_,
           stream_id,
           NGTCP2_ERR_CLOSING);
     }
+    // One potential DOS attack vector is to send a bunch of
+    // empty stream frames to commit resources. Check that
+    // here. Essentially, we only want to create a new stream
+    // if the datalen is greater than 0, otherwise, we ignore
+    // the packet.
+    if (datalen == 0)
+      return 0;
+
+    // TODO(@jasnell): One bad behavior we need to watch out
+    // for here is a malicious client opening a large number
+    // of streams objects. There need to be strict limits
+    // placed on the number of streams that can be opened
+    // concurrently (which is already handled in the configuration
+    // settings). We need to verify that ngtcp2 implements
+    // appropriate checks for the existing limit per session,
+    // and we need to make sure there are additional checks
+    // implemented in case of distributed DOS type attacks.
     stream = CreateStream(stream_id);
   }
   CHECK_NOT_NULL(stream);
   stream->ReceiveData(fin, data, datalen);
 
+  // This extends the flow control window for the entire session
+  // but not for the individual Stream. Stream flow control is
+  // only expanded as data is read on the JavaScript side.
   ngtcp2_conn_extend_max_offset(connection_, datalen);
 
   return 0;

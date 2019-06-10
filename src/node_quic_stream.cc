@@ -12,6 +12,7 @@
 #include "v8.h"
 
 #include <algorithm>
+#include <limits>
 
 namespace node {
 
@@ -63,6 +64,10 @@ QuicStream::QuicStream(
     flags_(QUICSTREAM_FLAG_INITIAL),
     available_outbound_length_(0),
     inbound_consumed_data_while_paused_(0),
+    data_rx_rate_(1, std::numeric_limits<int64_t>::max()),
+    data_rx_size_(1, NGTCP2_MAX_PKT_SIZE),
+    data_rx_ack_(1, std::numeric_limits<int64_t>::max()),
+    data_rx_acksize_(1, NGTCP2_MAX_PKT_SIZE);
     stats_buffer_(
       session->env()->isolate(),
       sizeof(stream_stats_) / sizeof(uint64_t),
@@ -251,7 +256,24 @@ void QuicStream::AckedDataOffset(uint64_t offset,  size_t datalen) {
   if (IsDestroyed())
     return;
   streambuf_.Consume(datalen);
-  stream_stats_.stream_acked_at = uv_hrtime();
+
+  uint64_t now = uv_hrtime();
+  if (stream_stats_.stream_acked_at > 0)
+    data_rx_ack_.Record(now - stream_stats_.stream_acked_at);
+  stream_stats_.stream_acked_at = now;
+  data_rx_acksize_.Record(datalen);
+
+  // TODO(@jasnell): One possible DOS attack vector is a peer that sends
+  // very small acks at a rate that is just fast enough not to run afoul
+  // of the idle timeout. This can force a QuicStream to hold on to
+  // buffered data for long periods of time, eating up resources. The
+  // data_rx_ack_ and data_rx_acksize_ histograms can be used to detect
+  // this behavior. There are, however, legitimate reasons why a peer
+  // would send small acks at a slow rate, so there are no blanket rules
+  // that we can apply to this. We need to determine a reasonable default
+  // that can be overriden by user code. When the activity falls below
+  // that threshold, we will emit an event that the user code can respond
+  // to.
 }
 
 size_t QuicStream::DrainInto(
@@ -306,9 +328,19 @@ void QuicStream::ReceiveData(int fin, const uint8_t* data, size_t datalen) {
   if (!IsReadable())
     return;
 
-  IncrementStat(datalen, &stream_stats_, &stream_stats::bytes_received);
-
-  stream_stats_.stream_received_at = uv_hrtime();
+  IncrementStats(datalen);
+  // TODO(@jasnell): IncrementStats will update the data_rx_rate_ and
+  // data_rx_size_ histograms. These will provide data necessary to
+  // detect and prevent Slow Send DOS attacks specifically by allowing
+  // us to see if a connection is sending very small chunks of data
+  // at very slow speeds. It is important to emphasize, however, that
+  // slow send rates may be perfectly legitimate so we cannot simply take
+  // blanket action when slow rates are detected. Nor can we reliably
+  // define what a slow rate even is! Will will need to determine some
+  // reasonable default and allow user code to change the default as well
+  // as determine what action to take. The current strategy will be to
+  // trigger an event on the stream when data transfer rates are likely
+  // to be considered too slow.
 
   while (datalen > 0) {
     uv_buf_t buf = EmitAlloc(datalen);
@@ -338,6 +370,16 @@ void QuicStream::ReceiveData(int fin, const uint8_t* data, size_t datalen) {
     SetReadClose();
     EmitRead(UV_EOF);
   }
+}
+
+inline void QuicStream::IncrementStats(uint64_t datalen) {
+  IncrementStat(datalen, &stream_stats_, &stream_stats::bytes_received);
+
+  uint64_t now = uv_hrtime();
+  if (stream_stats_.stream_received_at > 0)
+    data_rx_rate_.Record(stream_stats_.stream_received_at - now);
+  stream_stats_.stream_received_at = now;
+  data_rx_size_.Record(datalen);
 }
 
 QuicStream* QuicStream::New(

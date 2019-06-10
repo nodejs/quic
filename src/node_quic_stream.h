@@ -6,6 +6,7 @@
 #include "memory_tracker-inl.h"
 #include "async_wrap.h"
 #include "env.h"
+#include "histogram-inl.h"
 #include "node_quic_util.h"
 #include "stream_base-inl.h"
 #include "v8.h"
@@ -228,6 +229,8 @@ class QuicStream : public AsyncWrap,
     flags_ &= QUICSTREAM_FLAG_READ_PAUSED;
   }
 
+  inline void IncrementStats(uint64_t datalen);
+
   QuicStreamListener stream_listener_;
   QuicSession* session_;
   uint64_t stream_id_;
@@ -255,6 +258,32 @@ class QuicStream : public AsyncWrap,
     uint64_t bytes_sent;
   };
   stream_stats stream_stats_{0, 0, 0, 0, 0, 0, 0};
+
+  // data_rx_rate_ measures the elapsed time between data packets
+  // for this stream. When used in combination with the data_rx_size,
+  // this can be used to track the overall data throughput over time
+  // for the stream. Specifically, this can be used to detect
+  // potentially bad acting peers that are sending many small chunks
+  // of data too slowly in an attempt to DOS the peer.
+  Histogram data_rx_rate_;
+
+  // data_rx_size_ measures the size of data packets for this stream
+  // over time. When used in combination with the data_rx_rate_,
+  // this can be used to track the overall data throughout over time
+  // for the stream. Specifically, this can be used to detect
+  // potentially bad acting peers that are sending many small chunks
+  // of data too slowly in an attempt to DOS the peer.
+  Histogram data_rx_size_;
+
+  // data_rx_ack_ measures the elapsed time between data acks
+  // for this stream. This data can be used to detect peers that are
+  // generally taking too long to acknowledge sent stream data.
+  Histogram data_rx_ack_;
+
+  // data_rx_acksize_ measures the size of data acks for this stream.
+  // This data can be used to detect potentially malicious peers that
+  // are acknoledging data at too slow of a rate.
+  Histogram data_rx_acksize_;
 
   AliasedBigUint64Array stats_buffer_;
 };
