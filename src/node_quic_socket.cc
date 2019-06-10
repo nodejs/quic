@@ -555,6 +555,9 @@ int QuicSocket::SendPacket(
     SocketAddress* dest,
     std::shared_ptr<QuicBuffer> buffer,
     QuicBuffer::drain_from drain_from) {
+  char* host;
+  SocketAddress::GetAddress(**dest, &host);
+  Debug(this, "Sending to %s at port %d", host, SocketAddress::GetPort(**dest));
   return (new QuicSocket::SendWrap(this, dest, buffer, drain_from))->Send();
 }
 
@@ -562,6 +565,9 @@ int QuicSocket::SendPacket(
     const sockaddr* dest,
     std::shared_ptr<QuicBuffer> buffer,
     QuicBuffer::drain_from drain_from) {
+  char* host;
+  SocketAddress::GetAddress(dest, &host);
+  Debug(this, "Sending to %s at port %d", host, SocketAddress::GetPort(dest));
   return (new QuicSocket::SendWrap(this, dest, buffer, drain_from))->Send();
 }
 
