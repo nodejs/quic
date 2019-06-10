@@ -33,6 +33,14 @@ const { createSocket } = require('quic');
 let client;
 const server = createSocket({ type: 'udp4', port: 0 });
 
+// Diagnostic Packet Loss allows packets to be randomly ignored
+// to simulate network packet loss conditions. This is not a
+// feature that should be turned on in production unless the
+// intent is to simulate loss to gather performance data or
+// debug issues. The values for rx and tx must be between
+// 0.0 and 1.0 (inclusive)
+server.setDiagnosticPacketLoss({ rx: 0.0, tx: 0.00 });
+
 const unidata = ['I wonder if it worked.', 'test'];
 const kServerName = 'agent2';  // Intentionally the wrong servername
 const kALPN = 'zzz';  // ALPN can be overriden to whatever we want

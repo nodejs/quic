@@ -97,6 +97,7 @@ class QuicSocket : public HandleWrap {
   void SetServerSessionSettings(
       ngtcp2_cid* pscid,
       ngtcp2_settings* settings);
+  void SetDiagnosticPacketLoss(double rx = 0.0, double tx = 0.0);
 
   crypto::SecureContext* GetServerSecureContext() {
     return server_secure_context_;
@@ -151,6 +152,10 @@ class QuicSocket : public HandleWrap {
   friend void node::GetSockOrPeerName(
       const v8::FunctionCallbackInfo<v8::Value>&);
 
+  // Returns true if, and only if, diagnostic packet loss is enabled
+  // and the current packet should be artificially considered lost.
+  bool IsDiagnosticPacketLoss(double prob);
+
   // Fields and TypeDefs
   typedef uv_udp_t HandleType;
 
@@ -169,6 +174,10 @@ class QuicSocket : public HandleWrap {
   CryptoContext token_crypto_ctx_;
   std::array<uint8_t, TOKEN_SECRETLEN> token_secret_;
   uint64_t retry_token_expiration_;
+
+  // Used to specify diagnostic packet loss probabilities
+  double rx_loss_;
+  double tx_loss_;
 
   // Counts the number of active connections per remote
   // address. A custom std::hash specialization for

@@ -11,6 +11,8 @@
 #include "uv.h"
 #include "v8.h"
 
+#include <random>
+
 namespace node {
 
 using crypto::EntropySource;
@@ -73,6 +75,8 @@ QuicSocket::QuicSocket(
     request_cert_(false),
     token_crypto_ctx_{},
     retry_token_expiration_(retry_token_expiration),
+    rx_loss_(0.0),
+    tx_loss_(0.0),
     stats_buffer_(
       env->isolate(),
       sizeof(socket_stats_) / sizeof(uint64_t),
@@ -256,6 +260,14 @@ void QuicSocket::Receive(
     const struct sockaddr* addr,
     unsigned int flags) {
   Debug(this, "Receiving %d bytes from the UDP socket.", nread);
+
+  // When diagnostic packet loss is enabled, the packet will be randomly
+  // dropped based on the rx_loss_ probability.
+  if (UNLIKELY(IsDiagnosticPacketLoss(rx_loss_))) {
+    Debug(this, "Simulating received packet loss.");
+    return;
+  }
+
   IncrementSocketStat(nread, &socket_stats_, &socket_stats::bytes_received);
   ngtcp2_pkt_hd hd;
   int err;
@@ -608,6 +620,11 @@ void QuicSocket::SendWrapStack::OnSend(
 int QuicSocket::SendWrapStack::Send() {
   if (buf_.length() == 0)
     return 0;
+  if (socket_->IsDiagnosticPacketLoss(socket_->tx_loss_)) {
+    Debug(socket_, "Simulating transmitted packet loss.");
+    OnSend(&req_, 0);
+    return 0;
+  }
   uv_buf_t buf =
       uv_buf_init(
           reinterpret_cast<char*>(*buf_),
@@ -683,6 +700,15 @@ int QuicSocket::SendWrap::Send() {
     Debug(socket_, "Sending %llu bytes (%d buffers of %d remaining)",
           length_, len, buf->ReadRemaining());
     if (len == 0) return 0;
+    if (socket_->IsDiagnosticPacketLoss(socket_->tx_loss_)) {
+      Debug(socket_, "Simulating transmitted packet loss.");
+      // Advance even though we're not actually sending. This
+      // way the local code continues to act as if a write
+      // occurred.
+      buf->SeekHead(len);
+      OnSend(&req_, 0);
+      return 0;
+    }
     int err = uv_udp_send(
         &req_,
         &socket_->handle_,
@@ -696,6 +722,18 @@ int QuicSocket::SendWrap::Send() {
     return err;
   }
   return -1;
+}
+
+bool QuicSocket::IsDiagnosticPacketLoss(double prob) {
+  if (LIKELY(prob == 0.0)) return false;
+  unsigned char c = 255;
+  EntropySource(&c, 1);
+  return (static_cast<double>(c) / 255) < prob;
+}
+
+void QuicSocket::SetDiagnosticPacketLoss(double rx, double tx) {
+  rx_loss_ = rx;
+  tx_loss_ = tx;
 }
 
 // JavaScript API
@@ -718,6 +756,29 @@ void NewQuicSocket(const FunctionCallbackInfo<Value>& args) {
       validate_address,
       retry_token_expiration,
       max_connections_per_host);
+}
+
+// Enabling diagnostic packet loss enables a mode where the QuicSocket
+// instance will randomly ignore received packets in order to simulate
+// packet loss. This is not an API that should be enabled in production
+// but is useful when debugging and diagnosing performance issues.
+// Diagnostic packet loss is enabled by setting either the tx or rx
+// arguments to a value between 0.0 and 1.0. Setting both values to 0.0
+// disables the mechanism.
+void QuicSocketSetDiagnosticPacketLoss(
+  const FunctionCallbackInfo<Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  QuicSocket* socket;
+  ASSIGN_OR_RETURN_UNWRAP(&socket, args.Holder());
+  double rx = 0.0f;
+  double tx = 0.0f;
+  args[0]->NumberValue(env->context()).To(&rx);
+  args[1]->NumberValue(env->context()).To(&tx);
+  CHECK_GE(rx, 0.0f);
+  CHECK_GE(tx, 0.0f);
+  CHECK_LE(rx, 1.0f);
+  CHECK_LE(tx, 1.0f);
+  socket->SetDiagnosticPacketLoss(rx, tx);
 }
 
 void QuicSocketAddMembership(const FunctionCallbackInfo<Value>& args) {
@@ -919,6 +980,9 @@ void QuicSocket::Initialize(
   env->SetProtoMethod(socket,
                       "receiveStop",
                       QuicSocketReceiveStop);
+  env->SetProtoMethod(socket,
+                      "setDiagnosticPacketLoss",
+                      QuicSocketSetDiagnosticPacketLoss);
   env->SetProtoMethod(socket,
                       "setTTL",
                       QuicSocketSetTTL);
