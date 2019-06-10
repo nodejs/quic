@@ -53,6 +53,32 @@ void QuicStreamListener::OnStreamRead(ssize_t nread, const uv_buf_t& buf) {
   stream->CallJSOnreadMethod(nread, buffer.ToArrayBuffer());
 }
 
+// TODO(@jasnell): QUIC streams have an absolute maximum amount
+// of data that can be transmitted over the lifetime of the stream.
+// We need to be performing two checks in here:
+//
+// 1. On transmit, we should ensure that a QuicStream instance
+//    never attempts to send more than the maximum data limit.
+//    This can be done by implementing a countdown that causes
+//    the stream to emit an error if the threshold is exceeded.
+//
+// 2. On receive, we need to ensure that ngtcp2 catches the limit.
+//    When a stream reaches it's maximum, the stream will need to
+//    be destroyed. We should differentiate streams that end because
+//    there is no more data vs. streams that end because it has
+//    reached the transmit limit.
+//
+
+// TODO(@jasnell): Currently, streams max exist for the entire
+// lifespan of the QuicSession, which can be indefinite so long as
+// there is activity. It would make sense to implement an optional
+// maximum lifespan for individual stream instances, or to implement
+// a timeout that is independent of the session. This timeout would
+// best be implemented at the JavaScript side, but can be implemented
+// in the C++ code also. We should differentiate streams that end
+// because it reached the maximum time vs. streams that end because
+// it has no more data.
+
 QuicStream::QuicStream(
     QuicSession* session,
     Local<Object> wrap,
