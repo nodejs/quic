@@ -1672,6 +1672,7 @@ int QuicSession::SendPacket() {
   }
   Debug(this, "There are %llu bytes in txbuf_ to send", txbuf_->Length());
   session_stats_.session_sent_at = uv_hrtime();
+  ScheduleMonitor();
   return Socket()->SendPacket(&remote_address_, txbuf_);
 }
 
@@ -2619,7 +2620,6 @@ bool QuicServerSession::SendConnectionClose() {
           reinterpret_cast<char*>(conn_closebuf_.data),
           conn_closebuf_.size);
   sendbuf_.Push(&buf, 1);
-  ScheduleMonitor();
   return SendPacket() == 0;
 }
 
@@ -2638,12 +2638,8 @@ int QuicServerSession::SendPendingData() {
   RETURN_RET_IF_FAIL(SendPacket(), 0);
 
   // If the handshake is not yet complete, perform the handshake
-  if (!IsHandshakeCompleted()) {
-    err = DoHandshake(nullptr, nullptr, 0);
-    if (err == 0)
-      ScheduleMonitor();
-    return err;
-  }
+  if (!IsHandshakeCompleted())
+    return DoHandshake(nullptr, nullptr, 0);
 
   if (ngtcp2_conn_get_max_data_left(connection_) == 0)
     return 0;
@@ -2661,7 +2657,6 @@ int QuicServerSession::SendPendingData() {
     return 0;
   }
 
-  ScheduleMonitor();
   return 0;
 }
 
@@ -3217,7 +3212,6 @@ bool QuicClientSession::SendConnectionClose() {
   }
   data.Realloc(nwrite);
   sendbuf_.Push(std::move(data));
-  ScheduleMonitor();
   return SendPacket() == 0;
 }
 
@@ -3359,16 +3353,10 @@ int QuicClientSession::SendPendingData() {
   // First, send any data currently sitting in the sendbuf_ buffer
   RETURN_RET_IF_FAIL(SendPacket(), 0);
 
-  int err;
+  if (!IsHandshakeCompleted())
+    return DoHandshake(nullptr, nullptr, 0);
 
-  if (!IsHandshakeCompleted()) {
-    Debug(this, "Handshake is not completed");
-    err = DoHandshake(nullptr, nullptr, 0);
-    ScheduleMonitor();
-    return err;
-  }
-
-  err = WritePackets();
+  int err = WritePackets();
   if (err < 0) {
     SetLastError(QUIC_ERROR_SESSION, err);
     HandleError();
@@ -3378,7 +3366,6 @@ int QuicClientSession::SendPendingData() {
   for (auto stream : streams_)
     RETURN_RET_IF_FAIL(SendStreamData(stream.second), 0);
 
-  ScheduleMonitor();
   return 0;
 }
 
