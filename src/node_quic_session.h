@@ -17,6 +17,7 @@
 #include <ngtcp2/ngtcp2.h>
 #include <openssl/ssl.h>
 
+#include <functional>
 #include <map>
 #include <vector>
 
@@ -239,7 +240,7 @@ class QuicSession : public AsyncWrap,
       const uint8_t* data,
       size_t datalen) = 0;
   virtual int HandleError() = 0;
-  virtual bool MaybeTimeout() = 0;
+  virtual void MaybeTimeout() = 0;
   virtual void OnIdleTimeout() = 0;
   virtual int OnKey(
       int name,
@@ -310,13 +311,10 @@ class QuicSession : public AsyncWrap,
   int PathValidation(
     const ngtcp2_path* path,
     ngtcp2_path_validation_result res);
-  inline void ScheduleMonitor();
+  inline void ScheduleRetransmit();
   inline int SendPacket();
   inline void SetHandshakeCompleted();
-  void StartIdleTimer(
-      uint64_t idle_timeout);
-  void StopIdleTimer();
-  void StopRetransmitTimer();
+
   int StreamOpen(
       int64_t stream_id);
   int TLSHandshake();
@@ -648,7 +646,10 @@ class QuicSession : public AsyncWrap,
   ngtcp2_conn* connection_;
   SocketAddress remote_address_;
   size_t max_pktlen_;
-  uv_timer_t* idle_timer_;
+
+  Timer* idle_;
+  Timer* retransmit_;
+
   QuicSocket* socket_;
   CryptoContext hs_crypto_ctx_;
   CryptoContext crypto_ctx_;
@@ -684,9 +685,6 @@ class QuicSession : public AsyncWrap,
   std::map<int64_t, QuicStream*> streams_;
 
   AliasedFloat64Array state_;
-
-  bool monitor_scheduled_;
-  bool allow_retransmit_;
 
   // The amount of memory allocated by ngtcp2 internals
   uint64_t current_ngtcp2_memory_;
@@ -810,7 +808,7 @@ class QuicSession : public AsyncWrap,
       if (session_->IsDestroyed())
         return;
       session_->SendPendingData();
-      session_->StartIdleTimer(-1);
+      session_->idle_->Update();
     }
    private:
     QuicSession* session_;
@@ -852,7 +850,7 @@ class QuicServerSession : public QuicSession {
   void OnClientHelloDone() override;
   int OnTLSStatus() override;
 
-  bool MaybeTimeout() override;
+  void MaybeTimeout() override;
 
   int OnCert() override;
   void OnCertDone(
@@ -1000,7 +998,7 @@ class QuicClientSession : public QuicSession {
 
   void AddToSocket(QuicSocket* socket) override;
 
-  bool MaybeTimeout() override;
+  void MaybeTimeout() override;
 
   int OnTLSStatus() override;
 

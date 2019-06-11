@@ -30,7 +30,6 @@
 #include "inspector_profiler.h"
 #endif
 #if HAVE_OPENSSL
-#include "node_quic_monitor.h"
 #include "node_quic_state.h"
 #endif
 #include "handle_wrap.h"
@@ -1068,8 +1067,6 @@ class Environment : public MemoryRetainer {
 #if HAVE_OPENSSL
   inline QuicState* quic_state() const;
   inline void set_quic_state(std::unique_ptr<QuicState> state);
-
-  inline quic::QuicMonitor* quic_monitor();
 #endif
 
   inline bool debug_enabled(DebugCategory category) const;
@@ -1394,7 +1391,6 @@ class Environment : public MemoryRetainer {
   std::unique_ptr<http2::Http2State> http2_state_;
 #if HAVE_OPENSSL
   std::unique_ptr<QuicState> quic_state_;
-  std::unique_ptr<quic::QuicMonitor> quic_monitor_;
 #endif
 
   bool debug_enabled_[static_cast<int>(DebugCategory::CATEGORY_COUNT)] = {0};

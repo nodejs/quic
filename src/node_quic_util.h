@@ -408,6 +408,89 @@ struct CryptoToken {
   CryptoToken() : keylen(key.size()), ivlen(iv.size()) {}
 };
 
+  // Simple timer wrapper that is used to implement the internals
+  // for idle and retransmission timeouts. Call Update to start or
+  // reset the timer; Stop to halt the timer.
+class Timer {
+ public:
+  inline explicit Timer(
+      Environment* env,
+      std::function<void(void* data)> fn,
+      void* data = nullptr) :
+      stopped_(false),
+      env_(env),
+      fn_(fn),
+      data_(data) {
+    uv_timer_init(env_->event_loop(), &timer_);
+    timer_.data = this;
+    env->AddCleanupHook(CleanupHook, this);
+  }
+
+  inline ~Timer() = default;
+
+  // Stops the timer with the side effect of the timer no longer being usable.
+  // It will be cleaned up and the Timer object will be destroyed.
+  inline void Stop() {
+    if (stopped_)
+      return;
+    stopped_ = true;
+    env_->RemoveCleanupHook(CleanupHook, this);
+
+    if (timer_.data == this) {
+      timer_.data = nullptr;
+      uv_timer_stop(&timer_);
+      env_->CloseHandle(
+          reinterpret_cast<uv_handle_t*>(&timer_),
+          TimerClosedCb);
+    }
+  }
+
+  // If the timer is not currently active, interval must be either 0 or greater.
+  // If the timer is already active, interval is ignored.
+  inline void Update(uint64_t interval = -1) {
+    if (stopped_)
+      return;
+    if (interval >= 0 ||
+        !uv_is_active(reinterpret_cast<uv_handle_t*>(&timer_))) {
+      CHECK_GE(interval, 0);
+      uv_timer_start(&timer_, OnTimeout, interval, 0);
+      uv_unref(reinterpret_cast<uv_handle_t*>(&timer_));
+    } else {
+      uv_timer_again(&timer_);
+    }
+  }
+
+private:
+  inline void OnTimeout() {
+    fn_(data_);
+  }
+
+  static void OnTimeout(uv_timer_t* timer) {
+    Timer* t =
+        ContainerOf(
+            &Timer::timer_,
+            reinterpret_cast<uv_timer_t*>(timer));
+    t->OnTimeout();
+  }
+
+  static void CleanupHook(void* data) {
+    static_cast<Timer*>(data)->Stop();
+  }
+
+  static void TimerClosedCb(uv_handle_t* timer) {
+    std::unique_ptr<Timer> t(
+        ContainerOf(
+            &Timer::timer_,
+            reinterpret_cast<uv_timer_t*>(timer)));
+  }
+
+  bool stopped_;
+  Environment* env_;
+  std::function<void(void* data)> fn_;
+  uv_timer_t timer_;
+  void* data_;
+};
+
 }  // namespace quic
 }  // namespace node
 

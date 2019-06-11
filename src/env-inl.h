@@ -615,12 +615,6 @@ inline void Environment::set_quic_state(std::unique_ptr<QuicState> buffer) {
   CHECK(!quic_state_);  // Should be set only once.
   quic_state_ = std::move(buffer);
 }
-
-inline quic::QuicMonitor* Environment::quic_monitor() {
-  if (!quic_monitor_)
-    quic_monitor_ = std::make_unique<quic::QuicMonitor>(this);
-  return quic_monitor_.get();
-}
 #endif
 
 bool Environment::debug_enabled(DebugCategory category) const {

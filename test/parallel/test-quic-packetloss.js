@@ -98,7 +98,6 @@ server.on('ready', common.mustCall(() => {
     stream.resume();
     stream.setEncoding('utf8');
     stream.on('data', (chunk) => data += chunk);
-    stream.on('data', console.log);
     stream.on('end', () => {
       console.log(data, data.length);
       assert.strictEqual(data, kData);

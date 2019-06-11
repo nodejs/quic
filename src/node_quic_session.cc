@@ -151,6 +151,7 @@ void QuicSessionConfig::ToSettings(ngtcp2_settings* settings,
   }
 }
 
+
 void QuicSession::CheckAllocatedSize(size_t previous_size) {
   CHECK_GE(current_ngtcp2_memory_, previous_size);
 }
@@ -733,15 +734,12 @@ QuicSession::QuicSession(
     initial_(true),
     connection_(nullptr),
     max_pktlen_(0),
-    idle_timer_(nullptr),
     socket_(socket),
     hs_crypto_ctx_{},
     crypto_ctx_{},
     txbuf_(new QuicBuffer()),
     ncread_(0),
     state_(env()->isolate(), IDX_QUIC_SESSION_STATE_COUNT),
-    monitor_scheduled_(false),
-    allow_retransmit_(false),
     current_ngtcp2_memory_(0),
     max_cid_len_(NGTCP2_MAX_CIDLEN),
     min_cid_len_(NGTCP2_MIN_CIDLEN),
@@ -757,6 +755,18 @@ QuicSession::QuicSession(
   ssl_.reset(SSL_new(ctx->ctx_.get()));
   SSL_CTX_set_keylog_callback(ctx->ctx_.get(), OnKeylog);
   CHECK(ssl_);
+
+  idle_ = new Timer(env(), [](void* data) {
+    QuicSession* session = static_cast<QuicSession*>(data);
+    session->OnIdleTimeout();
+  }, this);
+
+  retransmit_ = new Timer(env(), [](void* data) {
+    QuicSession* session = static_cast<QuicSession*>(data);
+    Debug(session, "Data loss timer fired");
+    printf("%s: retransmit fired\n", session->IsServer()?"S":"C");
+    session->MaybeTimeout();
+  }, this);
 
   USE(wrap->DefineOwnProperty(
       env()->context(),
@@ -780,7 +790,6 @@ QuicSession::~QuicSession() {
   CHECK(destroyed_);
   ssl_.reset();
   ngtcp2_conn_del(connection_);
-
   uint64_t now = uv_hrtime();
   Debug(this,
         "Quic%sSession destroyed.\n"
@@ -947,8 +956,11 @@ void QuicSession::Destroy() {
   // the session is removed from the socket.
   std::shared_ptr<QuicSession> ptr = shared_from_this();
 
-  StopIdleTimer();
-  StopRetransmitTimer();
+  idle_->Stop();
+  idle_ = nullptr;
+
+  retransmit_->Stop();
+  retransmit_ = nullptr;
 
   sendbuf_.Cancel();
   handshake_.Cancel();
@@ -1658,8 +1670,7 @@ int QuicSession::SendStreamData(
   return 0;
 }
 
-// Transmits the current contents of the internal sendbuf_ to the peer
-// By default, SendPacket will drain from the txbuf_ read head.
+// Transmits the current contents of the internal sendbuf_ to the peer.
 int QuicSession::SendPacket() {
   CHECK(!IsDestroyed());
   // Move the contents of sendbuf_ to the tail of txbuf_ and reset sendbuf_
@@ -1672,7 +1683,7 @@ int QuicSession::SendPacket() {
   }
   Debug(this, "There are %llu bytes in txbuf_ to send", txbuf_->Length());
   session_stats_.session_sent_at = uv_hrtime();
-  ScheduleMonitor();
+  ScheduleRetransmit();
   return Socket()->SendPacket(&remote_address_, txbuf_);
 }
 
@@ -1683,14 +1694,12 @@ int QuicSession::SetRemoteTransportParams(ngtcp2_transport_params* params) {
   return ngtcp2_conn_set_remote_transport_params(connection_, params);
 }
 
-inline void QuicSession::ScheduleMonitor() {
-  // If the monitor is already scheduled, do nothing
-  if (monitor_scheduled_)
-    return;
-  Debug(this, "Scheduling retransmission monitor");
-  monitor_scheduled_ = true;
-  allow_retransmit_ = true;
-  env()->quic_monitor()->Schedule(shared_from_this());
+// Schedule the retransmission timer
+inline void QuicSession::ScheduleRetransmit() {
+  uint64_t expiry = ngtcp2_conn_get_expiry(connection_);
+  uint64_t now = uv_hrtime();
+  uint64_t interval = expiry < now ? 1 : (expiry - now);
+  retransmit_->Update(interval);
 }
 
 // Notifies the ngtcp2_conn that the TLS handshake is completed.
@@ -1744,7 +1753,7 @@ int QuicSession::StreamOpen(int64_t stream_id) {
   if (stream != nullptr)
     return NGTCP2_STREAM_STATE_ERROR;
   CreateStream(stream_id);
-  StartIdleTimer(-1);
+  idle_->Update();
   return 0;
 }
 
@@ -1793,48 +1802,6 @@ int QuicSession::OpenBidirectionalStream(int64_t* stream_id) {
 
 QuicSocket* QuicSession::Socket() {
   return socket_;
-}
-
-// Starts the idle timer. This timer monitors for activity on the session
-// and shuts the session down if there is no activity by the timeout. If
-// the timer has already been started, it is restarted.
-// TODO(@jasnell): Using multiple timers for every QuicSession is going
-// to be expensive. We need to refactor the approach here so that we are
-// not overly reliant on multiple timer instances.
-void QuicSession::StartIdleTimer(
-    uint64_t idle_timeout) {
-  if (idle_timer_ == nullptr) {
-    idle_timer_ = new uv_timer_t();
-    uv_timer_init(env()->event_loop(), idle_timer_);
-    idle_timer_->data = this;
-  }
-
-  if (!uv_is_active(reinterpret_cast<uv_handle_t*>(idle_timer_))) {
-    Debug(this, "Scheduling idle timer on interval %llu", idle_timeout);
-    uv_timer_start(idle_timer_,
-                   OnIdleTimeout,
-                   idle_timeout,
-                   idle_timeout);
-    uv_unref(reinterpret_cast<uv_handle_t*>(idle_timer_));
-  } else {
-    uv_timer_again(idle_timer_);
-  }
-}
-
-// Stops the idle timer and frees the timer handle.
-void QuicSession::StopIdleTimer() {
-  CHECK(!IsDestroyed());
-  if (idle_timer_ == nullptr)
-    return;
-  Debug(this, "Halting idle timer.");
-  uv_timer_stop(idle_timer_);
-  auto cb = [](uv_timer_t* handle) { delete handle; };
-  env()->CloseHandle(idle_timer_, cb);
-  idle_timer_ = nullptr;
-}
-
-void QuicSession::StopRetransmitTimer() {
-  allow_retransmit_ = false;
 }
 
 // Called by ngtcp2 when a stream has been closed. If the stream does
@@ -2438,7 +2405,7 @@ void QuicServerSession::Init(
   if (ocid)
     ngtcp2_conn_set_retry_ocid(connection_, ocid);
 
-  StartIdleTimer(settings.idle_timeout);
+  idle_->Update(settings.idle_timeout);
 }
 
 bool QuicServerSession::IsDraining() {
@@ -2489,26 +2456,14 @@ void QuicServerSession::OnIdleTimeout() {
   StartDrainingPeriod();
 }
 
-bool QuicServerSession::MaybeTimeout() {
-  CHECK(monitor_scheduled_);
+void QuicServerSession::MaybeTimeout() {
   uint64_t now = uv_hrtime();
-
-  uint64_t expiry = static_cast<uint64_t>(ngtcp2_conn_get_expiry(connection_));
-  if (expiry > now) return false;
-
-  if (allow_retransmit_ &&
-      ngtcp2_conn_loss_detection_expiry(connection_) <= now) {
-    Debug(this, "Retransmitting due to loss detection");
+  if (ngtcp2_conn_loss_detection_expiry(connection_) <= now) {
     CHECK_EQ(ngtcp2_conn_on_loss_detection_timer(connection_, uv_hrtime()), 0);
     SendPendingData();
   } else if (ngtcp2_conn_ack_delay_expiry(connection_) <= now) {
-    Debug(this, "Transmitting due to ack delay");
     SendPendingData();
   }
-
-  allow_retransmit_ = false;
-  monitor_scheduled_ = false;
-  return true;
 }
 
 int QuicServerSession::Receive(
@@ -2577,6 +2532,7 @@ int QuicServerSession::Receive(
   }
 
   session_stats_.session_received_at = now;
+  SendPendingData();
   return 0;
 }
 
@@ -2610,7 +2566,7 @@ void QuicServerSession::RemoveFromSocket() {
 bool QuicServerSession::SendConnectionClose() {
   CHECK(!IsDestroyed());
   RETURN_IF_FAIL(StartClosingPeriod(), 0, false);
-  StartIdleTimer(-1);
+  idle_->Update();
   CHECK_GT(conn_closebuf_.size, 0);
   sendbuf_.Cancel();
   // We don't use std::move here because we do not want
@@ -2665,8 +2621,8 @@ int QuicServerSession::StartClosingPeriod() {
   if (IsInClosingPeriod())
     return 0;
 
-  StopRetransmitTimer();
-  StartIdleTimer(-1);
+  retransmit_->Stop();
+  idle_->Update();
 
   sendbuf_.Cancel();
 
@@ -2694,9 +2650,9 @@ void QuicServerSession::StartDrainingPeriod() {
   CHECK(!IsDestroyed());
   if (draining_)
     return;
-  StopRetransmitTimer();
+  retransmit_->Stop();
   draining_ = true;
-  StartIdleTimer(-1);
+  idle_->Update();
 }
 
 int QuicServerSession::TLSHandshake_Initial() {
@@ -2900,7 +2856,7 @@ int QuicClientSession::Init(
   if (session_ticket->IsArrayBufferView())
     RETURN_RET_IF_FAIL(SetSession(session_ticket), 0);
 
-  StartIdleTimer(settings.idle_timeout);
+  idle_->Update(settings.idle_timeout);
   return 0;
 }
 
@@ -3194,7 +3150,7 @@ int QuicClientSession::HandleError() {
 // based on the current value of last_error_.
 bool QuicClientSession::SendConnectionClose() {
   CHECK(!IsDestroyed());
-  StartIdleTimer(-1);
+  idle_->Update();
   MallocedBuffer<uint8_t> data(max_pktlen_);
   sendbuf_.Cancel();
   QuicError error = GetLastError();
@@ -3222,14 +3178,9 @@ void QuicClientSession::OnIdleTimeout() {
   Close();
 }
 
-bool QuicClientSession::MaybeTimeout() {
-  CHECK(monitor_scheduled_);
+void QuicClientSession::MaybeTimeout() {
   int err;
   uint64_t now = uv_hrtime();
-
-  uint64_t expiry = static_cast<uint64_t>(ngtcp2_conn_get_expiry(connection_));
-  if (expiry > now) return false;
-
   if (ngtcp2_conn_loss_detection_expiry(connection_) <= now) {
     CHECK_EQ(ngtcp2_conn_on_loss_detection_timer(connection_, now), 0);
     Debug(this, "Retransmitting due to loss detection");
@@ -3246,9 +3197,6 @@ bool QuicClientSession::MaybeTimeout() {
       HandleError();
     }
   }
-  allow_retransmit_ = false;
-  monitor_scheduled_ = false;
-  return true;
 }
 
 int QuicClientSession::Receive(
@@ -3287,6 +3235,7 @@ int QuicClientSession::Receive(
   }
 
   session_stats_.session_received_at = now;
+  SendPendingData();
   return 0;
 }
 
