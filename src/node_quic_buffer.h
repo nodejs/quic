@@ -129,11 +129,6 @@ struct quic_buffer_chunk : public MemoryRetainer {
 // Will append the contents of buf1 to buf2, then reset buf1
 class QuicBuffer : public MemoryRetainer {
  public:
-  enum drain_from {
-    DRAIN_FROM_ROOT,
-    DRAIN_FROM_HEAD
-  };
-
   inline QuicBuffer() :
     head_(nullptr),
     tail_(nullptr),
@@ -280,21 +275,15 @@ class QuicBuffer : public MemoryRetainer {
     return count_;
   }
 
-  // Drain the remaining buffers into the given vector. There are
-  // two possible starting positions: root_ or head_.
-  // DRAIN_FROM_ROOT is used as part of the retransmission
-  // mechanism. DRAIN_FROM_HEAD, the default, is used when
-  // transmitting packets for the first time.
-  //
+  // Drain the remaining buffers into the given vector.
   // The function will return the number of positions the
   // read head_ can be advanced.
   inline size_t DrainInto(
       std::vector<uv_buf_t>* list,
-      drain_from from = DRAIN_FROM_HEAD,
       uint64_t* length = nullptr) {
     size_t len = 0;
     bool seen_head = false;
-    quic_buffer_chunk* pos = (from == DRAIN_FROM_ROOT ? root_.get() : head_);
+    quic_buffer_chunk* pos = head_;
     if (pos == nullptr)
       return 0;
     if (length != nullptr) *length = 0;
@@ -312,11 +301,10 @@ class QuicBuffer : public MemoryRetainer {
 
   inline size_t DrainInto(
       std::vector<ngtcp2_vec>* list,
-      drain_from from = DRAIN_FROM_HEAD,
       uint64_t* length = nullptr) {
     size_t len = 0;
     bool seen_head = false;
-    quic_buffer_chunk* pos = (from == DRAIN_FROM_ROOT ? root_.get() : head_);
+    quic_buffer_chunk* pos = head_;
     if (pos == nullptr)
       return 0;
     if (length != nullptr) *length = 0;

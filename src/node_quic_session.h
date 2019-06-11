@@ -190,15 +190,14 @@ class QuicSession : public AsyncWrap,
       int64_t stream_id,
       int fin,
       const uint8_t* data,
-      size_t datalen);
+      size_t datalen,
+      uint64_t offset);
   void RemoveStream(
       int64_t stream_id);
   int Send0RTTStreamData(
-      QuicStream* stream,
-      QuicBuffer::drain_from from = QuicBuffer::DRAIN_FROM_HEAD);
+      QuicStream* stream);
   int SendStreamData(
-      QuicStream* stream,
-      QuicBuffer::drain_from from = QuicBuffer::DRAIN_FROM_HEAD);
+      QuicStream* stream);
   inline void SetLastError(
       QuicError error = { QUIC_ERROR_SESSION, NGTCP2_NO_ERROR }) {
     last_error_ = error;
@@ -255,8 +254,7 @@ class QuicSession : public AsyncWrap,
       unsigned int flags) = 0;
   virtual void RemoveFromSocket() = 0;
   virtual bool SendConnectionClose() = 0;
-  virtual int SendPendingData(
-      bool retransmit = false) = 0;
+  virtual int SendPendingData() = 0;
   virtual int TLSHandshake_Complete() = 0;
   virtual int TLSHandshake_Initial() = 0;
   virtual int TLSRead() = 0;
@@ -313,7 +311,7 @@ class QuicSession : public AsyncWrap,
     const ngtcp2_path* path,
     ngtcp2_path_validation_result res);
   inline void ScheduleMonitor();
-  inline int SendPacket(bool retransmit = false);
+  inline int SendPacket();
   inline void SetHandshakeCompleted();
   void StartIdleTimer(
       uint64_t idle_timeout);
@@ -904,8 +902,7 @@ class QuicServerSession : public QuicSession {
       unsigned int flags) override;
   void RemoveFromSocket() override;
   bool SendConnectionClose() override;
-  int SendPendingData(
-      bool retransmit = false) override;
+  int SendPendingData() override;
   int TLSHandshake_Complete() override;
   int TLSHandshake_Initial() override;
   int TLSRead() override;
@@ -1052,8 +1049,7 @@ class QuicClientSession : public QuicSession {
     ngtcp2_addr* dest,
     const ngtcp2_preferred_addr* paddr) override;
   bool SendConnectionClose() override;
-  int SendPendingData(
-      bool retransmit = false) override;
+  int SendPendingData() override;
   int Start() override;
   void StoreRemoteTransportParams(
       ngtcp2_transport_params* params) override;

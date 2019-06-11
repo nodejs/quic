@@ -567,22 +567,20 @@ int QuicSocket::DropMembership(const char* address, const char* iface) {
 
 int QuicSocket::SendPacket(
     SocketAddress* dest,
-    std::shared_ptr<QuicBuffer> buffer,
-    QuicBuffer::drain_from drain_from) {
+    std::shared_ptr<QuicBuffer> buffer) {
   char* host;
   SocketAddress::GetAddress(**dest, &host);
   Debug(this, "Sending to %s at port %d", host, SocketAddress::GetPort(**dest));
-  return (new QuicSocket::SendWrap(this, dest, buffer, drain_from))->Send();
+  return (new QuicSocket::SendWrap(this, dest, buffer))->Send();
 }
 
 int QuicSocket::SendPacket(
     const sockaddr* dest,
-    std::shared_ptr<QuicBuffer> buffer,
-    QuicBuffer::drain_from drain_from) {
+    std::shared_ptr<QuicBuffer> buffer) {
   char* host;
   SocketAddress::GetAddress(dest, &host);
   Debug(this, "Sending to %s at port %d", host, SocketAddress::GetPort(dest));
-  return (new QuicSocket::SendWrap(this, dest, buffer, drain_from))->Send();
+  return (new QuicSocket::SendWrap(this, dest, buffer))->Send();
 }
 
 void QuicSocket::SetServerSessionSettings(
@@ -642,11 +640,9 @@ int QuicSocket::SendWrapStack::Send() {
 QuicSocket::SendWrap::SendWrap(
     QuicSocket* socket,
     SocketAddress* dest,
-    std::shared_ptr<QuicBuffer> buffer,
-    QuicBuffer::drain_from drain_from) :
+    std::shared_ptr<QuicBuffer> buffer) :
     socket_(socket),
-    buffer_(buffer),
-    drain_from_(drain_from) {
+    buffer_(buffer) {
   req_.data = this;
   address_.Copy(dest);
 }
@@ -654,11 +650,9 @@ QuicSocket::SendWrap::SendWrap(
 QuicSocket::SendWrap::SendWrap(
     QuicSocket* socket,
     const sockaddr* dest,
-    std::shared_ptr<QuicBuffer> buffer,
-    QuicBuffer::drain_from drain_from) :
+    std::shared_ptr<QuicBuffer> buffer) :
     socket_(socket),
-    buffer_(buffer),
-    drain_from_(drain_from) {
+    buffer_(buffer) {
   req_.data = this;
   address_.Copy(dest);
 }
@@ -696,7 +690,7 @@ void QuicSocket::SendWrap::OnSend(
 int QuicSocket::SendWrap::Send() {
   std::vector<uv_buf_t> vec;
   if (auto buf = buffer_.lock()) {
-    size_t len = buf->DrainInto(&vec, drain_from_, &length_);
+    size_t len = buf->DrainInto(&vec, &length_);
     Debug(socket_, "Sending %llu bytes (%d buffers of %d remaining)",
           length_, len, buf->ReadRemaining());
     if (len == 0) return 0;

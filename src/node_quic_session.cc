@@ -434,7 +434,7 @@ int QuicSession::OnReceiveStreamData(
     void* stream_user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
   RETURN_IF_FAIL(
-      session->ReceiveStreamData(stream_id, fin, data, datalen), 0,
+      session->ReceiveStreamData(stream_id, fin, data, datalen, offset), 0,
       NGTCP2_ERR_CALLBACK_FAILURE);
   return 0;
 }
@@ -874,12 +874,6 @@ void QuicSession::AckedStreamDataOffset(
   QuicStream* stream = FindStream(stream_id);
   if (stream != nullptr)
     stream->AckedDataOffset(offset, datalen);
-  // TODO(@jasnell): Check session_stats_.session_sent_at to see how long
-  // stream data ack has taken. We will want to guard against Slow Ack as a
-  // DOS vector.
-  // Likewise, we need to guard against malicious acknowledgements that trickle
-  // in acknowledgements with small datalen values. These could cause the
-  // session to retain memory and/or send extraneous retransmissions.
 }
 
 // Add the given QuicStream to this QuicSession's collection of streams. All
@@ -1420,7 +1414,8 @@ int QuicSession::ReceiveStreamData(
     int64_t stream_id,
     int fin,
     const uint8_t* data,
-    size_t datalen) {
+    size_t datalen,
+    uint64_t offset) {
   // QUIC does not permit zero-length stream packets if
   // fin is not set. ngtcp2 prevents these from coming
   // through but just in case of regression in that impl,
@@ -1462,7 +1457,7 @@ int QuicSession::ReceiveStreamData(
     stream = CreateStream(stream_id);
   }
   CHECK_NOT_NULL(stream);
-  stream->ReceiveData(fin, data, datalen);
+  stream->ReceiveData(fin, data, datalen, offset);
 
   // This extends the flow control window for the entire session
   // but not for the individual Stream. Stream flow control is
@@ -1543,13 +1538,12 @@ int Empty(const ngtcp2_vec* vec, size_t cnt) {
 
 // Sends 0RTT stream data.
 int QuicSession::Send0RTTStreamData(
-    QuicStream* stream,
-    QuicBuffer::drain_from from) {
+    QuicStream* stream) {
   CHECK(!IsDestroyed());
   ssize_t ndatalen = 0;
 
   std::vector<ngtcp2_vec> vec;
-  size_t count = stream->DrainInto(&vec, from);
+  size_t count = stream->DrainInto(&vec);
   size_t c = count;
   ngtcp2_vec* v = vec.data();
 
@@ -1604,14 +1598,13 @@ int QuicSession::Send0RTTStreamData(
 
 // Sends buffered stream data.
 int QuicSession::SendStreamData(
-    QuicStream* stream,
-    QuicBuffer::drain_from from) {
+    QuicStream* stream) {
   CHECK(!IsDestroyed());
   ssize_t ndatalen = 0;
   QuicPathStorage path;
 
   std::vector<ngtcp2_vec> vec;
-  size_t count = stream->DrainInto(&vec, from);
+  size_t count = stream->DrainInto(&vec);
 
   size_t c = vec.size();
   ngtcp2_vec* v = vec.data();
@@ -1666,9 +1659,8 @@ int QuicSession::SendStreamData(
 }
 
 // Transmits the current contents of the internal sendbuf_ to the peer
-// By default, SendPacket will drain from the txbuf_ read head. If
-// retransmit is true, the entire contents of txbuf_ will be drained.
-int QuicSession::SendPacket(bool retransmit) {
+// By default, SendPacket will drain from the txbuf_ read head.
+int QuicSession::SendPacket() {
   CHECK(!IsDestroyed());
   // Move the contents of sendbuf_ to the tail of txbuf_ and reset sendbuf_
   if (sendbuf_.Length() > 0) {
@@ -1680,10 +1672,7 @@ int QuicSession::SendPacket(bool retransmit) {
   }
   Debug(this, "There are %llu bytes in txbuf_ to send", txbuf_->Length());
   session_stats_.session_sent_at = uv_hrtime();
-  return Socket()->SendPacket(
-      &remote_address_,
-      txbuf_,
-      retransmit ? QuicBuffer::DRAIN_FROM_ROOT : QuicBuffer::DRAIN_FROM_HEAD);
+  return Socket()->SendPacket(&remote_address_, txbuf_);
 }
 
 // Set the transport parameters received from the remote peer
@@ -2509,8 +2498,8 @@ bool QuicServerSession::MaybeTimeout() {
   if (allow_retransmit_ &&
       ngtcp2_conn_loss_detection_expiry(connection_) <= now) {
     Debug(this, "Retransmitting due to loss detection");
-    CHECK_EQ(ngtcp2_conn_on_loss_detection_timer(connection_, now), 0);
-    SendPendingData(true);
+    CHECK_EQ(ngtcp2_conn_on_loss_detection_timer(connection_, uv_hrtime()), 0);
+    SendPendingData();
   } else if (ngtcp2_conn_ack_delay_expiry(connection_) <= now) {
     Debug(this, "Transmitting due to ack delay");
     SendPendingData();
@@ -2634,7 +2623,7 @@ bool QuicServerSession::SendConnectionClose() {
   return SendPacket() == 0;
 }
 
-int QuicServerSession::SendPendingData(bool retransmit) {
+int QuicServerSession::SendPendingData() {
   if (IsDestroyed())
     return 0;
 
@@ -2656,16 +2645,14 @@ int QuicServerSession::SendPendingData(bool retransmit) {
     return err;
   }
 
+  if (ngtcp2_conn_get_max_data_left(connection_) == 0)
+    return 0;
+
   // For every stream, transmit the stream data, returning
   // early if we're unable to send stream data for some
   // reason.
-  for (auto stream : streams_) {
-    RETURN_RET_IF_FAIL(
-        SendStreamData(
-            stream.second,
-            retransmit ?
-                QuicBuffer::DRAIN_FROM_ROOT : QuicBuffer::DRAIN_FROM_HEAD), 0);
-  }
+  for (auto stream : streams_)
+    RETURN_RET_IF_FAIL(SendStreamData(stream.second), 0);
 
   err = WritePackets();
   if (err < 0) {
@@ -3246,15 +3233,13 @@ bool QuicClientSession::MaybeTimeout() {
   int err;
   uint64_t now = uv_hrtime();
 
-  uint64_t expiry =
-    static_cast<uint64_t>(ngtcp2_conn_get_expiry(connection_));
-  if (expiry > now)
-    return false;
+  uint64_t expiry = static_cast<uint64_t>(ngtcp2_conn_get_expiry(connection_));
+  if (expiry > now) return false;
 
   if (ngtcp2_conn_loss_detection_expiry(connection_) <= now) {
     CHECK_EQ(ngtcp2_conn_on_loss_detection_timer(connection_, now), 0);
     Debug(this, "Retransmitting due to loss detection");
-    err = SendPendingData(true);
+    err = SendPendingData();
     if (err != 0) {
       SetLastError(QUIC_ERROR_SESSION, err);
       HandleError();
@@ -3366,7 +3351,7 @@ void QuicClientSession::RemoveFromSocket() {
   socket_->RemoveSession(&scid, **GetRemoteAddress());
 }
 
-int QuicClientSession::SendPendingData(bool retransmit) {
+int QuicClientSession::SendPendingData() {
   if (IsDestroyed())
     return 0;
   Debug(this, "Sending pending data for client session");
@@ -3375,15 +3360,6 @@ int QuicClientSession::SendPendingData(bool retransmit) {
   RETURN_RET_IF_FAIL(SendPacket(), 0);
 
   int err;
-  // If we're retransmitting, reset the loss detection timer
-  if (retransmit) {
-    err = ngtcp2_conn_on_loss_detection_timer(connection_, uv_hrtime());
-    if (err != 0) {
-      SetLastError(QUIC_ERROR_SESSION, err);
-      Close();
-      return -1;
-    }
-  }
 
   if (!IsHandshakeCompleted()) {
     Debug(this, "Handshake is not completed");
@@ -3398,11 +3374,9 @@ int QuicClientSession::SendPendingData(bool retransmit) {
     HandleError();
   }
 
-  if (!retransmit) {
-    // For each stream, send any pending data.
-    for (auto stream : streams_)
-      RETURN_RET_IF_FAIL(SendStreamData(stream.second), 0);
-  }
+  // For each stream, send any pending data.
+  for (auto stream : streams_)
+    RETURN_RET_IF_FAIL(SendStreamData(stream.second), 0);
 
   ScheduleMonitor();
   return 0;

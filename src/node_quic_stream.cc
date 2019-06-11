@@ -88,6 +88,7 @@ QuicStream::QuicStream(
     session_(session),
     stream_id_(stream_id),
     flags_(QUICSTREAM_FLAG_INITIAL),
+    max_offset_(0),
     available_outbound_length_(0),
     inbound_consumed_data_while_paused_(0),
     data_rx_rate_(1, std::numeric_limits<int64_t>::max()),
@@ -232,12 +233,9 @@ int QuicStream::DoWrite(
   // have to be acknowledged. If a packet is not acknowledged
   // soon enough, it is retransmitted. The exact arrangement
   // of packets being retransmitted varies over the course of
-  // the connection on many factors, so we can't simply encode
-  // the packets and resend them. Instead, we have to retain the
-  // original data and re-encode packets on each transmission
-  // attempt. This means we have to persist the data written
-  // until either an acknowledgement is received or the stream
-  // is reset and canceled.
+  // the connection on many factors. Fortunately, ngtcp2 takes
+  // care of most of the details here, we just need to retain
+  // the data until we're certain it's no longer needed.
   //
   // That said, on the JS Streams API side, we can only write
   // one batch of buffers at a time. That is, DoWrite won't be
@@ -303,9 +301,8 @@ void QuicStream::AckedDataOffset(uint64_t offset,  size_t datalen) {
 }
 
 size_t QuicStream::DrainInto(
-    std::vector<ngtcp2_vec>* vec,
-    QuicBuffer::drain_from from) {
-  return streambuf_.DrainInto(vec, from);
+    std::vector<ngtcp2_vec>* vec) {
+  return streambuf_.DrainInto(vec);
 }
 
 void QuicStream::Commit(size_t count) {
@@ -347,47 +344,61 @@ int QuicStream::ReadStop() {
 // TODO(@jasnell): We may need to be more defensive here with regards to
 // flow control to keep the buffer from growing too much. ngtcp2 may give
 // us some protection but we need to verify.
-void QuicStream::ReceiveData(int fin, const uint8_t* data, size_t datalen) {
+void QuicStream::ReceiveData(
+    int fin,
+    const uint8_t* data,
+    size_t datalen,
+    uint64_t offset) {
   Debug(this, "Receiving %d bytes of data. Final? %s. Readable? %s",
         datalen, fin ? "yes" : "no", IsReadable() ? "yes" : "no");
 
   if (!IsReadable())
     return;
 
-  IncrementStats(datalen);
-  // TODO(@jasnell): IncrementStats will update the data_rx_rate_ and
-  // data_rx_size_ histograms. These will provide data necessary to
-  // detect and prevent Slow Send DOS attacks specifically by allowing
-  // us to see if a connection is sending very small chunks of data
-  // at very slow speeds. It is important to emphasize, however, that
-  // slow send rates may be perfectly legitimate so we cannot simply take
-  // blanket action when slow rates are detected. Nor can we reliably
-  // define what a slow rate even is! Will will need to determine some
-  // reasonable default and allow user code to change the default as well
-  // as determine what action to take. The current strategy will be to
-  // trigger an event on the stream when data transfer rates are likely
-  // to be considered too slow.
+  // ngtcp2 guarantees that datalen will only be 0 if fin is set.
+  // Let's just make sure.
+  CHECK(datalen > 0 || fin == 1);
 
-  while (datalen > 0) {
-    uv_buf_t buf = EmitAlloc(datalen);
-    size_t avail = std::min(static_cast<size_t>(buf.len), datalen);
+  // ngtcp2 guarantees that offset is always greater than the previously
+  // received offset. Let's just make sure.
+  CHECK_GE(offset, max_offset_);
+  max_offset_ = offset;
 
-    // TODO(@jasnell): For now, we're allocating and copying. Once
-    // we determine if we can safely switch to a non-allocated mode
-    // like we do with http2 streams, we can make this branch more
-    // efficient by using the LIKELY optimization
-    // if (LIKELY(buf.base == nullptr))
-    if (buf.base == nullptr)
-      buf.base = reinterpret_cast<char*>(const_cast<uint8_t*>(data));
-    else
-      memcpy(buf.base, data, avail);
-    data += avail;
-    datalen -= avail;
-    EmitRead(avail, buf);
-    if (IsReadPaused())
-      inbound_consumed_data_while_paused_ += avail;
-    else
-      session_->ExtendStreamOffset(this, avail);
+  if (datalen > 0) {
+    IncrementStats(datalen);
+    // TODO(@jasnell): IncrementStats will update the data_rx_rate_ and
+    // data_rx_size_ histograms. These will provide data necessary to
+    // detect and prevent Slow Send DOS attacks specifically by allowing
+    // us to see if a connection is sending very small chunks of data
+    // at very slow speeds. It is important to emphasize, however, that
+    // slow send rates may be perfectly legitimate so we cannot simply take
+    // blanket action when slow rates are detected. Nor can we reliably
+    // define what a slow rate even is! Will will need to determine some
+    // reasonable default and allow user code to change the default as well
+    // as determine what action to take. The current strategy will be to
+    // trigger an event on the stream when data transfer rates are likely
+    // to be considered too slow.
+    while (datalen > 0) {
+      uv_buf_t buf = EmitAlloc(datalen);
+      size_t avail = std::min(static_cast<size_t>(buf.len), datalen);
+
+      // TODO(@jasnell): For now, we're allocating and copying. Once
+      // we determine if we can safely switch to a non-allocated mode
+      // like we do with http2 streams, we can make this branch more
+      // efficient by using the LIKELY optimization
+      // if (LIKELY(buf.base == nullptr))
+      if (buf.base == nullptr)
+        buf.base = reinterpret_cast<char*>(const_cast<uint8_t*>(data));
+      else
+        memcpy(buf.base, data, avail);
+      data += avail;
+      datalen -= avail;
+      EmitRead(avail, buf);
+      if (IsReadPaused())
+        inbound_consumed_data_while_paused_ += avail;
+      else
+        session_->ExtendStreamOffset(this, avail);
+    }
   }
 
   // When fin != 0, we've received that last chunk of data for this

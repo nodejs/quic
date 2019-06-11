@@ -88,12 +88,10 @@ class QuicSocket : public HandleWrap {
       int ttl);
   int SendPacket(
       SocketAddress* dest,
-      std::shared_ptr<QuicBuffer> buf,
-      QuicBuffer::drain_from drain_from = QuicBuffer::DRAIN_FROM_HEAD);
+      std::shared_ptr<QuicBuffer> buf);
   int SendPacket(
       const sockaddr* dest,
-      std::shared_ptr<QuicBuffer> buf,
-      QuicBuffer::drain_from drain_from = QuicBuffer::DRAIN_FROM_HEAD);
+      std::shared_ptr<QuicBuffer> buf);
   void SetServerSessionSettings(
       ngtcp2_cid* pscid,
       ngtcp2_settings* settings);
@@ -244,14 +242,12 @@ class QuicSocket : public HandleWrap {
     SendWrap(
         QuicSocket* socket,
         SocketAddress* dest,
-        std::shared_ptr<QuicBuffer> buffer,
-        QuicBuffer::drain_from drain_from = QuicBuffer::DRAIN_FROM_HEAD);
+        std::shared_ptr<QuicBuffer> buffer);
 
     SendWrap(
         QuicSocket* socket,
         const sockaddr* dest,
-        std::shared_ptr<QuicBuffer> buffer,
-        QuicBuffer::drain_from drain_from = QuicBuffer::DRAIN_FROM_HEAD);
+        std::shared_ptr<QuicBuffer> buffer);
 
     static void OnSend(
         uv_udp_send_t* req,
@@ -267,7 +263,6 @@ class QuicSocket : public HandleWrap {
     uv_udp_send_t req_;
     QuicSocket* socket_;
     std::weak_ptr<QuicBuffer> buffer_;
-    QuicBuffer::drain_from drain_from_;
     uint64_t length_ = 0;
     SocketAddress address_;
   };

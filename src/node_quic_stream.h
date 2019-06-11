@@ -163,7 +163,11 @@ class QuicStream : public AsyncWrap,
   inline void IncrementAvailableOutboundLength(size_t amount);
   inline void DecrementAvailableOutboundLength(size_t amount);
 
-  virtual void ReceiveData(int fin, const uint8_t* data, size_t datalen);
+  virtual void ReceiveData(
+      int fin,
+      const uint8_t* data,
+      size_t datalen,
+      uint64_t offset);
 
   // Required for StreamBase
   int ReadStart() override;
@@ -175,8 +179,7 @@ class QuicStream : public AsyncWrap,
   int DoShutdown(ShutdownWrap* req_wrap) override;
 
   size_t DrainInto(
-    std::vector<ngtcp2_vec>* vec,
-    QuicBuffer::drain_from from);
+    std::vector<ngtcp2_vec>* vec);
 
   void Commit(size_t count);
 
@@ -235,6 +238,7 @@ class QuicStream : public AsyncWrap,
   QuicSession* session_;
   uint64_t stream_id_;
   uint32_t flags_;
+  uint64_t max_offset_;
 
   QuicBuffer streambuf_;
   size_t available_outbound_length_;
