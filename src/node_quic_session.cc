@@ -243,7 +243,6 @@ void QuicSession::Close() {
 QuicStream* QuicSession::CreateStream(int64_t stream_id) {
   CHECK(!IsDestroyed());
   CHECK(!IsClosing());
-  Debug(this, "Create new stream %llu", stream_id);
   QuicStream* stream = QuicStream::New(this, stream_id);
   CHECK_NOT_NULL(stream);
   Local<Value> argv[] = {
@@ -414,7 +413,7 @@ int QuicSession::DoHandshakeReadOnce(
     const ngtcp2_path* path,
     const uint8_t* data,
     size_t datalen) {
-  if (datalen > 0) {
+  if (LIKELY(datalen > 0)) {
     RETURN_RET_IF_FAIL(
         ngtcp2_conn_read_handshake(
             connection_,
@@ -707,6 +706,7 @@ int QuicSession::ReceiveCryptoData(
 // that will be used to secure the communication.
 int QuicSession::ReceiveClientInitial(const ngtcp2_cid* dcid) {
   CHECK(!IsDestroyed());
+  CHECK(IsServer());
   Debug(this, "Receiving client initial parameters.");
 
   CryptoInitialParams params;
@@ -790,8 +790,7 @@ int QuicSession::ReceiveStreamData(
 }
 
 // Removes the given connection id from the QuicSession.
-void QuicSession::RemoveConnectionID(
-    const ngtcp2_cid* cid) {
+void QuicSession::RemoveConnectionID(const ngtcp2_cid* cid) {
   CHECK(!IsDestroyed());
   state_[IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT] =
     state_[IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT] - 1;
@@ -801,8 +800,7 @@ void QuicSession::RemoveConnectionID(
 
 // Removes the given stream from the QuicSession. All streams must
 // be removed before the QuicSession is destroyed.
-void QuicSession::RemoveStream(
-    int64_t stream_id) {
+void QuicSession::RemoveStream(int64_t stream_id) {
   CHECK(!IsDestroyed());
   Debug(this, "Removing stream %llu", stream_id);
   streams_.erase(stream_id);
@@ -883,6 +881,11 @@ int QuicSession::SendStreamData(
   ssize_t ndatalen = 0;
   QuicPathStorage path;
 
+  // If we are blocked from sending any data because of
+  // flow control, don't try.
+  if (ngtcp2_conn_get_max_data_left(connection_) == 0)
+    return 0;
+
   std::vector<ngtcp2_vec> vec;
   size_t count = stream->DrainInto(&vec);
 
@@ -896,8 +899,6 @@ int QuicSession::SendStreamData(
   if (c == 0 && stream->IsWritable())
     return WritePackets();
 
-  // Event if there's no data to write, we iterate through just in case
-  // ngtcp2 has other frames that it needs to encode.
   for (;;) {
     MallocedBuffer<uint8_t> dest(max_pktlen_);
     ssize_t nwrite =
@@ -1101,7 +1102,7 @@ void QuicSession::WriteHandshake(const uint8_t* data, size_t datalen) {
 // Write any packets current pending for the ngtcp2 connection
 int QuicSession::WritePackets() {
   QuicPathStorage path;
-  for ( ;; ) {
+  for (;;) {
     MallocedBuffer<uint8_t> data(max_pktlen_);
     ssize_t nwrite =
         ngtcp2_conn_write_pkt(
