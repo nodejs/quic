@@ -80,7 +80,7 @@ server.on('ready', common.mustCall(() => {
     debug('QuicClientSession TLS Handshake Complete');
 
     // Set for 20% received packet loss on the server
-    server.setDiagnosticPacketLoss({ rx: 0.0, tx: 0.0 });
+    server.setDiagnosticPacketLoss({ rx: 0.2 });
 
     const file = fs.createReadStream(__filename);
     const stream = req.openStream();
