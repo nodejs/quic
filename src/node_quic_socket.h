@@ -43,6 +43,8 @@ class QuicSocket : public HandleWrap {
       size_t max_connections_per_host);
   ~QuicSocket() override;
 
+  SocketAddress* GetLocalAddress() { return &local_address_; }
+
   int AddMembership(
       const char* address,
       const char* iface);
@@ -62,7 +64,6 @@ class QuicSocket : public HandleWrap {
   int DropMembership(
       const char* address,
       const char* iface);
-  SocketAddress* GetLocalAddress();
   void Listen(
       crypto::SecureContext* context,
       const sockaddr* preferred_address = nullptr,
@@ -207,6 +208,12 @@ class QuicSocket : public HandleWrap {
     // by this QuicSocket instance.
     uint64_t packets_received;
 
+    // The total number of packets ignored by this QuicSocket
+    // instance. Packets are ignored if they are invalid in
+    // some way. A high number of ignored packets could signal
+    // a buggy or malicious peer.
+    uint64_t packets_ignored;
+
     // The total number of packets successfully sent by this
     // QuicSocket instance.
     uint64_t packets_sent;
@@ -219,7 +226,7 @@ class QuicSocket : public HandleWrap {
     // associated with this QuicSocket instance.
     uint64_t client_sessions;
   };
-  socket_stats socket_stats_{0, 0, 0, 0, 0, 0, 0, 0, 0};
+  socket_stats socket_stats_{0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
   AliasedBigUint64Array stats_buffer_;
 

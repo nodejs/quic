@@ -110,6 +110,7 @@ QuicSocket::~QuicSocket() {
         "  Bytes Sent: %llu\n"
         "  Packets Received: %llu\n"
         "  Packets Sent: %llu\n"
+        "  Packets Ignored: %llu\n"
         "  Server Sessions: %llu\n"
         "  Client Sessions: %llu\n",
         now - socket_stats_.created_at,
@@ -119,6 +120,7 @@ QuicSocket::~QuicSocket() {
         socket_stats_.bytes_sent,
         socket_stats_.packets_received,
         socket_stats_.packets_sent,
+        socket_stats_.packets_ignored,
         socket_stats_.server_sessions,
         socket_stats_.client_sessions);
 }
@@ -132,10 +134,11 @@ void QuicSocket::AddSession(
     std::shared_ptr<QuicSession> session) {
   sessions_[cid->ToStr()] = session;
   IncrementSocketAddressCounter(**session->GetRemoteAddress());
-  if (session->IsServer())
-    IncrementSocketStat(1, &socket_stats_, &socket_stats::server_sessions);
-  else
-    IncrementSocketStat(1, &socket_stats_, &socket_stats::client_sessions);
+  IncrementSocketStat(
+      1, &socket_stats_,
+      session->IsServer() ?
+          &socket_stats::server_sessions :
+          &socket_stats::client_sessions);
 }
 
 void QuicSocket::AssociateCID(
@@ -183,17 +186,12 @@ int QuicSocket::Bind(
   arg = Integer::New(env()->isolate(), fd);
   MakeCallback(env()->quic_on_socket_ready_function(), 1, &arg);
   socket_stats_.bound_at = uv_hrtime();
-  Debug(this, "Bind successful.");
   return 0;
 }
 
 void QuicSocket::DisassociateCID(QuicCID* cid) {
   Debug(this, "Removing associations for cid %s", cid->ToHex().c_str());
   dcid_to_scid_.erase(cid->ToStr());
-}
-
-SocketAddress* QuicSocket::GetLocalAddress() {
-  return &local_address_;
 }
 
 void QuicSocket::Listen(
@@ -286,7 +284,7 @@ void QuicSocket::Receive(
     // likely not a QUIC packet. If this is sent by an attacker, returning
     // and doing nothing is likely best but we also might want to keep some
     // stats or record of the failure.
-    Debug(this, "Could not decode a QUIC packet header.");
+    IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
     return;
   }
 
@@ -306,6 +304,7 @@ void QuicSocket::Receive(
       Debug(this, "There is no existing session for dcid %s", dcid_hex.c_str());
       if (!server_listening_) {
         Debug(this, "Ignoring packet because socket is not listening.");
+        IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
         return;
       }
       session = ServerReceive(&dcid, &hd, nread, data, addr, flags);
@@ -324,22 +323,22 @@ void QuicSocket::Receive(
   }
 
   CHECK_NOT_NULL(session);
-  Debug(this, "Dispatching packet to session");
-  // An appropriate handler was found! Dispatch the data
   if (session->IsDestroyed()) {
-    Debug(this, "Ignoring packet because session is destroyed");
+    Debug(this, "Ignoring packet because session is destroyed!");
+    IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
     return;
   }
   err = session->Receive(&hd, nread, data, addr, flags);
   if (err != 0) {
-    Debug(this, "Ignoring unsuccessfully processed packet. Error %d", err);
+    // Packet was not successfully processed for some reason, possibly
+    // due to being malformed or malicious in some way. Ignore.
+    IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
     return;
   }
   IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_received);
 }
 
 int QuicSocket::ReceiveStart() {
-  Debug(this, "Starting to receive packets on the UDP socket.");
   int err = uv_udp_recv_start(&handle_, OnAlloc, OnRecv);
   if (err == UV_EALREADY)
     err = 0;
@@ -347,18 +346,15 @@ int QuicSocket::ReceiveStart() {
 }
 
 int QuicSocket::ReceiveStop() {
-  Debug(this, "No longer receiving packets on this UDP socket.");
   return uv_udp_recv_stop(&handle_);
 }
 
 void QuicSocket::RemoveSession(QuicCID* cid, const sockaddr* addr) {
-  Debug(this, "Removing QuicSession for cid %s.", cid->ToHex().c_str());
   sessions_.erase(cid->ToStr());
   DecrementSocketAddressCounter(addr);
 }
 
 void QuicSocket::ReportSendError(int error) {
-  Debug(this, "There was an error sending the UDP packet. Error %d", error);
   HandleScope scope(env()->isolate());
   Context::Scope context_scope(env()->context());
   Local<Value> arg = Integer::New(env()->isolate(), error);
@@ -369,8 +365,6 @@ void QuicSocket::ReportSendError(int error) {
 int QuicSocket::SendVersionNegotiation(
     const ngtcp2_pkt_hd* chd,
     const sockaddr* addr) {
-  Debug(this, "Sending version negotiation packet.");
-
   SendWrapStack* req = new SendWrapStack(this, addr, NGTCP2_MAX_PKTLEN_IPV6);
 
   std::array<uint32_t, 2> sv;
@@ -388,12 +382,9 @@ int QuicSocket::SendVersionNegotiation(
       &chd->dcid,
       sv.data(),
       sv.size());
-  if (nwrite < 0) {
-    Debug(this, "Error writing version negotiation packet. Error %d", nwrite);
+  if (nwrite < 0)
     return -1;
-  }
   req->SetLength(nwrite);
-
   return req->Send();
 }
 
@@ -454,31 +445,40 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
   Context::Scope context_scope(env()->context());
 
   if (static_cast<size_t>(nread) < MIN_INITIAL_QUIC_PKT_SIZE) {
-    Debug(this, "Ignoring initial packet that is too short");
+    // The initial packet is too short, which means it's not a valid
+    // QUIC packet. Ignore so we don't commit any further resources
+    // to handling.
+    IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
     return session;
   }
 
   int err;
   err = ngtcp2_accept(hd, data, nread);
   if (err == -1) {
-    // Ignore to prevent malicious senders from accomplishing anything bad.
-    Debug(this, "Ignoring unexpected QUIC packet.");
+    // Not a valid QUIC packet. Ignore so we don't commit any further
+    // resources to handling.
+    IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
     return session;
   }
   if (err == 1) {
-    Debug(this, "Unexpected QUIC version.");
+    // It was a QUIC packet, but it was the wrong version. Send a version
+    // negotiation in response but do nothing else.
     SendVersionNegotiation(hd, addr);
     return session;
   }
   if (GetCurrentSocketAddressCounter(addr) >= max_connections_per_host_) {
-    Debug(this, "Max number of connections for this client exceeded.");
+    // TODO(@jasnell): The maximum number of connections for this client has
+    // been exceeded. We should decide exactly how we want to handle this case,
+    // for now, we're going to ignore the packet.
+    IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
     return session;
   }
 
   ngtcp2_cid ocid;
   ngtcp2_cid* pocid = nullptr;
+  // TODO(@jasnell): Need to verify that stateless address validation
+  // is happening correctly.
   if (validate_addr_ && hd->type == NGTCP2_PKT_INITIAL) {
-    Debug(this, "Stateless address validation.");
     if (hd->tokenlen == 0 ||
         VerifyRetryToken(
             env(), &ocid,
@@ -486,14 +486,12 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
             &token_crypto_ctx_,
             &token_secret_,
             retry_token_expiration_) != 0) {
-      Debug(this, "Invalid token. Sending retry");
       SendRetry(hd, addr);
       return session;
     }
     pocid = &ocid;
   }
 
-  Debug(this, "Creating and initializing a new QuicServerSession.");
   session =
       QuicServerSession::New(
           this,
@@ -570,6 +568,8 @@ int QuicSocket::DropMembership(const char* address, const char* iface) {
 int QuicSocket::SendPacket(
     SocketAddress* dest,
     std::shared_ptr<QuicBuffer> buffer) {
+  if (buffer->Length() == 0 || buffer->ReadRemaining() == 0)
+    return 0;
   char* host;
   SocketAddress::GetAddress(**dest, &host);
   Debug(this, "Sending to %s at port %d", host, SocketAddress::GetPort(**dest));
@@ -579,6 +579,8 @@ int QuicSocket::SendPacket(
 int QuicSocket::SendPacket(
     const sockaddr* dest,
     std::shared_ptr<QuicBuffer> buffer) {
+  if (buffer->Length() == 0 || buffer->ReadRemaining() == 0)
+    return 0;
   char* host;
   SocketAddress::GetAddress(dest, &host);
   Debug(this, "Sending to %s at port %d", host, SocketAddress::GetPort(dest));
@@ -620,6 +622,7 @@ void QuicSocket::SendWrapStack::OnSend(
 int QuicSocket::SendWrapStack::Send() {
   if (buf_.length() == 0)
     return 0;
+  Debug(socket_, "Sending %llu bytes", buf_.length());
   if (socket_->IsDiagnosticPacketLoss(socket_->tx_loss_)) {
     Debug(socket_, "Simulating transmitted packet loss.");
     OnSend(&req_, 0);
@@ -693,9 +696,9 @@ int QuicSocket::SendWrap::Send() {
   std::vector<uv_buf_t> vec;
   if (auto buf = buffer_.lock()) {
     size_t len = buf->DrainInto(&vec, &length_);
+    if (len == 0) return 0;
     Debug(socket_, "Sending %llu bytes (%d buffers of %d remaining)",
           length_, len, buf->ReadRemaining());
-    if (len == 0) return 0;
     if (socket_->IsDiagnosticPacketLoss(socket_->tx_loss_)) {
       Debug(socket_, "Simulating transmitted packet loss.");
       // Advance even though we're not actually sending. This

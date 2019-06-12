@@ -690,6 +690,8 @@ int QuicSession::ReceiveCryptoData(
   CHECK(!IsDestroyed());
   Debug(this, "Receiving %d bytes of crypto data.", datalen);
   RETURN_RET_IF_FAIL(WritePeerHandshake(crypto_level, data, datalen), 0);
+  // If the handshake is not yet completed, incrementally advance
+  // the handshake process.
   if (!IsHandshakeCompleted()) {
     RETURN_RET_IF_FAIL(TLSHandshake(), 0);
     return 0;
@@ -1054,14 +1056,15 @@ int QuicSession::TLSHandshake() {
 
   if (initial_)
     RETURN_RET_IF_FAIL(TLSHandshake_Initial(), 0);
+
   int err = DoTLSHandshake(ssl());
-  if (err > 0) {
-    RETURN_RET_IF_FAIL(TLSHandshake_Complete(), 0);
-    Debug(this, "TLS Handshake completed.");
-    SetHandshakeCompleted();
-    err = 0;
-  }
-  return err;
+  if (err <= 0)
+    return err;
+
+  RETURN_RET_IF_FAIL(TLSHandshake_Complete(), 0);
+  Debug(this, "TLS Handshake completed.");
+  SetHandshakeCompleted();
+  return 0;
 }
 
 // It's possible for TLS handshake to contain extra data that is not
@@ -1696,13 +1699,12 @@ int QuicServerSession::Receive(
     const uint8_t* data,
     const struct sockaddr* addr,
     unsigned int flags) {
-
   CHECK(!IsDestroyed());
 
   SendScope scope(this);
+  IncrementStat(nread, &session_stats_, &session_stats::bytes_received);
 
   int err;
-  IncrementStat(nread, &session_stats_, &session_stats::bytes_received);
 
   // Closing period starts once ngtcp2 has detected that the session
   // is being shutdown locally. Note that this is different that the
@@ -1990,11 +1992,8 @@ int QuicClientSession::DoHandshake(
     const ngtcp2_path* path,
     const uint8_t* data,
     size_t datalen) {
-
   CHECK(!IsDestroyed());
-
   RETURN_RET_IF_FAIL(SendPacket(), 0);
-
   int err = DoHandshakeReadOnce(path, data, datalen);
   if (err != 0) {
     SetLastError(QUIC_ERROR_CRYPTO, err);
