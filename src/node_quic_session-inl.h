@@ -1,0 +1,641 @@
+#ifndef SRC_NODE_QUIC_SESSION_INL_H_
+#define SRC_NODE_QUIC_SESSION_INL_H_
+
+#if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
+
+#include "aliased_buffer.h"
+#include "env-inl.h"
+#include "node_crypto.h"
+#include "node_quic_session.h"
+#include "ngtcp2/ngtcp2.h"
+
+namespace node {
+
+using crypto::EntropySource;
+
+namespace quic {
+
+// Reset the QuicSessionConfig to initial defaults. The default values are set
+// in the QUICSESSION_CONFIG macro definition in node_quic_session.h
+#define V(idx, name, def) name##_ = def;
+inline void QuicSessionConfig::ResetToDefaults() {
+  QUICSESSION_CONFIG(V)
+  max_cid_len_ = NGTCP2_MAX_CIDLEN;
+  min_cid_len_ = NGTCP2_MIN_CIDLEN;
+}
+#undef V
+
+// Sets the QuicSessionConfig using an AliasedBuffer for efficiency.
+inline void QuicSessionConfig::Set(
+    Environment* env,
+    const sockaddr* preferred_addr) {
+  ResetToDefaults();
+  AliasedFloat64Array& buffer =
+      env->quic_state()->quicsessionconfig_buffer;
+  uint64_t flags = buffer[IDX_QUIC_SESSION_CONFIG_COUNT];
+
+// The following might be non-obvious. The QUICSESSION_CONFIG macro defines
+// the set of numeric configuration values for the QuicSessionConfig. They
+// are defined this way to avoid code duplicate in a couple of places. The
+// following macro expands out to set each member value in the QuicSessionConfig
+// to the corresponding value in the AliasedBuffer
+#define V(idx, name, def)                                                      \
+  if (flags & (1 << IDX_QUIC_SESSION_##idx))                                   \
+    name##_ = static_cast<uint64_t>(buffer[IDX_QUIC_SESSION_##idx]);
+  QUICSESSION_CONFIG(V)
+#undef V
+
+  if (flags & (1 << IDX_QUIC_SESSION_MAX_CID_LEN)) {
+    max_cid_len_ = static_cast<size_t>(buffer[IDX_QUIC_SESSION_MAX_CID_LEN]);
+    CHECK_LE(max_cid_len_, NGTCP2_MAX_CIDLEN);
+  }
+
+  if (flags & (1 << IDX_QUIC_SESSION_MIN_CID_LEN)) {
+    min_cid_len_ = static_cast<size_t>(buffer[IDX_QUIC_SESSION_MIN_CID_LEN]);
+    CHECK_GE(min_cid_len_, NGTCP2_MIN_CIDLEN);
+  }
+
+  if (preferred_addr != nullptr) {
+    preferred_address_set_ = true;
+    preferred_address_.Copy(preferred_addr);
+  }
+}
+
+// Forwards detailed(verbose) debugging information from ngtcp2. Enabled using
+// the NODE_DEBUG_NATIVE=NGTCP2_DEBUG category.
+inline void DebugLog(void* user_data, const char* fmt, ...) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  va_list ap;
+  va_start(ap, fmt);
+  Debug(session->env(), DebugCategory::NGTCP2_DEBUG, fmt, ap);
+  va_end(ap);
+}
+
+// Copies the QuicSessionConfig into a ngtcp2_settings object
+inline void QuicSessionConfig::ToSettings(
+    ngtcp2_settings* settings,
+    ngtcp2_cid* pscid,
+    bool stateless_reset_token) {
+  ngtcp2_settings_default(settings);
+#define V(idx, name, def) settings->name = name##_;
+  QUICSESSION_CONFIG(V)
+#undef V
+
+  settings->log_printf = DebugLog;
+  settings->initial_ts = uv_hrtime();
+  settings->disable_migration = 0;
+
+  if (stateless_reset_token) {
+    settings->stateless_reset_token_present = 1;
+    EntropySource(
+        settings->stateless_reset_token,
+        arraysize(settings->stateless_reset_token));
+  }
+
+  if (pscid != nullptr && preferred_address_set_) {
+    settings->preferred_address_present = 1;
+    const sockaddr* addr = *preferred_address_;
+    switch (addr->sa_family) {
+      case AF_INET: {
+        auto& dest = settings->preferred_address.ipv4_addr;
+        memcpy(
+            &dest,
+            &(reinterpret_cast<const sockaddr_in*>(addr)->sin_addr),
+            sizeof(dest));
+        settings->preferred_address.ipv4_port = SocketAddress::GetPort(addr);
+        break;
+      }
+      case AF_INET6: {
+        auto& dest = settings->preferred_address.ipv6_addr;
+        memcpy(
+            &dest,
+            &(reinterpret_cast<const sockaddr_in6*>(addr)->sin6_addr),
+            sizeof(dest));
+        settings->preferred_address.ipv6_port = SocketAddress::GetPort(addr);
+        break;
+      }
+      default:
+        UNREACHABLE();
+    }
+
+    EntropySource(
+        settings->preferred_address.stateless_reset_token,
+        arraysize(settings->preferred_address.stateless_reset_token));
+
+    pscid->datalen = NGTCP2_SV_SCIDLEN;
+    EntropySource(pscid->data, pscid->datalen);
+    settings->preferred_address.cid = *pscid;
+  }
+}
+
+
+
+inline void QuicSession::CheckAllocatedSize(size_t previous_size) {
+  CHECK_GE(current_ngtcp2_memory_, previous_size);
+}
+
+inline void QuicSession::IncrementAllocatedSize(size_t size) {
+  current_ngtcp2_memory_ += size;
+}
+
+inline void QuicSession::DecrementAllocatedSize(size_t size) {
+  current_ngtcp2_memory_ -= size;
+}
+
+
+inline void QuicSession::OnIdleTimeout(uv_timer_t* timer) {
+  QuicSession* session = static_cast<QuicSession*>(timer->data);
+  CHECK_NOT_NULL(session);
+  session->OnIdleTimeout();
+}
+
+// Static ngtcp2 callbacks are registered when ngtcp2 when a new ngtcp2_conn is
+// created. These are static functions that, for the most part, simply defer to
+// a QuicSession instance that is passed through as user_data.
+
+// Called by ngtcp2 upon creation of a new client connection
+// to initiate the TLS handshake.
+inline int QuicSession::OnClientInitial(
+    ngtcp2_conn* conn,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  RETURN_IF_FAIL(
+      session->TLSHandshake(), 0,
+      NGTCP2_ERR_CALLBACK_FAILURE);
+  return 0;
+}
+
+// Called by ngtcp2 for a new server connection when the initial
+// crypto handshake from the client has been received.
+inline int QuicSession::OnReceiveClientInitial(
+    ngtcp2_conn* conn,
+    const ngtcp2_cid* dcid,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  RETURN_IF_FAIL(
+      session->ReceiveClientInitial(dcid), 0,
+      NGTCP2_ERR_CALLBACK_FAILURE);
+  return 0;
+}
+
+// Called by ngtcp2 for both client and server connections when
+// TLS handshake data has been received.
+inline int QuicSession::OnReceiveCryptoData(
+    ngtcp2_conn* conn,
+    ngtcp2_crypto_level crypto_level,
+    uint64_t offset,
+    const uint8_t* data,
+    size_t datalen,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  return session->ReceiveCryptoData(crypto_level, offset, data, datalen);
+}
+
+// Called by ngtcp2 for a client connection when the server has
+// sent a retry packet.
+inline int QuicSession::OnReceiveRetry(
+    ngtcp2_conn* conn,
+    const ngtcp2_pkt_hd* hd,
+    const ngtcp2_pkt_retry* retry,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  RETURN_IF_FAIL(
+      session->ReceiveRetry(), 0,
+      NGTCP2_ERR_CALLBACK_FAILURE);
+  return 0;
+}
+
+// Called by ngtcp2 for both client and server connections
+// when a request to extend the maximum number of bidirectional
+// streams has been received.
+inline int QuicSession::OnExtendMaxStreamsBidi(
+    ngtcp2_conn* conn,
+    uint64_t max_streams,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  RETURN_IF_FAIL(
+      session->ExtendMaxStreamsBidi(max_streams), 0,
+      NGTCP2_ERR_CALLBACK_FAILURE);
+  return 0;
+}
+
+// Called by ngtcp2 for both client and server connections
+// when a request to extend the maximum number of unidirectional
+// streams has been received
+inline int QuicSession::OnExtendMaxStreamsUni(
+    ngtcp2_conn* conn,
+    uint64_t max_streams,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  RETURN_IF_FAIL(
+      session->ExtendMaxStreamsUni(max_streams), 0,
+      NGTCP2_ERR_CALLBACK_FAILURE);
+  return 0;
+}
+
+inline int QuicSession::OnExtendMaxStreamData(
+    ngtcp2_conn* conn,
+    int64_t stream_id,
+    uint64_t max_data,
+    void* user_data,
+    void* stream_user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  session->ExtendMaxStreamData(stream_id, max_data);
+  return 0;
+}
+
+// Called by ngtcp2 for both client and server connections
+// when ngtcp2 has determined that the TLS handshake has
+// been completed.
+inline int QuicSession::OnHandshakeCompleted(
+    ngtcp2_conn* conn,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  session->HandshakeCompleted();
+  return 0;
+}
+
+// Called by ngtcp2 when TLS handshake data needs to be
+// encrypted prior to sending.
+inline ssize_t QuicSession::OnDoHSEncrypt(
+    ngtcp2_conn* conn,
+    uint8_t* dest,
+    size_t destlen,
+    const uint8_t* plaintext,
+    size_t plaintextlen,
+    const uint8_t* key,
+    size_t keylen,
+    const uint8_t* nonce,
+    size_t noncelen,
+    const uint8_t* ad,
+    size_t adlen,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  ssize_t nwrite =
+      session->DoHSEncrypt(
+          dest, destlen,
+          plaintext, plaintextlen,
+          key, keylen,
+          nonce, noncelen,
+          ad, adlen);
+  if (nwrite < 0)
+    return NGTCP2_ERR_CALLBACK_FAILURE;
+  return nwrite;
+}
+
+// Called by ngtcp2 when encrypted TLS handshake data has
+// been received.
+inline ssize_t QuicSession::OnDoHSDecrypt(
+    ngtcp2_conn* conn,
+    uint8_t* dest,
+    size_t destlen,
+    const uint8_t* ciphertext,
+    size_t ciphertextlen,
+    const uint8_t* key,
+    size_t keylen,
+    const uint8_t* nonce,
+    size_t noncelen,
+    const uint8_t* ad,
+    size_t adlen,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  ssize_t nwrite =
+      session->DoHSDecrypt(
+          dest, destlen,
+          ciphertext, ciphertextlen,
+          key, keylen,
+          nonce, noncelen,
+          ad, adlen);
+  if (nwrite < 0)
+    return NGTCP2_ERR_TLS_DECRYPT;
+  return nwrite;
+}
+
+// Called by ngtcp2 when non-TLS handshake data needs to be
+// encrypted prior to sending.
+inline ssize_t QuicSession::OnDoEncrypt(
+    ngtcp2_conn* conn,
+    uint8_t* dest,
+    size_t destlen,
+    const uint8_t* plaintext,
+    size_t plaintextlen,
+    const uint8_t* key,
+    size_t keylen,
+    const uint8_t* nonce,
+    size_t noncelen,
+    const uint8_t* ad,
+    size_t adlen,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  ssize_t nwrite =
+      session->DoEncrypt(
+          dest, destlen,
+          plaintext, plaintextlen,
+          key, keylen,
+          nonce, noncelen,
+          ad, adlen);
+  if (nwrite < 0)
+    return NGTCP2_ERR_CALLBACK_FAILURE;
+  return nwrite;
+}
+
+// Called by ngtcp2 when encrypted non-TLS handshake data
+// has been received.
+inline ssize_t QuicSession::OnDoDecrypt(
+    ngtcp2_conn* conn,
+    uint8_t* dest,
+    size_t destlen,
+    const uint8_t* ciphertext,
+    size_t ciphertextlen,
+    const uint8_t* key,
+    size_t keylen,
+    const uint8_t* nonce,
+    size_t noncelen,
+    const uint8_t* ad,
+    size_t adlen,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  ssize_t nwrite =
+      session->DoDecrypt(
+          dest, destlen,
+          ciphertext, ciphertextlen,
+          key, keylen,
+          nonce, noncelen,
+          ad, adlen);
+  if (nwrite < 0)
+    return NGTCP2_ERR_TLS_DECRYPT;
+  return nwrite;
+}
+
+inline ssize_t QuicSession::OnDoInHPMask(
+    ngtcp2_conn* conn,
+    uint8_t* dest,
+    size_t destlen,
+    const uint8_t* key,
+    size_t keylen,
+    const uint8_t* sample,
+    size_t samplelen,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  ssize_t nwrite =
+      session->DoInHPMask(
+          dest, destlen,
+          key, keylen,
+          sample, samplelen);
+  if (nwrite < 0)
+    return NGTCP2_ERR_CALLBACK_FAILURE;
+  return nwrite;
+}
+
+inline ssize_t QuicSession::OnDoHPMask(
+    ngtcp2_conn* conn,
+    uint8_t* dest,
+    size_t destlen,
+    const uint8_t* key,
+    size_t keylen,
+    const uint8_t* sample,
+    size_t samplelen,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  ssize_t nwrite =
+      session->DoHPMask(
+          dest, destlen,
+          key, keylen,
+          sample, samplelen);
+  if (nwrite < 0)
+    return NGTCP2_ERR_CALLBACK_FAILURE;
+  return nwrite;
+}
+
+// Called by ngtcp2 when a chunk of stream data has been
+// received.
+inline int QuicSession::OnReceiveStreamData(
+    ngtcp2_conn* conn,
+    int64_t stream_id,
+    int fin,
+    uint64_t offset,
+    const uint8_t* data,
+    size_t datalen,
+    void* user_data,
+    void* stream_user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  RETURN_IF_FAIL(
+      session->ReceiveStreamData(stream_id, fin, data, datalen, offset), 0,
+      NGTCP2_ERR_CALLBACK_FAILURE);
+  return 0;
+}
+
+// Called by ngtcp2 when a new stream has been opened
+inline int QuicSession::OnStreamOpen(
+    ngtcp2_conn* conn,
+    int64_t stream_id,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  RETURN_IF_FAIL(
+      session->StreamOpen(stream_id), 0,
+      NGTCP2_ERR_CALLBACK_FAILURE);
+  return 0;
+}
+
+// Called by ngtcp2 when an acknowledgement for a chunk of
+// TLS handshake data has been received.
+inline int QuicSession::OnAckedCryptoOffset(
+    ngtcp2_conn* conn,
+    ngtcp2_crypto_level crypto_level,
+    uint64_t offset,
+    size_t datalen,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  session->AckedCryptoOffset(crypto_level, offset, datalen);
+  return 0;
+}
+
+// Called by ngtcp2 when an acknowledgement for a chunk of
+// stream data has been received.
+inline int QuicSession::OnAckedStreamDataOffset(
+    ngtcp2_conn* conn,
+    int64_t stream_id,
+    uint64_t offset,
+    size_t datalen,
+    void* user_data,
+    void* stream_user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  session->AckedStreamDataOffset(stream_id, offset, datalen);
+  return 0;
+}
+
+// Called by ngtcp2 for a client connection when the server
+// has indicated a preferred address in the transport
+// params.
+// For now, there are two modes: we can accept the preferred address
+// or we can reject it. Later, we may want to implement a callback
+// to ask the user if they want to accept the preferred address or
+// not.
+inline int QuicSession::OnSelectPreferredAddress(
+    ngtcp2_conn* conn,
+    ngtcp2_addr* dest,
+    const ngtcp2_preferred_addr* paddr,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  RETURN_IF_FAIL(
+      session->SelectPreferredAddress(dest, paddr), 0,
+      NGTCP2_ERR_CALLBACK_FAILURE);
+  return 0;
+}
+
+// Called by ngtcp2 when a stream has been closed for any
+// reason.
+inline int QuicSession::OnStreamClose(
+    ngtcp2_conn* conn,
+    int64_t stream_id,
+    uint16_t app_error_code,
+    void* user_data,
+    void* stream_user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  session->StreamClose(stream_id, app_error_code);
+  return 0;
+}
+
+inline int QuicSession::OnStreamReset(
+    ngtcp2_conn* conn,
+    int64_t stream_id,
+    uint64_t final_size,
+    uint16_t app_error_code,
+    void* user_data,
+    void* stream_user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  session->StreamReset(stream_id, final_size, app_error_code);
+  return 0;
+}
+
+// Called by ngtcp2 when it needs to generate some random data
+inline int QuicSession::OnRand(
+    ngtcp2_conn* conn,
+    uint8_t* dest,
+    size_t destlen,
+    ngtcp2_rand_ctx ctx,
+    void* user_data) {
+  EntropySource(dest, destlen);
+  return 0;
+}
+
+// When a new client connection is established, ngtcp2 will call
+// this multiple times to generate a pool of connection IDs to use.
+inline int QuicSession::OnGetNewConnectionID(
+    ngtcp2_conn* conn,
+    ngtcp2_cid* cid,
+    uint8_t* token,
+    size_t cidlen,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  session->GetNewConnectionID(cid, token, cidlen);
+  return 0;
+}
+
+// Called by ngtcp2 to trigger a key update for the connection.
+inline int QuicSession::OnUpdateKey(
+    ngtcp2_conn* conn,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  RETURN_IF_FAIL(session->UpdateKey(), 0, NGTCP2_ERR_CALLBACK_FAILURE);
+  return 0;
+}
+
+// When a connection is closed, ngtcp2 will call this multiple
+// times to remove connection IDs.
+inline int QuicSession::OnRemoveConnectionID(
+    ngtcp2_conn* conn,
+    const ngtcp2_cid* cid,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  session->RemoveConnectionID(cid);
+  return 0;
+}
+
+// Called by ngtcp2 to perform path validation. Path validation
+// is necessary to ensure that a packet is originating from the
+// expected source.
+inline int QuicSession::OnPathValidation(
+    ngtcp2_conn* conn,
+    const ngtcp2_path* path,
+    ngtcp2_path_validation_result res,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  RETURN_IF_FAIL(session->PathValidation(path, res), 0, -1);
+  return 0;
+}
+
+inline void QuicSession::OnKeylog(const SSL* ssl, const char* line) {
+  QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
+  session->Keylog(line);
+}
+
+inline void QuicSession::SetTLSAlert(int err) {
+  SetLastError(InitQuicError(QUIC_ERROR_CRYPTO, err));
+}
+
+inline void QuicSession::SetLastError(QuicError error) {
+  last_error_ = error;
+}
+
+inline void QuicSession::SetLastError(QuicErrorFamily family, int code) {
+  SetLastError(InitQuicError(family, code));
+}
+
+// Locate the QuicStream with the given id or return nullptr
+inline QuicStream* QuicSession::FindStream(int64_t id) {
+  auto it = streams_.find(id);
+  if (it == std::end(streams_))
+    return nullptr;
+  return (*it).second;
+}
+
+inline QuicError QuicSession::GetLastError() { return last_error_; }
+
+// closing_ will only be set when the QuicSession::Closing() method is called.
+inline bool QuicSession::IsClosing() { return closing_; }
+
+// destroyed_ will only be set when the QuicSession::Destroy method is called.
+inline bool QuicSession::IsDestroyed() { return destroyed_; }
+
+// Setting the closing_ flag disables the ability to open or accept
+// new streams for this Session. Existing streams are allowed to
+// close gracefully on their own. Once called, the QuicSession will
+// be destroyed once there are no remaining streams. Note that no
+// notification is given to the connecting peer that we're in a
+// closing state. A CONNECTION_CLOSE will be sent when the
+// QuicSession is destroyed.
+inline void QuicSession::SetClosing() {
+  closing_ = true;
+  session_stats_.closing_at = uv_hrtime();
+}
+
+inline void Consume(ngtcp2_vec** pvec, size_t* pcnt, size_t len) {
+  ngtcp2_vec* v = *pvec;
+  size_t cnt = *pcnt;
+
+  for (; cnt > 0; --cnt, ++v) {
+    if (v->len > len) {
+      v->len -= len;
+      v->base += len;
+      break;
+    }
+    len -= v->len;
+  }
+
+  *pvec = v;
+  *pcnt = cnt;
+}
+
+inline int Empty(const ngtcp2_vec* vec, size_t cnt) {
+  size_t i;
+  for (i = 0; i < cnt && vec[i].len == 0; ++i) {}
+  return i == cnt;
+}
+
+}
+}
+
+#endif  // defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
+
+#endif  // SRC_NODE_QUIC_SESSION_INL_H_

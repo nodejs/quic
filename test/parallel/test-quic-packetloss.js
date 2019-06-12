@@ -4,7 +4,6 @@
 // This test is not yet working correctly because data
 // retransmission and the requisite data buffering is
 // not yet working correctly
-
 const common = require('../common');
 if (!common.hasCrypto)
   common.skip('missing crypto');
@@ -31,7 +30,7 @@ const debug = debuglog('test');
 const { createSocket } = require('quic');
 
 let client;
-const server = createSocket({ type: 'udp4', port: 0 });
+const server = createSocket({ type: 'udp4', port: 5678 });
 
 const kServerName = 'agent1';
 const kALPN = 'echo';
@@ -53,6 +52,9 @@ server.listen({
 server.on('session', common.mustCall((session) => {
   debug('QuicServerSession Created');
 
+  const kf = fs.createWriteStream('keylog.log');
+  session.on('keylog', (line) => kf.write(line));
+
   session.on('stream', common.mustCall((stream) => {
     debug('Bidirectional, Client-initiated stream %d received', stream.id);
     stream.pipe(stream);
@@ -62,10 +64,7 @@ server.on('session', common.mustCall((session) => {
 
 server.on('ready', common.mustCall(() => {
   debug('Server is listening on port %d', server.address.port);
-  client = createSocket({ port: 0 });
-
-  // Set for 20% received packet loss on the server
-  server.setDiagnosticPacketLoss({ rx: 0.2, tx: 0.0 });
+  client = createSocket({ port: 5679 });
 
   const req = client.connect({
     address: 'localhost',
@@ -79,6 +78,9 @@ server.on('ready', common.mustCall(() => {
 
   req.on('secure', common.mustCall((servername, alpn, cipher) => {
     debug('QuicClientSession TLS Handshake Complete');
+
+    // Set for 20% received packet loss on the server
+    server.setDiagnosticPacketLoss({ rx: 0.0, tx: 0.0 });
 
     const file = fs.createReadStream(__filename);
     const stream = req.openStream();
@@ -111,3 +113,4 @@ server.on('ready', common.mustCall(() => {
     debug('Bidirectional, Client-initiated stream %d opened', stream.id);
   }));
 }));
+

@@ -806,6 +806,7 @@
             'src/node_quic_buffer.h',
             'src/node_quic_crypto.h',
             'src/node_quic_session.h',
+            'src/node_quic_session-inl.h',
             'src/node_quic_socket.h',
             'src/node_quic_stream.h',
             'src/node_quic_util.h',

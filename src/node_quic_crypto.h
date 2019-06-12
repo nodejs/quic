@@ -109,6 +109,11 @@ inline size_t aead_tag_length(const CryptoContext* ctx) {
   UNREACHABLE();
 }
 
+inline void SetupTokenContext(CryptoContext* context) {
+  aead_aes_128_gcm(context);
+  prf_sha256(context);
+}
+
 inline int Negotiated_PRF(CryptoContext* ctx, SSL* ssl) {
   switch (SSL_CIPHER_get_id(SSL_get_current_cipher(ssl))) {
     case 0x03001301u:  // TLS_AES_128_GCM_SHA256
@@ -1372,7 +1377,132 @@ inline int Server_Transport_Params_Parse_CB(
   return 1;
 }
 
+inline int GenerateRetryToken(
+    uint8_t* token,
+    size_t* tokenlen,
+    const sockaddr* addr,
+    const ngtcp2_cid* ocid,
+    CryptoContext* token_crypto_ctx,
+    std::array<uint8_t, TOKEN_SECRETLEN>* token_secret) {
+  std::array<uint8_t, 4096> plaintext;
 
+  const size_t addrlen = SocketAddress::GetAddressLen(addr);
+
+  uint64_t now = uv_hrtime();
+
+  auto p = std::begin(plaintext);
+  p = std::copy_n(reinterpret_cast<const uint8_t *>(addr), addrlen, p);
+  p = std::copy_n(reinterpret_cast<uint8_t *>(&now), sizeof(now), p);
+  p = std::copy_n(ocid->data, ocid->datalen, p);
+
+  std::array<uint8_t, TOKEN_RAND_DATALEN> rand_data;
+  CryptoToken params;
+
+  RETURN_IF_FAIL(GenerateRandData(rand_data.data(), rand_data.size()), 0, -1);
+
+  RETURN_IF_FAIL(
+      DeriveTokenKey(
+          &params,
+          rand_data.data(),
+          rand_data.size(),
+          token_crypto_ctx,
+          token_secret), 0, -1);
+
+  ssize_t n =
+      Encrypt(
+          token, *tokenlen,
+          plaintext.data(), std::distance(std::begin(plaintext), p),
+          token_crypto_ctx,
+          params.key.data(),
+          params.keylen,
+          params.iv.data(),
+          params.ivlen,
+          reinterpret_cast<const uint8_t *>(addr), addrlen);
+
+  if (n < 0)
+    return -1;
+  memcpy(token + n, rand_data.data(), rand_data.size());
+  *tokenlen = n + rand_data.size();
+  return 0;
+}
+
+inline int VerifyRetryToken(
+    Environment* env,
+    ngtcp2_cid* ocid,
+    const ngtcp2_pkt_hd* hd,
+    const sockaddr* addr,
+    CryptoContext* token_crypto_ctx,
+    std::array<uint8_t, TOKEN_SECRETLEN>* token_secret,
+    uint64_t verification_expiration) {
+
+  uv_getnameinfo_t info;
+  char* host = nullptr;
+  const size_t addrlen = SocketAddress::GetAddressLen(addr);
+  if (uv_getnameinfo(
+          env->event_loop(),
+          &info, nullptr,
+          addr, NI_NUMERICSERV) == 0) {
+    DCHECK_EQ(SocketAddress::GetPort(addr), std::stoi(info.service));
+  } else {
+    SocketAddress::GetAddress(addr, &host);
+  }
+
+  if (hd->tokenlen < TOKEN_RAND_DATALEN)
+    return  -1;
+
+  uint8_t* rand_data = hd->token + hd->tokenlen - TOKEN_RAND_DATALEN;
+  uint8_t* ciphertext = hd->token;
+  size_t ciphertextlen = hd->tokenlen - TOKEN_RAND_DATALEN;
+
+  CryptoToken params;
+
+  RETURN_IF_FAIL(
+      DeriveTokenKey(
+          &params,
+          rand_data,
+          TOKEN_RAND_DATALEN,
+          token_crypto_ctx,
+          token_secret), 0, -1);
+
+  std::array<uint8_t, 4096> plaintext;
+
+  ssize_t n =
+      Decrypt(
+          plaintext.data(), plaintext.size(),
+          ciphertext, ciphertextlen,
+          token_crypto_ctx,
+          params.key.data(),
+          params.keylen,
+          params.iv.data(),
+          params.ivlen,
+          reinterpret_cast<const uint8_t*>(addr), addrlen);
+  if (n < 0)
+    return -1;
+
+  if (static_cast<size_t>(n) < addrlen + sizeof(uint64_t))
+    return -1;
+
+  ssize_t cil = static_cast<size_t>(n) - addrlen - sizeof(uint64_t);
+  if (cil != 0 && (cil < NGTCP2_MIN_CIDLEN || cil > NGTCP2_MAX_CIDLEN))
+    return -1;
+
+  if (memcmp(plaintext.data(), addr, addrlen) != 0)
+    return -1;
+
+
+  uint64_t t;
+  memcpy(&t, plaintext.data() + addrlen, sizeof(uint64_t));
+
+  uint64_t now = uv_hrtime();
+
+  // 10-second window by default, but configurable for each
+  // QuicSocket instance with a MIN_RETRYTOKEN_EXPIRATION second
+  // minimum and a MAX_RETRYTOKEN_EXPIRATION second maximum.
+  if (t + verification_expiration * NGTCP2_SECONDS < now)
+    return -1;
+
+  return 0;
+}
 
 inline int VerifyPeerCertificate(SSL* ssl) {
   int err = X509_V_ERR_UNSPECIFIED;

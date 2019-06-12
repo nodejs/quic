@@ -58,20 +58,20 @@ class QuicSessionConfig {
  public:
   QuicSessionConfig() = default;
 
-  void ResetToDefaults();
+  inline void ResetToDefaults();
 
   // QuicSessionConfig::Set() is where the magic happens. It pulls
   // values out of the AliasedBuffer defined in node_quic_state.h
   // and stores the values. If the preferred_addr is set, it will
   // be copied into preferred_address_.
-  void Set(
+  inline void Set(
       Environment* env,
       const struct sockaddr* preferred_addr = nullptr);
 
   // When a ngtcp2 connection is created, ToSettings is used to
   // populate the given ngtcp2_settings object with the stored
   // parameters. These are translated into QUIC transport params.
-  void ToSettings(
+  inline void ToSettings(
       ngtcp2_settings* settings,
       ngtcp2_cid* pscid,
       bool stateless_reset_token = false);
@@ -166,63 +166,55 @@ class QuicSession : public AsyncWrap,
       const std::string& alpn);
   ~QuicSession() override;
 
+  inline QuicError GetLastError();
+  inline bool IsClosing();
+  inline bool IsDestroyed();
+  inline void SetClosing();
+  inline void SetTLSAlert(int err);
+
+  const std::string& GetALPN() { return alpn_; }
+
+  // Returns the associated peer's address. Note that this
+  // value can change over the lifetime of the QuicSession.
+  // The fact that the session is not tied intrinsically to
+  // a single address is one of the benefits of QUIC.
+  SocketAddress* GetRemoteAddress() { return &remote_address_; }
+  const ngtcp2_cid* scid() const { return &scid_; }
+  QuicSocket* Socket() { return socket_; }
+  SSL* ssl() { return ssl_.get(); }
+
   void AddStream(QuicStream* stream);
-  void Close();
-  void Closing();
   void Destroy();
   void ExtendStreamOffset(QuicStream* stream, size_t amount);
-  const std::string& GetALPN();
-  inline QuicError GetLastError();
-  void GetLocalTransportParams(
-      ngtcp2_transport_params* params);
+  void GetLocalTransportParams(ngtcp2_transport_params* params);
   uint32_t GetNegotiatedVersion();
-  SocketAddress* GetRemoteAddress();
-  bool IsClosing();
-  bool IsDestroyed();
   bool IsHandshakeCompleted();
-  int OpenBidirectionalStream(
-      int64_t* stream_id);
-  int OpenUnidirectionalStream(
-      int64_t* stream_id);
-  size_t ReadPeerHandshake(
-      uint8_t* buf,
-      size_t buflen);
+  int OpenBidirectionalStream(int64_t* stream_id);
+  int OpenUnidirectionalStream(int64_t* stream_id);
+  size_t ReadPeerHandshake(uint8_t* buf, size_t buflen);
   int ReceiveStreamData(
       int64_t stream_id,
       int fin,
       const uint8_t* data,
       size_t datalen,
       uint64_t offset);
-  void RemoveStream(
-      int64_t stream_id);
-  int Send0RTTStreamData(
-      QuicStream* stream);
-  int SendStreamData(
-      QuicStream* stream);
+  void RemoveStream(int64_t stream_id);
+  int Send0RTTStreamData(QuicStream* stream);
+  int SendStreamData(QuicStream* stream);
   inline void SetLastError(
-      QuicError error = { QUIC_ERROR_SESSION, NGTCP2_NO_ERROR }) {
-    last_error_ = error;
-  }
-  inline void SetLastError(QuicErrorFamily family, int code) {
-    SetLastError(InitQuicError(family, code));
-  }
-  int SetRemoteTransportParams(
-      ngtcp2_transport_params* params);
-  void SetTLSAlert(
-      int err);
+      QuicError error = {
+          QUIC_ERROR_SESSION,
+          NGTCP2_NO_ERROR
+      });
+  inline void SetLastError(QuicErrorFamily family, int code);
+  int SetRemoteTransportParams(ngtcp2_transport_params* params);
   int ShutdownStreamRead(
       int64_t stream_id,
       uint16_t code = NGTCP2_APP_NOERROR);
   int ShutdownStreamWrite(
       int64_t stream_id,
       uint16_t code = NGTCP2_APP_NOERROR);
-  QuicSocket* Socket();
-  SSL* ssl() { return ssl_.get(); }
-  void WriteHandshake(
-      const uint8_t* data,
-      size_t datalen);
-
-  const ngtcp2_cid* scid() const;
+  void WriteHandshake(const uint8_t* data, size_t datalen);
 
   // These may be implemented by QuicSession types
   virtual bool IsServer() const { return false; }
@@ -259,35 +251,21 @@ class QuicSession : public AsyncWrap,
   virtual int TLSHandshake_Complete() = 0;
   virtual int TLSHandshake_Initial() = 0;
   virtual int TLSRead() = 0;
-  virtual int VerifyPeerIdentity(const char* hostname) = 0;
 
-  static void SetupTokenContext(
-      CryptoContext* context);
-  static int GenerateRetryToken(
-      uint8_t* token,
-      size_t* tokenlen,
-      const sockaddr* addr,
-      const ngtcp2_cid* ocid,
-      CryptoContext* context,
-      std::array<uint8_t, TOKEN_SECRETLEN>* token_secret);
-  static int VerifyRetryToken(
-      Environment* env,
-      ngtcp2_cid* ocid,
-      const ngtcp2_pkt_hd* hd,
-      const sockaddr* addr,
-      CryptoContext* context,
-      std::array<uint8_t, TOKEN_SECRETLEN>* token_secret,
-      uint64_t verification_expiration);
-
-  static void DebugLog(
-      void* user_data,
-      const char* fmt, ...);
-
-  void CheckAllocatedSize(size_t previous_size) override;
-  void IncrementAllocatedSize(size_t size) override;
-  void DecrementAllocatedSize(size_t size) override;
+  // Implementation for mem::Tracker
+  inline void CheckAllocatedSize(size_t previous_size) override;
+  inline void IncrementAllocatedSize(size_t size) override;
+  inline void DecrementAllocatedSize(size_t size) override;
 
  private:
+  inline bool IsInClosingPeriod();
+  inline bool IsInDrainingPeriod();
+  inline QuicStream* FindStream(int64_t id);
+
+  bool IsHandshakeSuspended() {
+    return client_hello_cb_running_ || cert_cb_running_;
+  }
+
   void AckedCryptoOffset(
       ngtcp2_crypto_level crypto_level,
       uint64_t offset,
@@ -296,231 +274,11 @@ class QuicSession : public AsyncWrap,
       int64_t stream_id,
       uint64_t offset,
       size_t datalen);
-  void AssociateCID(
-      ngtcp2_cid* cid);
+  void AssociateCID(ngtcp2_cid* cid);
+  void Close();
+  QuicStream* CreateStream(int64_t stream_id);
   int DoHandshakeReadOnce(
       const ngtcp2_path* path,
-      const uint8_t* data,
-      size_t datalen);
-  int DoHandshakeWriteOnce();
-  QuicStream* FindStream(
-      int64_t id);
-  void HandshakeCompleted();
-  inline bool IsInClosingPeriod();
-  inline bool IsInDrainingPeriod();
-  int PathValidation(
-    const ngtcp2_path* path,
-    ngtcp2_path_validation_result res);
-  inline void ScheduleRetransmit();
-  inline int SendPacket();
-  inline void SetHandshakeCompleted();
-
-  int StreamOpen(
-      int64_t stream_id);
-  int TLSHandshake();
-  int WritePeerHandshake(
-      ngtcp2_crypto_level crypto_level,
-      const uint8_t* data,
-      size_t datalen);
-
-  virtual void DisassociateCID(
-      const ngtcp2_cid* cid) {}
-  virtual int ExtendMaxStreamsUni(
-      uint64_t max_streams) { return 0; }
-  virtual int ExtendMaxStreamsBidi(
-      uint64_t max_streams) { return 0; }
-  virtual int ReceiveRetry() { return 0; }
-  virtual void StoreRemoteTransportParams(
-      ngtcp2_transport_params* params) {}
-
-
-  // ngtcp2 callbacks
-  static int OnClientInitial(
-      ngtcp2_conn* conn,
-      void* user_data);
-  static int OnReceiveClientInitial(
-      ngtcp2_conn* conn,
-      const ngtcp2_cid* dcid,
-      void* user_data);
-  static int OnReceiveCryptoData(
-      ngtcp2_conn* conn,
-      ngtcp2_crypto_level crypto_level,
-      uint64_t offset,
-      const uint8_t* data,
-      size_t datalen,
-      void* user_data);
-  static int OnHandshakeCompleted(
-      ngtcp2_conn* conn,
-      void* user_data);
-  static ssize_t OnDoHSEncrypt(
-      ngtcp2_conn* conn,
-      uint8_t* dest,
-      size_t destlen,
-      const uint8_t* plaintext,
-      size_t plaintextlen,
-      const uint8_t* key,
-      size_t keylen,
-      const uint8_t* nonce,
-      size_t noncelen,
-      const uint8_t* ad,
-      size_t adlen,
-      void* user_data);
-  static ssize_t OnDoHSDecrypt(
-      ngtcp2_conn* conn,
-      uint8_t* dest,
-      size_t destlen,
-      const uint8_t* ciphertext,
-      size_t ciphertextlen,
-      const uint8_t* key,
-      size_t keylen,
-      const uint8_t* nonce,
-      size_t noncelen,
-      const uint8_t* ad,
-      size_t adlen,
-      void* user_data);
-  static ssize_t OnDoEncrypt(
-      ngtcp2_conn* conn,
-      uint8_t* dest,
-      size_t destlen,
-      const uint8_t* plaintext,
-      size_t plaintextlen,
-      const uint8_t* key,
-      size_t keylen,
-      const uint8_t* nonce,
-      size_t noncelen,
-      const uint8_t* ad,
-      size_t adlen,
-      void* user_data);
-  static ssize_t OnDoDecrypt(
-      ngtcp2_conn* conn,
-      uint8_t* dest,
-      size_t destlen,
-      const uint8_t* ciphertext,
-      size_t ciphertextlen,
-      const uint8_t* key,
-      size_t keylen,
-      const uint8_t* nonce,
-      size_t noncelen,
-      const uint8_t* ad,
-      size_t adlen,
-      void* user_data);
-  static ssize_t OnDoInHPMask(
-      ngtcp2_conn* conn,
-      uint8_t* dest,
-      size_t destlen,
-      const uint8_t* key,
-      size_t keylen,
-      const uint8_t* sample,
-      size_t samplelen,
-      void* user_data);
-  static ssize_t OnDoHPMask(
-      ngtcp2_conn* conn,
-      uint8_t* dest,
-      size_t destlen,
-      const uint8_t* key,
-      size_t keylen,
-      const uint8_t* sample,
-      size_t samplelen,
-      void* user_data);
-  static int OnReceiveStreamData(
-      ngtcp2_conn* conn,
-      int64_t stream_id,
-      int fin,
-      uint64_t offset,
-      const uint8_t* data,
-      size_t datalen,
-      void* user_data,
-      void* stream_user_data);
-  static int OnReceiveRetry(
-      ngtcp2_conn* conn,
-      const ngtcp2_pkt_hd* hd,
-      const ngtcp2_pkt_retry* retry,
-      void* user_data);
-  static int OnAckedCryptoOffset(
-      ngtcp2_conn* conn,
-      ngtcp2_crypto_level crypto_level,
-      uint64_t offset,
-      size_t datalen,
-      void* user_data);
-  static int OnAckedStreamDataOffset(
-      ngtcp2_conn* conn,
-      int64_t stream_id,
-      uint64_t offset,
-      size_t datalen,
-      void* user_data,
-      void* stream_user_data);
-  static int OnSelectPreferredAddress(
-      ngtcp2_conn* conn,
-      ngtcp2_addr* dest,
-      const ngtcp2_preferred_addr* paddr,
-      void* user_data);
-  static int OnStreamClose(
-      ngtcp2_conn* conn,
-      int64_t stream_id,
-      uint16_t app_error_code,
-      void* user_data,
-      void* stream_user_data);
-  static int OnStreamOpen(
-      ngtcp2_conn* conn,
-      int64_t stream_id,
-      void* user_data);
-  static int OnStreamReset(
-      ngtcp2_conn* conn,
-      int64_t stream_id,
-      uint64_t final_size,
-      uint16_t app_error_code,
-      void* user_data,
-      void* stream_user_data);
-  static int OnRand(
-      ngtcp2_conn* conn,
-      uint8_t* dest,
-      size_t destlen,
-      ngtcp2_rand_ctx ctx,
-      void* user_data);
-  static int OnGetNewConnectionID(
-      ngtcp2_conn* conn,
-      ngtcp2_cid* cid,
-      uint8_t* token,
-      size_t cidlen,
-      void* user_data);
-  static int OnRemoveConnectionID(
-      ngtcp2_conn* conn,
-      const ngtcp2_cid* cid,
-      void* user_data);
-  static int OnUpdateKey(
-      ngtcp2_conn* conn,
-      void* user_data);
-  static int OnPathValidation(
-      ngtcp2_conn* conn,
-      const ngtcp2_path* path,
-      ngtcp2_path_validation_result res,
-      void* user_data);
-  static void OnIdleTimeout(
-      uv_timer_t* timer);
-  static int OnExtendMaxStreamsUni(
-      ngtcp2_conn* conn,
-      uint64_t max_streams,
-      void* user_data);
-  static int OnExtendMaxStreamsBidi(
-      ngtcp2_conn* conn,
-      uint64_t max_streams,
-      void* user_data);
-  static int OnExtendMaxStreamData(
-      ngtcp2_conn* conn,
-      int64_t stream_id,
-      uint64_t max_data,
-      void* user_data,
-      void* stream_user_data);
-
-  static void OnKeylog(const SSL* ssl, const char* line);
-
-  virtual void InitTLS_Post() = 0;
-
-  int ReceiveClientInitial(
-      const ngtcp2_cid* dcid);
-  int ReceiveCryptoData(
-      ngtcp2_crypto_level crypto_level,
-      uint64_t offset,
       const uint8_t* data,
       size_t datalen);
   ssize_t DoHSEncrypt(
@@ -581,32 +339,236 @@ class QuicSession : public AsyncWrap,
       size_t keylen,
       const uint8_t* sample,
       size_t samplelen);
+  int DoHandshakeWriteOnce();
+  void ExtendMaxStreamData(int64_t stream_id, uint64_t max_data);
+  int GetNewConnectionID(ngtcp2_cid* cid, uint8_t* token, size_t cidlen);
+  void HandshakeCompleted();
   void InitTLS();
   void Keylog(const char* line);
-  void StreamClose(
-      int64_t stream_id,
-      uint16_t app_error_code);
+  int PathValidation(
+    const ngtcp2_path* path,
+    ngtcp2_path_validation_result res);
+  int ReceiveClientInitial(const ngtcp2_cid* dcid);
+  int ReceiveCryptoData(
+      ngtcp2_crypto_level crypto_level,
+      uint64_t offset,
+      const uint8_t* data,
+      size_t datalen);
+  void RemoveConnectionID(const ngtcp2_cid* cid);
+  void ScheduleRetransmit();
+  int SendPacket();
+  void SetHandshakeCompleted();
+  void SetLocalAddress(const ngtcp2_addr* addr);
+  void StreamClose(int64_t stream_id, uint16_t app_error_code);
+  int StreamOpen(int64_t stream_id);
   void StreamReset(
       int64_t stream_id,
       uint64_t final_size,
       uint16_t app_error_code);
+  int TLSHandshake();
   int UpdateKey();
-  void RemoveConnectionID(
-      const ngtcp2_cid* cid);
-  inline int GetNewConnectionID(
+  int WritePackets();
+  int WritePeerHandshake(
+      ngtcp2_crypto_level crypto_level,
+      const uint8_t* data,
+      size_t datalen);
+
+  virtual void DisassociateCID(const ngtcp2_cid* cid) {}
+  virtual int ExtendMaxStreamsUni(uint64_t max_streams) { return 0; }
+  virtual int ExtendMaxStreamsBidi(uint64_t max_streams) { return 0; }
+  virtual int ReceiveRetry() { return 0; }
+  virtual int SelectPreferredAddress(
+    ngtcp2_addr* dest,
+    const ngtcp2_preferred_addr* paddr) { return 0; }
+  virtual void StoreRemoteTransportParams(ngtcp2_transport_params* params) {}
+  virtual int Start() { return 0; }
+
+  virtual void InitTLS_Post() = 0;
+  virtual ngtcp2_crypto_level GetServerCryptoLevel() = 0;
+  virtual ngtcp2_crypto_level GetClientCryptoLevel() = 0;
+  virtual void SetServerCryptoLevel(ngtcp2_crypto_level level) = 0;
+  virtual void SetClientCryptoLevel(ngtcp2_crypto_level level) = 0;
+  virtual void SetLocalCryptoLevel(ngtcp2_crypto_level level) = 0;
+  virtual int VerifyPeerIdentity(const char* hostname) = 0;
+
+  // static ngtcp2 callbacks
+  static inline int OnClientInitial(
+      ngtcp2_conn* conn,
+      void* user_data);
+  static inline int OnReceiveClientInitial(
+      ngtcp2_conn* conn,
+      const ngtcp2_cid* dcid,
+      void* user_data);
+  static inline int OnReceiveCryptoData(
+      ngtcp2_conn* conn,
+      ngtcp2_crypto_level crypto_level,
+      uint64_t offset,
+      const uint8_t* data,
+      size_t datalen,
+      void* user_data);
+  static inline int OnHandshakeCompleted(
+      ngtcp2_conn* conn,
+      void* user_data);
+  static inline ssize_t OnDoHSEncrypt(
+      ngtcp2_conn* conn,
+      uint8_t* dest,
+      size_t destlen,
+      const uint8_t* plaintext,
+      size_t plaintextlen,
+      const uint8_t* key,
+      size_t keylen,
+      const uint8_t* nonce,
+      size_t noncelen,
+      const uint8_t* ad,
+      size_t adlen,
+      void* user_data);
+  static inline ssize_t OnDoHSDecrypt(
+      ngtcp2_conn* conn,
+      uint8_t* dest,
+      size_t destlen,
+      const uint8_t* ciphertext,
+      size_t ciphertextlen,
+      const uint8_t* key,
+      size_t keylen,
+      const uint8_t* nonce,
+      size_t noncelen,
+      const uint8_t* ad,
+      size_t adlen,
+      void* user_data);
+  static inline ssize_t OnDoEncrypt(
+      ngtcp2_conn* conn,
+      uint8_t* dest,
+      size_t destlen,
+      const uint8_t* plaintext,
+      size_t plaintextlen,
+      const uint8_t* key,
+      size_t keylen,
+      const uint8_t* nonce,
+      size_t noncelen,
+      const uint8_t* ad,
+      size_t adlen,
+      void* user_data);
+  static inline ssize_t OnDoDecrypt(
+      ngtcp2_conn* conn,
+      uint8_t* dest,
+      size_t destlen,
+      const uint8_t* ciphertext,
+      size_t ciphertextlen,
+      const uint8_t* key,
+      size_t keylen,
+      const uint8_t* nonce,
+      size_t noncelen,
+      const uint8_t* ad,
+      size_t adlen,
+      void* user_data);
+  static inline ssize_t OnDoInHPMask(
+      ngtcp2_conn* conn,
+      uint8_t* dest,
+      size_t destlen,
+      const uint8_t* key,
+      size_t keylen,
+      const uint8_t* sample,
+      size_t samplelen,
+      void* user_data);
+  static inline ssize_t OnDoHPMask(
+      ngtcp2_conn* conn,
+      uint8_t* dest,
+      size_t destlen,
+      const uint8_t* key,
+      size_t keylen,
+      const uint8_t* sample,
+      size_t samplelen,
+      void* user_data);
+  static inline int OnReceiveStreamData(
+      ngtcp2_conn* conn,
+      int64_t stream_id,
+      int fin,
+      uint64_t offset,
+      const uint8_t* data,
+      size_t datalen,
+      void* user_data,
+      void* stream_user_data);
+  static inline int OnReceiveRetry(
+      ngtcp2_conn* conn,
+      const ngtcp2_pkt_hd* hd,
+      const ngtcp2_pkt_retry* retry,
+      void* user_data);
+  static inline int OnAckedCryptoOffset(
+      ngtcp2_conn* conn,
+      ngtcp2_crypto_level crypto_level,
+      uint64_t offset,
+      size_t datalen,
+      void* user_data);
+  static inline int OnAckedStreamDataOffset(
+      ngtcp2_conn* conn,
+      int64_t stream_id,
+      uint64_t offset,
+      size_t datalen,
+      void* user_data,
+      void* stream_user_data);
+  static inline int OnSelectPreferredAddress(
+      ngtcp2_conn* conn,
+      ngtcp2_addr* dest,
+      const ngtcp2_preferred_addr* paddr,
+      void* user_data);
+  static inline int OnStreamClose(
+      ngtcp2_conn* conn,
+      int64_t stream_id,
+      uint16_t app_error_code,
+      void* user_data,
+      void* stream_user_data);
+  static inline int OnStreamOpen(
+      ngtcp2_conn* conn,
+      int64_t stream_id,
+      void* user_data);
+  static inline int OnStreamReset(
+      ngtcp2_conn* conn,
+      int64_t stream_id,
+      uint64_t final_size,
+      uint16_t app_error_code,
+      void* user_data,
+      void* stream_user_data);
+  static inline int OnRand(
+      ngtcp2_conn* conn,
+      uint8_t* dest,
+      size_t destlen,
+      ngtcp2_rand_ctx ctx,
+      void* user_data);
+  static inline int OnGetNewConnectionID(
+      ngtcp2_conn* conn,
       ngtcp2_cid* cid,
       uint8_t* token,
-      size_t cidlen);
-  void ExtendMaxStreamData(
+      size_t cidlen,
+      void* user_data);
+  static inline int OnRemoveConnectionID(
+      ngtcp2_conn* conn,
+      const ngtcp2_cid* cid,
+      void* user_data);
+  static inline int OnUpdateKey(
+      ngtcp2_conn* conn,
+      void* user_data);
+  static inline int OnPathValidation(
+      ngtcp2_conn* conn,
+      const ngtcp2_path* path,
+      ngtcp2_path_validation_result res,
+      void* user_data);
+  static inline void OnIdleTimeout(
+      uv_timer_t* timer);
+  static inline int OnExtendMaxStreamsUni(
+      ngtcp2_conn* conn,
+      uint64_t max_streams,
+      void* user_data);
+  static inline int OnExtendMaxStreamsBidi(
+      ngtcp2_conn* conn,
+      uint64_t max_streams,
+      void* user_data);
+  static inline int OnExtendMaxStreamData(
+      ngtcp2_conn* conn,
       int64_t stream_id,
-      uint64_t max_data);
-  int WritePackets();
-
-  inline QuicStream* CreateStream(
-      int64_t stream_id);
-
-  void SetLocalAddress(
-      const ngtcp2_addr* addr);
+      uint64_t max_data,
+      void* user_data,
+      void* stream_user_data);
+  static inline void OnKeylog(const SSL* ssl, const char* line);
 
   typedef ssize_t(*ngtcp2_close_fn)(
     ngtcp2_conn* conn,
@@ -622,20 +584,6 @@ class QuicSession : public AsyncWrap,
     return ngtcp2_conn_write_connection_close;
   }
 
-  inline bool IsHandshakeSuspended() {
-    return client_hello_cb_running_ || cert_cb_running_;
-  }
-
-  virtual ngtcp2_crypto_level GetServerCryptoLevel() = 0;
-  virtual ngtcp2_crypto_level GetClientCryptoLevel() = 0;
-  virtual void SetServerCryptoLevel(ngtcp2_crypto_level level) = 0;
-  virtual void SetClientCryptoLevel(ngtcp2_crypto_level level) = 0;
-  virtual void SetLocalCryptoLevel(ngtcp2_crypto_level level) = 0;
-  virtual int Start() { return 0; }
-  virtual int SelectPreferredAddress(
-    ngtcp2_addr* dest,
-    const ngtcp2_preferred_addr* paddr) { return 0; }
-
   ngtcp2_crypto_level rx_crypto_level_;
   ngtcp2_crypto_level tx_crypto_level_;
   QuicError last_error_;
@@ -646,6 +594,7 @@ class QuicSession : public AsyncWrap,
   ngtcp2_conn* connection_;
   SocketAddress remote_address_;
   size_t max_pktlen_;
+  uint64_t idle_timeout_;
 
   Timer* idle_;
   Timer* retransmit_;
@@ -808,7 +757,7 @@ class QuicSession : public AsyncWrap,
       if (session_->IsDestroyed())
         return;
       session_->SendPendingData();
-      session_->idle_->Update();
+      session_->idle_->Update(session_->idle_timeout_);
     }
    private:
     QuicSession* session_;
@@ -837,30 +786,24 @@ class QuicServerSession : public QuicSession {
       bool request_cert_ = true);
 
   void AddToSocket(QuicSocket* socket) override;
-
   void Init(
       const struct sockaddr* addr,
       const ngtcp2_cid* dcid,
       const ngtcp2_cid* ocid,
       uint32_t version);
-
-  bool IsDraining();
+  bool IsDraining() { return draining_; }
   bool IsServer() const override { return true; }
-  int OnClientHello() override;
-  void OnClientHelloDone() override;
-  int OnTLSStatus() override;
-
-  void MaybeTimeout() override;
-
   int OnCert() override;
   void OnCertDone(
       crypto::SecureContext* context,
       v8::Local<v8::Value> ocsp_response) override;
+  int OnClientHello() override;
+  void OnClientHelloDone() override;
+  int OnTLSStatus() override;
+  void MaybeTimeout() override;
 
-  int VerifyPeerIdentity(const char* hostname) override;
-
-  const ngtcp2_cid* rcid() const;
-  ngtcp2_cid* pscid();
+  const ngtcp2_cid* rcid() const { return &rcid_; }
+  ngtcp2_cid* pscid() { return &pscid_; }
 
   void MemoryInfo(MemoryTracker* tracker) const override {}
   SET_MEMORY_INFO_NAME(QuicServerSession)
@@ -879,8 +822,7 @@ class QuicServerSession : public QuicSession {
       bool reject_unauthorized,
       bool request_cert);
 
-  void DisassociateCID(
-      const ngtcp2_cid* cid) override;
+  void DisassociateCID(const ngtcp2_cid* cid) override;
   int DoHandshake(
       const ngtcp2_path* path,
       const uint8_t* data,
@@ -904,15 +846,30 @@ class QuicServerSession : public QuicSession {
   int TLSHandshake_Complete() override;
   int TLSHandshake_Initial() override;
   int TLSRead() override;
+  int VerifyPeerIdentity(const char* hostname) override;
 
   int StartClosingPeriod();
   void StartDrainingPeriod();
 
-  ngtcp2_crypto_level GetServerCryptoLevel() override;
-  ngtcp2_crypto_level GetClientCryptoLevel() override;
-  void SetServerCryptoLevel(ngtcp2_crypto_level level) override;
-  void SetClientCryptoLevel(ngtcp2_crypto_level level) override;
-  void SetLocalCryptoLevel(ngtcp2_crypto_level level) override;
+  ngtcp2_crypto_level GetServerCryptoLevel() override {
+    return tx_crypto_level_;
+  }
+
+  ngtcp2_crypto_level GetClientCryptoLevel() override {
+    return rx_crypto_level_;
+  }
+
+  void SetServerCryptoLevel(ngtcp2_crypto_level level) override {
+    tx_crypto_level_ = level;
+  }
+
+  void SetClientCryptoLevel(ngtcp2_crypto_level level) override {
+    rx_crypto_level_ = level;
+  }
+
+  void SetLocalCryptoLevel(ngtcp2_crypto_level level) override {
+    SetServerCryptoLevel(level);
+  }
 
   ngtcp2_cid pscid_;
   ngtcp2_cid rcid_;
@@ -997,25 +954,15 @@ class QuicClientSession : public QuicSession {
       bool request_ocsp);
 
   void AddToSocket(QuicSocket* socket) override;
-
   void MaybeTimeout() override;
-
   int OnTLSStatus() override;
 
-  int SetSocket(
-      QuicSocket* socket,
-      bool nat_rebinding = false);
-  int SetSession(
-      SSL_SESSION* session);
-  int SetEarlyTransportParams(
-      v8::Local<v8::Value> buffer);
-  int SetSession(
-      v8::Local<v8::Value> buffer);
-
-  int VerifyPeerIdentity(const char* hostname) override;
+  int SetEarlyTransportParams(v8::Local<v8::Value> buffer);
+  int SetSocket(QuicSocket* socket, bool nat_rebinding = false);
+  int SetSession(SSL_SESSION* session);
+  int SetSession(v8::Local<v8::Value> buffer);
 
   void MemoryInfo(MemoryTracker* tracker) const override {}
-
   SET_MEMORY_INFO_NAME(QuicClientSession)
   SET_SELF_SIZE(QuicClientSession)
 
@@ -1024,17 +971,12 @@ class QuicClientSession : public QuicSession {
       const ngtcp2_path* path,
       const uint8_t* data,
       size_t datalen) override;
-  int ExtendMaxStreamsUni(
-      uint64_t max_streams) override;
-  int ExtendMaxStreamsBidi(
-      uint64_t max_streams) override;
+  int ExtendMaxStreamsUni(uint64_t max_streams) override;
+  int ExtendMaxStreamsBidi(uint64_t max_streams) override;
   int HandleError() override;
   void InitTLS_Post() override;
   void OnIdleTimeout() override;
-  int OnKey(
-      int name,
-      const uint8_t* secret,
-      size_t secretlen) override;
+  int OnKey(int name, const uint8_t* secret, size_t secretlen) override;
   int Receive(
       ngtcp2_pkt_hd* hd,
       ssize_t nread,
@@ -1049,11 +991,11 @@ class QuicClientSession : public QuicSession {
   bool SendConnectionClose() override;
   int SendPendingData() override;
   int Start() override;
-  void StoreRemoteTransportParams(
-      ngtcp2_transport_params* params) override;
+  void StoreRemoteTransportParams(ngtcp2_transport_params* params) override;
   int TLSHandshake_Complete() override;
   int TLSHandshake_Initial() override;
   int TLSRead() override;
+  int VerifyPeerIdentity(const char* hostname) override;
 
   int Init(
       const struct sockaddr* addr,
@@ -1061,16 +1003,28 @@ class QuicClientSession : public QuicSession {
       v8::Local<v8::Value> early_transport_params,
       v8::Local<v8::Value> session_ticket,
       v8::Local<v8::Value> dcid);
-  int ExtendMaxStreams(
-      bool bidi,
-      uint64_t max_streams);
+  int ExtendMaxStreams(bool bidi, uint64_t max_streams);
   int SetupInitialCryptoContext();
 
-  ngtcp2_crypto_level GetServerCryptoLevel() override;
-  ngtcp2_crypto_level GetClientCryptoLevel() override;
-  void SetServerCryptoLevel(ngtcp2_crypto_level level) override;
-  void SetClientCryptoLevel(ngtcp2_crypto_level level) override;
-  void SetLocalCryptoLevel(ngtcp2_crypto_level level) override;
+  ngtcp2_crypto_level GetServerCryptoLevel() override {
+    return rx_crypto_level_;
+  }
+
+  ngtcp2_crypto_level GetClientCryptoLevel() override {
+    return tx_crypto_level_;
+  }
+
+  void SetServerCryptoLevel(ngtcp2_crypto_level level) override {
+    rx_crypto_level_ = level;
+  }
+
+  void SetClientCryptoLevel(ngtcp2_crypto_level level) override {
+    tx_crypto_level_ = level;
+  }
+
+  void SetLocalCryptoLevel(ngtcp2_crypto_level level) override {
+    SetClientCryptoLevel(level);
+  }
 
   bool resumption_;
   std::string hostname_;

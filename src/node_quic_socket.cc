@@ -5,6 +5,8 @@
 #include "node.h"
 #include "node_crypto.h"
 #include "node_internals.h"
+#include "node_quic_crypto.h"
+#include "node_quic_session-inl.h"
 #include "node_quic_socket.h"
 #include "node_quic_util.h"
 #include "util.h"
@@ -84,7 +86,7 @@ QuicSocket::QuicSocket(
   CHECK_EQ(uv_udp_init(env->event_loop(), &handle_), 0);
   Debug(this, "New QuicSocket created.");
 
-  QuicSession::SetupTokenContext(&token_crypto_ctx_);
+  SetupTokenContext(&token_crypto_ctx_);
   EntropySource(token_secret_.data(), token_secret_.size());
   socket_stats_.created_at = uv_hrtime();
 
@@ -404,7 +406,7 @@ int QuicSocket::SendRetry(
   std::array<uint8_t, 256> token;
   size_t tokenlen = token.size();
 
-  if (QuicSession::GenerateRetryToken(
+  if (GenerateRetryToken(
           token.data(), &tokenlen,
           addr,
           &chd->dcid,
@@ -478,7 +480,7 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
   if (validate_addr_ && hd->type == NGTCP2_PKT_INITIAL) {
     Debug(this, "Stateless address validation.");
     if (hd->tokenlen == 0 ||
-        QuicSession::VerifyRetryToken(
+        VerifyRetryToken(
             env(), &ocid,
             hd, addr,
             &token_crypto_ctx_,

@@ -447,17 +447,12 @@ class Timer {
 
   // If the timer is not currently active, interval must be either 0 or greater.
   // If the timer is already active, interval is ignored.
-  inline void Update(uint64_t interval = -1) {
+  inline void Update(uint64_t interval) {
     if (stopped_)
       return;
-    if (interval >= 0 ||
-        !uv_is_active(reinterpret_cast<uv_handle_t*>(&timer_))) {
-      CHECK_GE(interval, 0);
-      uv_timer_start(&timer_, OnTimeout, interval, 0);
-      uv_unref(reinterpret_cast<uv_handle_t*>(&timer_));
-    } else {
-      uv_timer_again(&timer_);
-    }
+    CHECK_GE(interval, 0);
+    uv_timer_start(&timer_, OnTimeout, interval, interval);
+    uv_unref(reinterpret_cast<uv_handle_t*>(&timer_));
   }
 
 private:
