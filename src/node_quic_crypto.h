@@ -1533,7 +1533,7 @@ inline std::string GetCertificateCN(X509* cert) {
 
 inline void GetCertificateAltNames(
     X509* cert,
-    std::unordered_multimap<std::string,std::string>* map) {
+    std::unordered_multimap<std::string, std::string>* map) {
   crypto::BIOPointer bio(BIO_new(BIO_s_mem()));
   BUF_MEM* mem;
   int idx = X509_get_ext_by_NID(cert, NID_subject_alt_name, -1);
@@ -1572,7 +1572,7 @@ inline void GetCertificateAltNames(
         url::URL url(value.substr(4));
         if (url.flags() & url::URL_FLAGS_CANNOT_BE_BASE ||
             url.flags() & url::URL_FLAGS_FAILED) {
-          continue; // Skip this one
+          continue;  // Skip this one
         }
         map->emplace("uri", url.host());
       }
@@ -1677,8 +1677,8 @@ inline bool CheckCertNames(
 
 inline int VerifyHostnameIdentity(
     const char* hostname,
-    std::string& cert_cn,
-    std::unordered_multimap<std::string,std::string>& altnames) {
+    const std::string& cert_cn,
+    const std::unordered_multimap<std::string, std::string>& altnames) {
 
   int err = X509_V_ERR_HOSTNAME_MISMATCH;
 
@@ -1752,7 +1752,6 @@ inline int VerifyHostnameIdentity(
   // 4. Failing all of the previous checks, we assume the certificate is
   //    invalid for an unspecified reason.
   return err;
-
 }
 
 inline int VerifyHostnameIdentity(SSL* ssl, const char* hostname) {
@@ -1797,7 +1796,7 @@ inline int VerifyHostnameIdentity(SSL* ssl, const char* hostname) {
   // If we've made it this far, then we have to perform a more manual check
 
   // First, grab the Subject Alt Name Extension
-  std::unordered_multimap<std::string,std::string> altnames;
+  std::unordered_multimap<std::string, std::string> altnames;
   GetCertificateAltNames(cert.get(), &altnames);
 
   return VerifyHostnameIdentity(

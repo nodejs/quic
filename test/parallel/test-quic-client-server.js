@@ -208,11 +208,11 @@ server.on('ready', common.mustCall(() => {
     debug('  Bound duration',
           client.boundDuration);
     debug('  Bytes Sent/Received: %d/%d',
-        client.bytesSent,
-        client.bytesReceived);
+          client.bytesSent,
+          client.bytesReceived);
     debug('  Packets Sent/Received: %d/%d',
-        client.packetsSent,
-        client.packetsReceived);
+          client.packetsSent,
+          client.packetsReceived);
     debug('  Sessions:', client.clientSessions);
   });
 
@@ -253,7 +253,7 @@ server.on('ready', common.mustCall(() => {
     common.expectsError(() => { throw req.authenticationError; }, {
       code: 'ERR_QUIC_VERIFY_HOSTNAME_MISMATCH',
       message: 'Hostname mismatch'
-    })
+    });
 
     {
       const {

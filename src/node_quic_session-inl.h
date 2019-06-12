@@ -633,8 +633,8 @@ inline int Empty(const ngtcp2_vec* vec, size_t cnt) {
   return i == cnt;
 }
 
-}
-}
+}  // namespace quic
+}  // namespace node
 
 #endif  // defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 

@@ -455,7 +455,7 @@ class Timer {
     uv_unref(reinterpret_cast<uv_handle_t*>(&timer_));
   }
 
-private:
+ private:
   inline void OnTimeout() {
     fn_(data_);
   }

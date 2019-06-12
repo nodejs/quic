@@ -7,6 +7,7 @@
 #include "node_crypto.h"
 #include "node_internals.h"
 #include "node_quic_crypto.h"
+#include "node_quic_session.h"  // NOLINT(build/include_inline)
 #include "node_quic_session-inl.h"
 #include "node_quic_socket.h"
 #include "node_quic_stream.h"
@@ -30,7 +31,6 @@ using crypto::SecureContext;
 using v8::Array;
 using v8::ArrayBufferView;
 using v8::Context;
-using v8::Float64Array;
 using v8::Function;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
@@ -584,7 +584,7 @@ void QuicSession::HandshakeCompleted() {
     const char* reason = X509_verify_cert_error_string(verifyError);
     verifyErrorReason = OneByteString(env()->isolate(), reason);
     verifyErrorCode =
-        OneByteString(env()->isolate(),X509ErrorCode(verifyError));
+        OneByteString(env()->isolate(), X509ErrorCode(verifyError));
   }
 
   Local<Value> argv[] = {
@@ -1857,7 +1857,6 @@ int QuicServerSession::Receive(
       SetLastError(QUIC_ERROR_SESSION, err);
       HandleError();
     }
-
   }
   return 0;
 }

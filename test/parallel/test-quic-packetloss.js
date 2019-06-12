@@ -8,15 +8,6 @@ const common = require('../common');
 if (!common.hasCrypto)
   common.skip('missing crypto');
 
-const { internalBinding } = require('internal/test/binding');
-const {
-  constants: {
-    NGTCP2_NO_ERROR,
-    QUIC_ERROR_APPLICATION,
-  }
-} = internalBinding('quic');
-
-const { Buffer } = require('buffer');
 const Countdown = require('../common/countdown');
 const assert = require('assert');
 const fs = require('fs');
@@ -82,7 +73,6 @@ server.on('ready', common.mustCall(() => {
     // Set for 20% received packet loss on the server
     server.setDiagnosticPacketLoss({ rx: 0.2 });
 
-    const file = fs.createReadStream(__filename);
     const stream = req.openStream();
 
     let n = 0;
@@ -113,4 +103,3 @@ server.on('ready', common.mustCall(() => {
     debug('Bidirectional, Client-initiated stream %d opened', stream.id);
   }));
 }));
-

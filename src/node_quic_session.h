@@ -227,7 +227,7 @@ class QuicSession : public AsyncWrap,
       crypto::SecureContext* context,
       v8::Local<v8::Value> ocsp_response) {}
   virtual void RemoveFromSocket();
-  virtual int TLSHandshake_Complete() { return 0; };
+  virtual int TLSHandshake_Complete() { return 0; }
 
   // These must be implemented by QuicSession types
   virtual void AddToSocket(QuicSocket* socket) = 0;
