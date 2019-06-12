@@ -889,6 +889,13 @@ int QuicSession::SendStreamData(
   size_t c = vec.size();
   ngtcp2_vec* v = vec.data();
 
+  // If there is no stream data and we're not sending fin,
+  // then just write any pending queued packets and don't
+  // attempt to send any stream data to avoid sending empty
+  // Stream frames.
+  if (c == 0 && stream->IsWritable())
+    return WritePackets();
+
   // Event if there's no data to write, we iterate through just in case
   // ngtcp2 has other frames that it needs to encode.
   for (;;) {
@@ -905,7 +912,6 @@ int QuicSession::SendStreamData(
             reinterpret_cast<const ngtcp2_vec*>(v),
             c,
             uv_hrtime());
-
     if (nwrite < 0) {
       if (nwrite == NGTCP2_ERR_STREAM_DATA_BLOCKED ||
           nwrite == NGTCP2_ERR_EARLY_DATA_REJECTED ||
@@ -949,6 +955,9 @@ int QuicSession::SendPacket() {
         &session_stats::bytes_sent);
     *txbuf_ += std::move(sendbuf_);
   }
+  // There's nothing to send, so let's not try
+  if (txbuf_->Length() == 0)
+    return 0;
   Debug(this, "There are %llu bytes in txbuf_ to send", txbuf_->Length());
   session_stats_.session_sent_at = uv_hrtime();
   ScheduleRetransmit();
