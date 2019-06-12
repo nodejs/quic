@@ -82,7 +82,11 @@ QuicSession::QuicSession(
     stats_buffer_(
       socket->env()->isolate(),
       sizeof(session_stats_) / sizeof(uint64_t),
-      reinterpret_cast<uint64_t*>(&session_stats_)) {
+      reinterpret_cast<uint64_t*>(&session_stats_)),
+    recovery_stats_buffer_(
+      socket->env()->isolate(),
+      sizeof(recovery_stats_) / sizeof(double),
+      reinterpret_cast<double*>(&recovery_stats_)) {
   ssl_.reset(SSL_new(ctx->ctx_.get()));
   SSL_CTX_set_keylog_callback(ctx->ctx_.get(), OnKeylog);
   CHECK(ssl_);
@@ -109,6 +113,12 @@ QuicSession::QuicSession(
       env()->context(),
       env()->stats_string(),
       stats_buffer_.GetJSArray(),
+      PropertyAttribute::ReadOnly));
+
+  USE(wrap->DefineOwnProperty(
+      env()->context(),
+      FIXED_ONE_BYTE_STRING(env()->isolate(), "recoveryStats"),
+      recovery_stats_buffer_.GetJSArray(),
       PropertyAttribute::ReadOnly));
 
   // TODO(@jasnell): memory accounting
@@ -1770,6 +1780,7 @@ int QuicServerSession::Receive(
 
   session_stats_.session_received_at = now;
   SendPendingData();
+
   return 0;
 }
 

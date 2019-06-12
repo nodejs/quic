@@ -686,7 +686,15 @@ class QuicSession : public AsyncWrap,
   };
   session_stats session_stats_{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
+  struct recovery_stats {
+    double min_rtt;
+    double latest_rtt;
+    double smoothed_rtt;
+  };
+  recovery_stats recovery_stats_{0, 0, 0};
+
   AliasedBigUint64Array stats_buffer_;
+  AliasedFloat64Array recovery_stats_buffer_;
 
   template <typename... Members>
   void IncrementSocketStat(
@@ -758,6 +766,12 @@ class QuicSession : public AsyncWrap,
         return;
       session_->SendPendingData();
       session_->idle_->Update(session_->idle_timeout_);
+
+      ngtcp2_rcvry_stat stat;
+      ngtcp2_conn_get_rcvry_stat(session_->connection_, &stat);
+      session_->recovery_stats_.min_rtt = stat.min_rtt;
+      session_->recovery_stats_.latest_rtt = stat.latest_rtt;
+      session_->recovery_stats_.smoothed_rtt = stat.smoothed_rtt;
     }
    private:
     QuicSession* session_;

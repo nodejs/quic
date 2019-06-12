@@ -314,9 +314,9 @@ server.on('ready', common.mustCall(() => {
 server.on('listening', common.mustCall());
 server.on('close', () => {
   debug('Server closing. Duration', server.duration);
-  debug('  Bound duration',
+  debug('  Bound duration:',
         server.boundDuration);
-  debug('  Listen duration',
+  debug('  Listen duration:',
         server.listenDuration);
   debug('  Bytes Sent/Received: %d/%d',
         server.bytesSent,
