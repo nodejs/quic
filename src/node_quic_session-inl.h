@@ -38,8 +38,6 @@ inline void QuicSessionConfig::ResetToDefaults() {
   idle_timeout_ = 10 * 1000;
   max_packet_size_ = NGTCP2_MAX_PKT_SIZE;
   max_ack_delay_ = NGTCP2_DEFAULT_MAX_ACK_DELAY;
-  max_cid_len_ = NGTCP2_MAX_CIDLEN;
-  min_cid_len_ = NGTCP2_MIN_CIDLEN;
   max_crypto_buffer_ = DEFAULT_MAX_CRYPTO_BUFFER;
 }
 
@@ -70,17 +68,10 @@ inline void QuicSessionConfig::Set(
             &max_packet_size_);
   SetConfig(env, IDX_QUIC_SESSION_MAX_ACK_DELAY,
             &max_ack_delay_);
-  SetConfig(env, IDX_QUIC_SESSION_MAX_CID_LEN,
-            &max_cid_len_);
-  SetConfig(env, IDX_QUIC_SESSION_MIN_CID_LEN,
-            &min_cid_len_);
   SetConfig(env, IDX_QUIC_SESSION_MAX_CRYPTO_BUFFER,
             &max_crypto_buffer_);
 
   max_crypto_buffer_ = std::max(max_crypto_buffer_, MINIMUM_MAX_CRYPTO_BUFFER);
-
-  CHECK_LE(max_cid_len_, NGTCP2_MAX_CIDLEN);
-  CHECK_GE(min_cid_len_, NGTCP2_MIN_CIDLEN);
 
   if (preferred_addr != nullptr) {
     preferred_address_set_ = true;

@@ -72,8 +72,6 @@ QuicSession::QuicSession(
     ncread_(0),
     state_(env()->isolate(), IDX_QUIC_SESSION_STATE_COUNT),
     current_ngtcp2_memory_(0),
-    max_cid_len_(NGTCP2_MAX_CIDLEN),
-    min_cid_len_(NGTCP2_MIN_CIDLEN),
     max_crypto_buffer_(DEFAULT_MAX_CRYPTO_BUFFER),
     alpn_(alpn),
     allocator_(this),
@@ -2102,19 +2100,17 @@ int QuicClientSession::Init(
   QuicSessionConfig client_session_config;
   client_session_config.Set(env());
   client_session_config.ToSettings(&settings, nullptr);
-  max_cid_len_ = client_session_config.GetMaxCidLen();
-  min_cid_len_ = client_session_config.GetMinCidLen();
   max_crypto_buffer_ = client_session_config.GetMaxCryptoBuffer();
 
-  scid_.datalen = max_cid_len_;
+  scid_.datalen = NGTCP2_MAX_CIDLEN;
   EntropySource(scid_.data, scid_.datalen);
 
   ngtcp2_cid dcid;
   if (dcid_value->IsArrayBufferView()) {
     ArrayBufferViewContents<uint8_t> sbuf(
         dcid_value.As<ArrayBufferView>());
-    CHECK_LE(sbuf.length(), max_cid_len_);
-    CHECK_GE(sbuf.length(), min_cid_len_);
+    CHECK_LE(sbuf.length(), NGTCP2_MAX_CIDLEN);
+    CHECK_GE(sbuf.length(), NGTCP2_MIN_CIDLEN);
     memcpy(dcid.data, sbuf.data(), sbuf.length());
     dcid.datalen = sbuf.length();
   } else {

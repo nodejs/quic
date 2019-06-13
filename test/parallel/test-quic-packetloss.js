@@ -21,7 +21,7 @@ const debug = debuglog('test');
 const { createSocket } = require('quic');
 
 let client;
-const server = createSocket({ type: 'udp4', port: 5678 });
+const server = createSocket({ type: 'udp4', port: 0 });
 
 const kServerName = 'agent1';
 const kALPN = 'echo';
@@ -43,9 +43,6 @@ server.listen({
 server.on('session', common.mustCall((session) => {
   debug('QuicServerSession Created');
 
-  const kf = fs.createWriteStream('keylog.log');
-  session.on('keylog', (line) => kf.write(line));
-
   session.on('stream', common.mustCall((stream) => {
     debug('Bidirectional, Client-initiated stream %d received', stream.id);
     stream.pipe(stream);
@@ -55,7 +52,7 @@ server.on('session', common.mustCall((session) => {
 
 server.on('ready', common.mustCall(() => {
   debug('Server is listening on port %d', server.address.port);
-  client = createSocket({ port: 5679 });
+  client = createSocket({ port: 0 });
 
   const req = client.connect({
     address: 'localhost',

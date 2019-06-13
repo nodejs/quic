@@ -31,7 +31,7 @@ const filedata = fs.readFileSync(__filename, { encoding: 'utf8' });
 const { createSocket } = require('quic');
 
 let client;
-const server = createSocket({ type: 'udp4', port: 0 });
+const server = createSocket({ port: 0 });
 
 // Diagnostic Packet Loss allows packets to be randomly ignored
 // to simulate network packet loss conditions. This is not a
@@ -183,16 +183,11 @@ server.on('session', common.mustCall((session) => {
 server.on('ready', common.mustCall(() => {
   debug('Server is listening on port %d', server.address.port);
   client = createSocket({
-    type: 'udp4',
     port: 0,
     client: {
-      type: 'udp4',
       key,
       cert,
       ca,
-      maxStreamsUni: 1000,
-      minCidLen: 5,
-      maxCidLen: 10,
       alpn: kALPN,
     }
   });
