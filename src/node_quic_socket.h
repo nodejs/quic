@@ -95,7 +95,8 @@ class QuicSocket : public HandleWrap {
       std::shared_ptr<QuicBuffer> buf);
   void SetServerSessionSettings(
       ngtcp2_cid* pscid,
-      ngtcp2_settings* settings);
+      ngtcp2_settings* settings,
+      size_t* max_crypto_buffer);
   void SetDiagnosticPacketLoss(double rx = 0.0, double tx = 0.0);
 
   crypto::SecureContext* GetServerSecureContext() {

@@ -9,21 +9,39 @@
 #include "node_quic_session.h"
 #include "ngtcp2/ngtcp2.h"
 
+#include <algorithm>
+
 namespace node {
 
 using crypto::EntropySource;
 
 namespace quic {
 
-// Reset the QuicSessionConfig to initial defaults. The default values are set
-// in the QUICSESSION_CONFIG macro definition in node_quic_session.h
-#define V(idx, name, def) name##_ = def;
+namespace {
+
+inline void SetConfig(Environment* env, int idx, uint64_t* val) {
+  AliasedFloat64Array& buffer = env->quic_state()->quicsessionconfig_buffer;
+  uint64_t flags = buffer[IDX_QUIC_SESSION_CONFIG_COUNT];
+  if (flags & (1 << idx))
+    *val = buffer[idx];
+}
+
+}  // namespace
+
 inline void QuicSessionConfig::ResetToDefaults() {
-  QUICSESSION_CONFIG(V)
+  max_stream_data_bidi_local_ = 256 * 1024;
+  max_stream_data_bidi_remote_ = 256 * 1024;
+  max_stream_data_uni_ = 256 * 1024;
+  max_data_ = 1 * 1024 * 1024;
+  max_streams_bidi_ = 100;
+  max_streams_uni_ = 3;
+  idle_timeout_ = 10 * 1000;
+  max_packet_size_ = NGTCP2_MAX_PKT_SIZE;
+  max_ack_delay_ = NGTCP2_DEFAULT_MAX_ACK_DELAY;
   max_cid_len_ = NGTCP2_MAX_CIDLEN;
   min_cid_len_ = NGTCP2_MIN_CIDLEN;
+  max_crypto_buffer_ = DEFAULT_MAX_CRYPTO_BUFFER;
 }
-#undef V
 
 // Sets the QuicSessionConfig using an AliasedBuffer for efficiency.
 inline void QuicSessionConfig::Set(
@@ -34,26 +52,35 @@ inline void QuicSessionConfig::Set(
       env->quic_state()->quicsessionconfig_buffer;
   uint64_t flags = buffer[IDX_QUIC_SESSION_CONFIG_COUNT];
 
-// The following might be non-obvious. The QUICSESSION_CONFIG macro defines
-// the set of numeric configuration values for the QuicSessionConfig. They
-// are defined this way to avoid code duplicate in a couple of places. The
-// following macro expands out to set each member value in the QuicSessionConfig
-// to the corresponding value in the AliasedBuffer
-#define V(idx, name, def)                                                      \
-  if (flags & (1 << IDX_QUIC_SESSION_##idx))                                   \
-    name##_ = static_cast<uint64_t>(buffer[IDX_QUIC_SESSION_##idx]);
-  QUICSESSION_CONFIG(V)
-#undef V
+  SetConfig(env, IDX_QUIC_SESSION_MAX_STREAM_DATA_BIDI_LOCAL,
+            &max_stream_data_bidi_local_);
+  SetConfig(env, IDX_QUIC_SESSION_MAX_STREAM_DATA_BIDI_REMOTE,
+            &max_stream_data_bidi_remote_);
+  SetConfig(env, IDX_QUIC_SESSION_MAX_STREAM_DATA_UNI,
+            &max_stream_data_uni_);
+  SetConfig(env, IDX_QUIC_SESSION_MAX_DATA,
+            &max_data_);
+  SetConfig(env, IDX_QUIC_SESSION_MAX_STREAMS_BIDI,
+            &max_streams_bidi_);
+  SetConfig(env, IDX_QUIC_SESSION_MAX_STREAMS_UNI,
+            &max_streams_uni_);
+  SetConfig(env, IDX_QUIC_SESSION_IDLE_TIMEOUT,
+            &idle_timeout_);
+  SetConfig(env, IDX_QUIC_SESSION_MAX_PACKET_SIZE,
+            &max_packet_size_);
+  SetConfig(env, IDX_QUIC_SESSION_MAX_ACK_DELAY,
+            &max_ack_delay_);
+  SetConfig(env, IDX_QUIC_SESSION_MAX_CID_LEN,
+            &max_cid_len_);
+  SetConfig(env, IDX_QUIC_SESSION_MIN_CID_LEN,
+            &min_cid_len_);
+  SetConfig(env, IDX_QUIC_SESSION_MAX_CRYPTO_BUFFER,
+            &max_crypto_buffer_);
 
-  if (flags & (1 << IDX_QUIC_SESSION_MAX_CID_LEN)) {
-    max_cid_len_ = static_cast<size_t>(buffer[IDX_QUIC_SESSION_MAX_CID_LEN]);
-    CHECK_LE(max_cid_len_, NGTCP2_MAX_CIDLEN);
-  }
+  max_crypto_buffer_ = std::max(max_crypto_buffer_, MINIMUM_MAX_CRYPTO_BUFFER);
 
-  if (flags & (1 << IDX_QUIC_SESSION_MIN_CID_LEN)) {
-    min_cid_len_ = static_cast<size_t>(buffer[IDX_QUIC_SESSION_MIN_CID_LEN]);
-    CHECK_GE(min_cid_len_, NGTCP2_MIN_CIDLEN);
-  }
+  CHECK_LE(max_cid_len_, NGTCP2_MAX_CIDLEN);
+  CHECK_GE(min_cid_len_, NGTCP2_MIN_CIDLEN);
 
   if (preferred_addr != nullptr) {
     preferred_address_set_ = true;
@@ -77,9 +104,16 @@ inline void QuicSessionConfig::ToSettings(
     ngtcp2_cid* pscid,
     bool stateless_reset_token) {
   ngtcp2_settings_default(settings);
-#define V(idx, name, def) settings->name = name##_;
-  QUICSESSION_CONFIG(V)
-#undef V
+
+  settings->max_stream_data_bidi_local = max_stream_data_bidi_local_;
+  settings->max_stream_data_bidi_remote = max_stream_data_bidi_remote_;
+  settings->max_stream_data_uni = max_stream_data_uni_;
+  settings->max_data = max_data_;
+  settings->max_streams_bidi = max_streams_bidi_;
+  settings->max_streams_uni = max_streams_uni_;
+  settings->idle_timeout = idle_timeout_;
+  settings->max_packet_size = max_packet_size_;
+  settings->max_ack_delay = max_ack_delay_;
 
   settings->log_printf = DebugLog;
   settings->initial_ts = uv_hrtime();

@@ -74,6 +74,7 @@ QuicSession::QuicSession(
     current_ngtcp2_memory_(0),
     max_cid_len_(NGTCP2_MAX_CIDLEN),
     min_cid_len_(NGTCP2_MIN_CIDLEN),
+    max_crypto_buffer_(DEFAULT_MAX_CRYPTO_BUFFER),
     alpn_(alpn),
     allocator_(this),
     cert_cb_running_(false),
@@ -1221,6 +1222,8 @@ int QuicSession::WritePeerHandshake(
   CHECK(!IsDestroyed());
   if (rx_crypto_level_ != crypto_level)
     return -1;
+  if (peer_handshake_.size() + datalen > max_crypto_buffer_)
+    return NGTCP2_ERR_CRYPTO_BUFFER_EXCEEDED;
   Debug(this, "Writing %d bytes of peer handshake data.", datalen);
   std::copy_n(data, datalen, std::back_inserter(peer_handshake_));
   return 0;
@@ -1446,7 +1449,10 @@ void QuicServerSession::Init(
   InitTLS();
 
   ngtcp2_settings settings{};
-  Socket()->SetServerSessionSettings(this->pscid(), &settings);
+  Socket()->SetServerSessionSettings(
+      this->pscid(),
+      &settings,
+      &max_crypto_buffer_);
   idle_timeout_ = settings.idle_timeout;
 
   EntropySource(scid_.data, NGTCP2_SV_SCIDLEN);
@@ -2098,6 +2104,7 @@ int QuicClientSession::Init(
   client_session_config.ToSettings(&settings, nullptr);
   max_cid_len_ = client_session_config.GetMaxCidLen();
   min_cid_len_ = client_session_config.GetMinCidLen();
+  max_crypto_buffer_ = client_session_config.GetMaxCryptoBuffer();
 
   scid_.datalen = max_cid_len_;
   EntropySource(scid_.data, scid_.datalen);

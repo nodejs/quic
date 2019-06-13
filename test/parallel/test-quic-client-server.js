@@ -71,7 +71,8 @@ server.listen({
   ca,
   requestCert: true,
   rejectUnauthorized: false,
-  alpn: kALPN
+  alpn: kALPN,
+  maxCryptoBuffer: 4096,
 });
 server.on('session', common.mustCall((session) => {
   debug('QuicServerSession Created');

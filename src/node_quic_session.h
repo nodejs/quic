@@ -32,21 +32,8 @@ class QuicStream;
 constexpr int ERR_INVALID_REMOTE_TRANSPORT_PARAMS = -1;
 constexpr int ERR_INVALID_TLS_SESSION_TICKET = -2;
 
-#define QUICSESSION_CONFIG(V)                                                 \
-  V(MAX_STREAM_DATA_BIDI_LOCAL, max_stream_data_bidi_local, 256 * 1024)       \
-  V(MAX_STREAM_DATA_BIDI_REMOTE, max_stream_data_bidi_remote, 256 * 1024)     \
-  V(MAX_STREAM_DATA_UNI, max_stream_data_uni, 256 * 1024)                     \
-  V(MAX_DATA, max_data, 1 * 1024 * 1024)                                      \
-  V(MAX_STREAMS_BIDI, max_streams_bidi, 100)                                  \
-  V(MAX_STREAMS_UNI, max_streams_uni, 3)                                      \
-  V(IDLE_TIMEOUT, idle_timeout, 10 * 1000)                                    \
-  V(MAX_PACKET_SIZE, max_packet_size, NGTCP2_MAX_PKT_SIZE)                    \
-  V(MAX_ACK_DELAY, max_ack_delay, NGTCP2_DEFAULT_MAX_ACK_DELAY)
-
-#define V(idx, name, def)                                                     \
-  constexpr uint64_t IDX_QUIC_SESSION_## idx ##_DEFAULT = def;
-  QUICSESSION_CONFIG(V)
-#undef V
+constexpr size_t MINIMUM_MAX_CRYPTO_BUFFER = 4096;
+constexpr size_t DEFAULT_MAX_CRYPTO_BUFFER = MINIMUM_MAX_CRYPTO_BUFFER * 4;
 
 // The QuicSessionConfig class holds the initial transport parameters and
 // configuration options set by the JavaScript side when either a
@@ -78,14 +65,23 @@ class QuicSessionConfig {
 
   size_t GetMaxCidLen() { return max_cid_len_; }
   size_t GetMinCidLen() { return min_cid_len_; }
+  size_t GetMaxCryptoBuffer() { return max_crypto_buffer_; }
 
  private:
-#define V(idx, name, def) uint64_t name##_ = def;
-  QUICSESSION_CONFIG(V)
-#undef V
+  uint64_t max_stream_data_bidi_local_ = 256 * 1024;
+  uint64_t max_stream_data_bidi_remote_ = 256 * 1024;
+  uint64_t max_stream_data_uni_ = 256 * 1024;
+  uint64_t max_data_ = 1 * 1024 * 1024;
+  uint64_t max_streams_bidi_ = 100;
+  uint64_t max_streams_uni_ = 3;
+  uint64_t idle_timeout_ = 10 * 1000;
+  uint64_t max_packet_size_ = NGTCP2_MAX_PKT_SIZE;
+  uint64_t max_ack_delay_ = NGTCP2_DEFAULT_MAX_ACK_DELAY;
+
   bool preferred_address_set_ = false;
   size_t max_cid_len_ = NGTCP2_MAX_CIDLEN;
   size_t min_cid_len_ = NGTCP2_MIN_CIDLEN;
+  size_t max_crypto_buffer_ = DEFAULT_MAX_CRYPTO_BUFFER;
   SocketAddress preferred_address_;
 };
 
@@ -641,6 +637,7 @@ class QuicSession : public AsyncWrap,
   uint64_t current_ngtcp2_memory_;
   size_t max_cid_len_;
   size_t min_cid_len_;
+  size_t max_crypto_buffer_;
 
   std::string alpn_;
 
