@@ -2313,6 +2313,8 @@ void QuicClientSession::InitTLS_Post() {
   // information, use localhost.
 
   if (SocketAddress::numeric_host(hostname_.c_str())) {
+    // TODO(@jasnell): Should we do this at all? If the host is numeric,
+    // the we likely shouldn't set the SNI at all.
     Debug(this, "Using localhost as fallback hostname.");
     SSL_set_tlsext_host_name(ssl(), "localhost");
   } else {
