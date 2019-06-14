@@ -192,13 +192,6 @@ server.on('ready', common.mustCall(() => {
     }
   });
 
-  const req = client.connect({
-    address: 'localhost',
-    port: server.address.port,
-    servername: kServerName,
-    requestOCSP: true,
-  });
-
   client.on('close', () => {
     debug('Client closing. Duration', client.duration);
     debug('  Bound duration',
@@ -210,6 +203,13 @@ server.on('ready', common.mustCall(() => {
           client.packetsSent,
           client.packetsReceived);
     debug('  Sessions:', client.clientSessions);
+  });
+
+  const req = client.connect({
+    address: 'localhost',
+    port: server.address.port,
+    servername: kServerName,
+    requestOCSP: true,
   });
 
   assert.strictEqual(req.servername, kServerName);

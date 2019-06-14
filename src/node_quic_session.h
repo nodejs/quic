@@ -376,6 +376,10 @@ class QuicSession : public AsyncWrap,
     const ngtcp2_preferred_addr* paddr) { return 0; }
   virtual void StoreRemoteTransportParams(ngtcp2_transport_params* params) {}
   virtual int Start() { return 0; }
+  virtual void VersionNegotiation(
+      const ngtcp2_pkt_hd* hd,
+      const uint32_t* sv,
+      size_t nsv) {};
 
   virtual void InitTLS_Post() = 0;
   virtual ngtcp2_crypto_level GetServerCryptoLevel() = 0;
@@ -562,6 +566,12 @@ class QuicSession : public AsyncWrap,
       uint64_t max_data,
       void* user_data,
       void* stream_user_data);
+  static inline int OnVersionNegotiation(
+      ngtcp2_conn* conn,
+      const ngtcp2_pkt_hd* hd,
+      const uint32_t* sv,
+      size_t nsv,
+      void* user_data);
   static inline void OnKeylog(const SSL* ssl, const char* line);
 
   typedef ssize_t(*ngtcp2_close_fn)(
@@ -1026,6 +1036,12 @@ class QuicClientSession : public QuicSession {
     SetClientCryptoLevel(level);
   }
 
+  void VersionNegotiation(
+      const ngtcp2_pkt_hd* hd,
+      const uint32_t* sv,
+      size_t nsv) override;
+
+  uint32_t version_;
   bool resumption_;
   std::string hostname_;
   uint32_t port_;
@@ -1039,7 +1055,7 @@ class QuicClientSession : public QuicSession {
     nullptr,
     OnReceiveCryptoData,
     OnHandshakeCompleted,
-    nullptr,
+    OnVersionNegotiation,
     OnDoHSEncrypt,
     OnDoHSDecrypt,
     OnDoEncrypt,

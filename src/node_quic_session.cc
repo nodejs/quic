@@ -1977,6 +1977,7 @@ QuicClientSession::QuicClientSession(
         context,
         AsyncWrap::PROVIDER_QUICCLIENTSESSION,
         alpn),
+    version_(version),
     resumption_(false),
     hostname_(hostname),
     select_preferred_address_policy_(select_preferred_address_policy),
@@ -2040,6 +2041,38 @@ void QuicClientSession::AddToSocket(QuicSocket* socket) {
   }
 }
 
+void QuicClientSession::VersionNegotiation(
+      const ngtcp2_pkt_hd* hd,
+      const uint32_t* sv,
+      size_t nsv) {
+  CHECK(!IsDestroyed());
+  HandleScope scope(env()->isolate());
+  Local<Context> context = env()->context();
+  Context::Scope context_scope(context);
+
+  Local<Array> versions = Array::New(env()->isolate(), nsv);
+  for (size_t n = 0; n < nsv; n++) {
+    versions->Set(
+        env()->context(), n,
+        Integer::New(env()->isolate(), sv[n]));
+  }
+
+  Local<Array> supportedVersions = Array::New(env()->isolate(), 1);
+  supportedVersions->Set(
+      env()->context(), 0,
+      Integer::New(env()->isolate(), NGTCP2_PROTO_VER));
+
+  Local<Value> argv[] = {
+    Integer::New(env()->isolate(), version_),
+    versions,
+    supportedVersions
+  };
+
+  MakeCallback(
+      env()->quic_on_session_version_negotiation_function(),
+      arraysize(argv), argv);
+}
+
 int QuicClientSession::DoHandshake(
     const ngtcp2_path* path,
     const uint8_t* data,
@@ -2047,7 +2080,11 @@ int QuicClientSession::DoHandshake(
   CHECK(!IsDestroyed());
   RETURN_RET_IF_FAIL(SendPacket(), 0);
   int err = DoHandshakeReadOnce(path, data, datalen);
-  if (err != 0) {
+  if (err == NGTCP2_ERR_RECV_VERSION_NEGOTIATION) {
+    SetLastError(QUIC_ERROR_SESSION, err);
+    Close();
+    return -1;
+  } else if (err != 0) {
     SetLastError(QUIC_ERROR_CRYPTO, err);
     Close();
     return -1;
@@ -2447,6 +2484,12 @@ bool QuicClientSession::SendConnectionClose() {
   MallocedBuffer<uint8_t> data(max_pktlen_);
   sendbuf_.Cancel();
   QuicError error = GetLastError();
+
+  // Do not send a connection close for version negotiation
+  if (error.family == QUIC_ERROR_SESSION &&
+      error.code == NGTCP2_ERR_RECV_VERSION_NEGOTIATION) {
+    return 0;
+  }
   ssize_t nwrite =
       SelectCloseFn(error.family)(
         connection_,

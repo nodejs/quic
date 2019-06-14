@@ -590,6 +590,17 @@ inline int QuicSession::OnPathValidation(
   return 0;
 }
 
+inline int QuicSession::OnVersionNegotiation(
+    ngtcp2_conn* conn,
+    const ngtcp2_pkt_hd* hd,
+    const uint32_t* sv,
+    size_t nsv,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  session->VersionNegotiation(hd, sv, nsv);
+  return 0;
+}
+
 inline void QuicSession::OnKeylog(const SSL* ssl, const char* line) {
   QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
   session->Keylog(line);
