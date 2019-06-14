@@ -422,14 +422,14 @@ int QuicSocket::SendRetry(
   ssize_t nwrite =
       ngtcp2_pkt_write_retry(
           **req,
-          NGTCP2_MAX_PKTLEN_IPV6,
+          NGTCP2_MAX_PKTLEN_IPV4,
           &hd,
           &chd->dcid,
           token.data(),
           tokenlen);
   if (nwrite <= 0)
     return nwrite;
-
+  req->SetLength(nwrite);
   return req->Send();
 }
 
@@ -475,10 +475,15 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
   }
 
   ngtcp2_cid ocid;
-  ngtcp2_cid* pocid = nullptr;
-  // TODO(@jasnell): Need to verify that stateless address validation
-  // is happening correctly.
+
+  // QUIC has address validation built in to the handshake but allows for
+  // an additional explicit validation request using RETRY frames. If we
+  // are using explicit validation, we check for the existence of a valid
+  // retry token in the packet. If one does not exist, we send a retry with
+  // a new token. If it does exist, and if it's valid, we grab the original
+  // cid and continue.
   if (validate_addr_ && hd->type == NGTCP2_PKT_INITIAL) {
+    Debug(this, "Performing explicit address validation.");
     if (hd->tokenlen == 0 ||
         VerifyRetryToken(
             env(), &ocid,
@@ -489,7 +494,7 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
       SendRetry(hd, addr);
       return session;
     }
-    pocid = &ocid;
+    Debug(this, "A valid retry token was found. Continuing.");
   }
 
   session =
@@ -498,7 +503,7 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
           &hd->dcid,
           addr,
           &hd->scid,
-          pocid,
+          &ocid,
           hd->version,
           server_alpn_,
           reject_unauthorized_,

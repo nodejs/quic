@@ -31,7 +31,7 @@ const filedata = fs.readFileSync(__filename, { encoding: 'utf8' });
 const { createSocket } = require('quic');
 
 let client;
-const server = createSocket({ port: 0 });
+const server = createSocket({ port: 0, validateAddress: true });
 
 // Diagnostic Packet Loss allows packets to be randomly ignored
 // to simulate network packet loss conditions. This is not a

@@ -1421,6 +1421,7 @@ inline int GenerateRetryToken(
 
   if (n < 0)
     return -1;
+
   memcpy(token + n, rand_data.data(), rand_data.size());
   *tokenlen = n + rand_data.size();
   return 0;
@@ -1435,17 +1436,7 @@ inline int VerifyRetryToken(
     std::array<uint8_t, TOKEN_SECRETLEN>* token_secret,
     uint64_t verification_expiration) {
 
-  uv_getnameinfo_t info;
-  char* host = nullptr;
   const size_t addrlen = SocketAddress::GetAddressLen(addr);
-  if (uv_getnameinfo(
-          env->event_loop(),
-          &info, nullptr,
-          addr, NI_NUMERICSERV) == 0) {
-    DCHECK_EQ(SocketAddress::GetPort(addr), std::stoi(info.service));
-  } else {
-    SocketAddress::GetAddress(addr, &host);
-  }
 
   if (hd->tokenlen < TOKEN_RAND_DATALEN)
     return  -1;
@@ -1500,6 +1491,8 @@ inline int VerifyRetryToken(
   // minimum and a MAX_RETRYTOKEN_EXPIRATION second maximum.
   if (t + verification_expiration * NGTCP2_SECONDS < now)
     return -1;
+
+  ngtcp2_cid_init(ocid, plaintext.data() + addrlen + sizeof(uint64_t), cil);
 
   return 0;
 }

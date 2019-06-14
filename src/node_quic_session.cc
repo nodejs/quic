@@ -2114,7 +2114,7 @@ int QuicClientSession::Init(
     memcpy(dcid.data, sbuf.data(), sbuf.length());
     dcid.datalen = sbuf.length();
   } else {
-    dcid.datalen = max_cid_len_;
+    dcid.datalen = NGTCP2_MAX_CIDLEN;
     EntropySource(dcid.data, dcid.datalen);
   }
 
@@ -2254,8 +2254,7 @@ int QuicClientSession::SetSocket(
 int QuicClientSession::Start() {
   for (auto stream : streams_)
     RETURN_RET_IF_FAIL(Send0RTTStreamData(stream.second), 0);
-  int err = DoHandshakeWriteOnce();
-  return err;
+  return DoHandshakeWriteOnce();
 }
 
 void QuicClientSession::StoreRemoteTransportParams(
@@ -2434,6 +2433,7 @@ int QuicClientSession::Receive(
 // by generating new initial crypto material.
 int QuicClientSession::ReceiveRetry() {
   CHECK(!IsDestroyed());
+  Debug(this, "A retry packet was received. Restarting the handshake.");
   IncrementStat(1, &session_stats_, &session_stats::retry_count);
   return SetupInitialCryptoContext();
 }
@@ -2494,6 +2494,7 @@ int QuicClientSession::SetSession(Local<Value> buffer) {
 // client side by creating the initial keying material.
 int QuicClientSession::SetupInitialCryptoContext() {
   CHECK(!IsDestroyed());
+  Debug(this, "Setting up initial crypto context");
 
   CryptoInitialParams params;
   const ngtcp2_cid* dcid = ngtcp2_conn_get_dcid(connection_);

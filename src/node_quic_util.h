@@ -146,7 +146,9 @@ class SocketAddress {
   }
 
   static size_t GetMaxPktLen(const sockaddr* addr) {
-    return addr->sa_family ? NGTCP2_MAX_PKTLEN_IPV6 : NGTCP2_MAX_PKTLEN_IPV4;
+    return addr->sa_family == AF_INET6 ?
+        NGTCP2_MAX_PKTLEN_IPV6 :
+        NGTCP2_MAX_PKTLEN_IPV4;
   }
 
   static int ResolvePreferredAddress(
