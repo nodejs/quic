@@ -468,7 +468,6 @@ constexpr size_t kFsStatsBufferLength =
   V(quic_on_stream_ready_function, v8::Function)                               \
   V(quic_on_stream_close_function, v8::Function)                               \
   V(quic_on_stream_error_function, v8::Function)                               \
-  V(quic_on_stream_reset_function, v8::Function)                               \
   V(script_data_constructor_function, v8::Function)                            \
   V(tick_callback_function, v8::Function)                                      \
   V(timers_callback_function, v8::Function)                                    \

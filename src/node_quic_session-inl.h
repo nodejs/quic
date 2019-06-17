@@ -105,7 +105,6 @@ inline void QuicSessionConfig::ToSettings(
   settings->idle_timeout = idle_timeout_;
   settings->max_packet_size = max_packet_size_;
   settings->max_ack_delay = max_ack_delay_;
-
   settings->log_printf = DebugLog;
   settings->initial_ts = uv_hrtime();
   settings->disable_migration = 0;

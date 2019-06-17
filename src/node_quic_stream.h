@@ -148,6 +148,8 @@ class QuicStream : public AsyncWrap,
 
   virtual void AckedDataOffset(uint64_t offset, size_t datalen);
 
+  virtual void DoClose(uint16_t app_error_code = 0);
+
   virtual void Close(uint16_t app_error_code = 0);
 
   virtual void Reset(uint64_t final_size, uint16_t app_error_code = 0);

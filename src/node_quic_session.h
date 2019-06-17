@@ -201,10 +201,7 @@ class QuicSession : public AsyncWrap,
       });
   inline void SetLastError(QuicErrorFamily family, int code);
   int SetRemoteTransportParams(ngtcp2_transport_params* params);
-  int ShutdownStreamRead(
-      int64_t stream_id,
-      uint16_t code = NGTCP2_APP_NOERROR);
-  int ShutdownStreamWrite(
+  int ShutdownStream(
       int64_t stream_id,
       uint16_t code = NGTCP2_APP_NOERROR);
   int TLSRead();
@@ -1076,10 +1073,10 @@ class QuicClientSession : public QuicSession {
     OnRemoveConnectionID,
     OnUpdateKey,
     OnPathValidation,
-    OnSelectPreferredAddress,  // select_preferred_addr
-    nullptr,  // stream_reset
-    nullptr,  // extend_max_remote_streams_bidi
-    nullptr,  // extend_max_remote_streams_uni
+    OnSelectPreferredAddress,
+    OnStreamReset,
+    OnExtendMaxStreamsBidi,
+    OnExtendMaxStreamsUni,
     OnExtendMaxStreamData
   };
 

@@ -1074,20 +1074,14 @@ int QuicSession::SetRemoteTransportParams(ngtcp2_transport_params* params) {
   return ngtcp2_conn_set_remote_transport_params(connection_, params);
 }
 
-int QuicSession::ShutdownStreamRead(int64_t stream_id, uint16_t code) {
+int QuicSession::ShutdownStream(int64_t stream_id, uint16_t code) {
   CHECK(!IsDestroyed());
-  return ngtcp2_conn_shutdown_stream_read(
-      connection_,
-      stream_id,
-      code);
-}
-
-int QuicSession::ShutdownStreamWrite(int64_t stream_id, uint16_t code) {
-  CHECK(!IsDestroyed());
-  return ngtcp2_conn_shutdown_stream_write(
-      connection_,
-      stream_id,
-      code);
+  RETURN_RET_IF_FAIL(
+      ngtcp2_conn_shutdown_stream(
+          connection_,
+          stream_id,
+          code), 0);
+  return WritePackets();
 }
 
 // Called by ngtcp2 when a stream has been closed. If the stream does

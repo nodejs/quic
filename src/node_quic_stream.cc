@@ -157,6 +157,17 @@ inline void QuicStream::SetInitialFlags() {
   }
 }
 
+// Abruptly closes the stream and triggers the sending of STOP_SENDING
+// and RESET_STREAM frames to the peer if necessary
+void QuicStream::DoClose(uint16_t app_error_code) {
+  // Mark the stream no longer readable or writable.
+  SetWriteClose();
+  SetReadClose();
+  // Triggers emitting STOP_SENDING and RESET_STREAM frames
+  // to the peer.
+  session_->ShutdownStream(GetID(), app_error_code);
+}
+
 // QuicStream::Close() is called by the QuicSession when ngtcp2 detects that
 // a stream has been closed. This, in turn, calls out to the JavaScript to
 // start the process of tearing down and destroying the QuicStream instance.
@@ -166,8 +177,10 @@ void QuicStream::Close(uint16_t app_error_code) {
   SetWriteClose();
   HandleScope scope(env()->isolate());
   Context::Scope context_context(env()->context());
-  Local<Value> arg = Number::New(env()->isolate(), app_error_code);
-  MakeCallback(env()->quic_on_stream_close_function(), 1, &arg);
+  Local<Value> argv[] = {
+    Number::New(env()->isolate(), app_error_code)
+  };
+  MakeCallback(env()->quic_on_stream_close_function(), arraysize(argv), argv);
 }
 
 // Receiving a reset means that any data we've accumulated to send
@@ -185,10 +198,10 @@ void QuicStream::Reset(uint64_t final_size, uint16_t app_error_code) {
   Context::Scope context_scope(env()->context());
   streambuf_.Cancel();
   Local<Value> argv[] = {
+    Number::New(env()->isolate(), app_error_code),
     Number::New(env()->isolate(), static_cast<double>(final_size)),
-    Integer::New(env()->isolate(), app_error_code)
   };
-  MakeCallback(env()->quic_on_stream_reset_function(), arraysize(argv), argv);
+  MakeCallback(env()->quic_on_stream_close_function(), arraysize(argv), argv);
 }
 
 void QuicStream::Destroy() {
@@ -393,8 +406,12 @@ void QuicStream::ReceiveData(
         memcpy(buf.base, data, avail);
       data += avail;
       datalen -= avail;
+      bool read_paused = IsReadPaused();
       EmitRead(avail, buf);
-      if (IsReadPaused())
+      // Reading can be paused while we are processing. If that's
+      // the case, we still want to acknowledge the current bytes
+      // so that pausing does not throw off our flow control.
+      if (read_paused)
         inbound_consumed_data_while_paused_ += avail;
       else
         session_->ExtendStreamOffset(this, avail);
@@ -473,6 +490,16 @@ void OpenBidirectionalStream(const FunctionCallbackInfo<Value>& args) {
   args.GetReturnValue().Set(stream->object());
 }
 
+void QuicStreamClose(const FunctionCallbackInfo<Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  QuicStream* stream;
+  ASSIGN_OR_RETURN_UNWRAP(&stream, args.Holder());
+  uint32_t app_error_code = NGTCP2_APP_NOERROR;
+  args[0]->Uint32Value(env->context()).To(&app_error_code);
+  CHECK_LE(app_error_code, std::numeric_limits<uint16_t>::max());
+  stream->DoClose(static_cast<uint16_t>(app_error_code));
+}
+
 void QuicStreamDestroy(const FunctionCallbackInfo<Value>& args) {
   QuicStream* stream;
   ASSIGN_OR_RETURN_UNWRAP(&stream, args.Holder());
@@ -493,6 +520,7 @@ void QuicStream::Initialize(
   Local<ObjectTemplate> streamt = stream->InstanceTemplate();
   streamt->SetInternalFieldCount(StreamBase::kStreamBaseFieldCount);
   streamt->Set(env->owner_symbol(), Null(env->isolate()));
+  env->SetProtoMethod(stream, "close", QuicStreamClose);
   env->SetProtoMethod(stream,
                       "destroy",
                       QuicStreamDestroy);

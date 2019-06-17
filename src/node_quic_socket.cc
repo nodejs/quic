@@ -475,6 +475,7 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
   }
 
   ngtcp2_cid ocid;
+  ngtcp2_cid* ocid_ptr = nullptr;
 
   // QUIC has address validation built in to the handshake but allows for
   // an additional explicit validation request using RETRY frames. If we
@@ -495,6 +496,7 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
       return session;
     }
     Debug(this, "A valid retry token was found. Continuing.");
+    ocid_ptr = &ocid;
   }
 
   session =
@@ -503,7 +505,7 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
           &hd->dcid,
           addr,
           &hd->scid,
-          &ocid,
+          ocid_ptr,
           hd->version,
           server_alpn_,
           reject_unauthorized_,
