@@ -597,7 +597,7 @@ int QuicSocket::SendPacket(
 void QuicSocket::SetServerSessionSettings(
     ngtcp2_cid* pscid,
     ngtcp2_settings* settings,
-    size_t* max_crypto_buffer) {
+    uint64_t* max_crypto_buffer) {
   server_session_config_.ToSettings(settings, pscid, true);
   *max_crypto_buffer = server_session_config_.GetMaxCryptoBuffer();
 }

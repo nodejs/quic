@@ -63,7 +63,7 @@ class QuicSessionConfig {
       ngtcp2_cid* pscid,
       bool stateless_reset_token = false);
 
-  size_t GetMaxCryptoBuffer() { return max_crypto_buffer_; }
+  uint64_t GetMaxCryptoBuffer() { return max_crypto_buffer_; }
 
  private:
   uint64_t max_stream_data_bidi_local_ = 256 * 1024;
@@ -75,9 +75,10 @@ class QuicSessionConfig {
   uint64_t idle_timeout_ = 10 * 1000;
   uint64_t max_packet_size_ = NGTCP2_MAX_PKT_SIZE;
   uint64_t max_ack_delay_ = NGTCP2_DEFAULT_MAX_ACK_DELAY;
+  uint64_t max_crypto_buffer_ = DEFAULT_MAX_CRYPTO_BUFFER;
 
   bool preferred_address_set_ = false;
-  size_t max_crypto_buffer_ = DEFAULT_MAX_CRYPTO_BUFFER;
+
   SocketAddress preferred_address_;
 };
 
@@ -638,7 +639,7 @@ class QuicSession : public AsyncWrap,
 
   // The amount of memory allocated by ngtcp2 internals
   uint64_t current_ngtcp2_memory_;
-  size_t max_crypto_buffer_;
+  uint64_t max_crypto_buffer_;
 
   std::string alpn_;
 

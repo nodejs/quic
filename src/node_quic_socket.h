@@ -96,7 +96,7 @@ class QuicSocket : public HandleWrap {
   void SetServerSessionSettings(
       ngtcp2_cid* pscid,
       ngtcp2_settings* settings,
-      size_t* max_crypto_buffer);
+      uint64_t* max_crypto_buffer);
   void SetDiagnosticPacketLoss(double rx = 0.0, double tx = 0.0);
 
   crypto::SecureContext* GetServerSecureContext() {
