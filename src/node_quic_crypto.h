@@ -4,7 +4,7 @@
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
 #include "node_crypto.h"
-#include "node_quic_session.h"
+#include "node_quic_session-inl.h"
 #include "node_quic_util.h"
 #include "node_url.h"
 
@@ -1516,7 +1516,8 @@ inline std::string GetCertificateCN(X509* cert) {
       if (cn != nullptr) {
         ASN1_STRING* cn_str = X509_NAME_ENTRY_get_data(cn);
         if (cn_str != nullptr) {
-          return std::string(reinterpret_cast<char*>(ASN1_STRING_data(cn_str)));
+          return std::string(reinterpret_cast<const char*>(
+              ASN1_STRING_get0_data(cn_str)));
         }
       }
     }

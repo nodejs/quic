@@ -5,7 +5,7 @@
 #include "node_buffer.h"
 #include "node_internals.h"
 #include "stream_base-inl.h"
-#include "node_quic_session.h"
+#include "node_quic_session-inl.h"
 #include "node_quic_stream.h"
 #include "node_quic_socket.h"
 #include "node_quic_util.h"
@@ -495,7 +495,7 @@ void QuicStreamClose(const FunctionCallbackInfo<Value>& args) {
   QuicStream* stream;
   ASSIGN_OR_RETURN_UNWRAP(&stream, args.Holder());
   uint32_t app_error_code = NGTCP2_APP_NOERROR;
-  args[0]->Uint32Value(env->context()).To(&app_error_code);
+  USE(args[0]->Uint32Value(env->context()).To(&app_error_code));
   CHECK_LE(app_error_code, std::numeric_limits<uint16_t>::max());
   stream->DoClose(static_cast<uint16_t>(app_error_code));
 }

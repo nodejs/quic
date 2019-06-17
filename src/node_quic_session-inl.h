@@ -4,6 +4,7 @@
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
 #include "aliased_buffer.h"
+#include "debug_utils.h"
 #include "env-inl.h"
 #include "node_crypto.h"
 #include "node_quic_session.h"
@@ -46,9 +47,6 @@ inline void QuicSessionConfig::Set(
     Environment* env,
     const sockaddr* preferred_addr) {
   ResetToDefaults();
-  AliasedFloat64Array& buffer =
-      env->quic_state()->quicsessionconfig_buffer;
-  uint64_t flags = buffer[IDX_QUIC_SESSION_CONFIG_COUNT];
 
   SetConfig(env, IDX_QUIC_SESSION_MAX_STREAM_DATA_BIDI_LOCAL,
             &max_stream_data_bidi_local_);

@@ -45,8 +45,6 @@ class AliasedBufferBase {
       buffer_(buffer) {
     CHECK_GT(count, 0);
     const v8::HandleScope handle_scope(isolate_);
-    const size_t size_in_bytes =
-        MultiplyWithOverflowCheck(sizeof(NativeT), count);
 
     v8::Local<v8::ArrayBuffer> ab =
         v8::ArrayBuffer::New(

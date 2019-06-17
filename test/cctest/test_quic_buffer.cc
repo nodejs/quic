@@ -1,5 +1,5 @@
 #include "node_quic_buffer.h"
-#include "util.h"
+#include "util-inl.h"
 #include "uv.h"
 
 #include "gtest/gtest.h"
@@ -291,71 +291,6 @@ TEST(QuicBuffer, Append) {
   CHECK_EQ(0, buffer1.Size());
   CHECK_EQ(200, buffer2.Length());
   CHECK_EQ(2, buffer2.Size());
-}
-
-TEST(QuicBuffer, DrainInto) {
-  TestBuffer buf1(100);
-  TestBuffer buf2(50, 1);
-  TestBuffer buf3(50, 2);
-  int count = 0;
-
-  auto cb = [&](int status, void* user_data) {
-    TestBuffer* test_buffer = static_cast<TestBuffer*>(user_data);
-    test_buffer->Done();
-    count++;
-  };
-
-  QuicBuffer buffer;
-  {
-    uv_buf_t b = buf1.ToUVBuf();
-    buffer.Push(&b, 1, cb, &buf1);
-  }
-  {
-    uv_buf_t b = buf2.ToUVBuf();
-    buffer.Push(&b, 1, cb, &buf2);
-  }
-  {
-    uv_buf_t b = uv_buf_init(nullptr, 0);
-    buffer.Push(&b, 1);
-  }
-
-  {
-    std::vector<uv_buf_t> vec;
-    size_t len = buffer.DrainInto(&vec);
-    CHECK_EQ(2, vec.size());
-    buffer.SeekHead(len);
-  }
-
-  {
-    uv_buf_t b = buf2.ToUVBuf();
-    buffer.Push(&b, 1, cb, &buf3);
-  }
-
-  CHECK_EQ(3, buffer.Size());
-
-  {
-    std::vector<uv_buf_t> vec;
-    size_t len = buffer.DrainInto(&vec);
-    CHECK_EQ(1, vec.size());
-    buffer.SeekHead(len);
-  }
-
-  {
-    std::vector<uv_buf_t> vec;
-    buffer.DrainInto(&vec, QuicBuffer::DRAIN_FROM_ROOT);
-    CHECK_EQ(3, vec.size());
-  }
-
-  buffer.Consume(150);
-
-  {
-    std::vector<uv_buf_t> vec;
-    buffer.DrainInto(&vec, QuicBuffer::DRAIN_FROM_ROOT);
-    CHECK_EQ(1, vec.size());
-  }
-
-  buffer.Consume(50);
-  CHECK_EQ(3, count);
 }
 
 TEST(QuicBuffer, MallocedBuffer) {

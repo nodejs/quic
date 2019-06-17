@@ -1542,8 +1542,8 @@ int QuicServerSession::OnClientHello() {
   Context::Scope context_scope(env()->context());
   client_hello_cb_running_ = true;
 
-  const char* server_name;
-  const char* alpn;
+  const char* server_name = nullptr;
+  const char* alpn = nullptr;
   int* exts;
   size_t len;
   SSL_client_hello_get1_extensions_present(ssl(), &exts, &len);
@@ -2046,15 +2046,15 @@ void QuicClientSession::VersionNegotiation(
 
   Local<Array> versions = Array::New(env()->isolate(), nsv);
   for (size_t n = 0; n < nsv; n++) {
-    versions->Set(
+    USE(versions->Set(
         env()->context(), n,
-        Integer::New(env()->isolate(), sv[n]));
+        Integer::New(env()->isolate(), sv[n])));
   }
 
   Local<Array> supportedVersions = Array::New(env()->isolate(), 1);
-  supportedVersions->Set(
+  USE(supportedVersions->Set(
       env()->context(), 0,
-      Integer::New(env()->isolate(), NGTCP2_PROTO_VER));
+      Integer::New(env()->isolate(), NGTCP2_PROTO_VER)));
 
   Local<Value> argv[] = {
     Integer::New(env()->isolate(), version_),

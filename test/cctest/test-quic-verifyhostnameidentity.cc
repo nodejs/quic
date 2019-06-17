@@ -1,4 +1,5 @@
 
+#include "base_object-inl.h"
 #include "node_quic_crypto.h"
 #include "util.h"
 #include "gtest/gtest.h"

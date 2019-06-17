@@ -24,7 +24,6 @@
 #include "node_crypto_bio.h"
 #include "node_crypto_clienthello-inl.h"
 #include "node_crypto_groups.h"
-#include "node_quic_session.h"
 #include "node_errors.h"
 #include "node_mutex.h"
 #include "node_process.h"

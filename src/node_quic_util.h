@@ -452,7 +452,6 @@ class Timer {
   inline void Update(uint64_t interval) {
     if (stopped_)
       return;
-    CHECK_GE(interval, 0);
     uv_timer_start(&timer_, OnTimeout, interval, interval);
     uv_unref(reinterpret_cast<uv_handle_t*>(&timer_));
   }
