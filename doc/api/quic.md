@@ -20,8 +20,8 @@ const cert = getTLSCertSomehow();
 
 const { createSocket } = require('quic');
 
-// Create the local QUIC UDP socket...
-const socket = createSocket({ type: 'udp4', port: 1234 });
+// Create the local QUIC UDP IPv4 socket...
+const socket = createSocket({ port: 1234 });
 
 // Tell the socket to operate as a server...
 socket.listen({ key, cert });
@@ -74,11 +74,14 @@ added: REPLACEME
   * `maxConnectionsPerHost` {number} The maximum number of inbound connections
     per remote host. Default: `100`.
   * `port` {number} The local port to bind to.
-  * `retryTokenTimeout` {number} The maximum number of seconds for retry token
-    validation. Defaults: `10`.
+  * `retryTokenTimeout` {number} The maximum number of *seconds* for retry token
+    validation. Default: `10`.
   * `server` {Object} A default configuration for QUIC server sessions.
   * `type` {string} Either `'udp4'` or `'upd6'` to use either IPv4 or IPv6,
      respectively.
+  * `validateAddress` {boolean} When `true`, the `QuicSocket` will use explicit
+    address validation using a QUIC `RETRY` frame when listening for new server
+    sessions. Default: `false`.
 
 Creates a new `QuicSocket` instance.
 
@@ -130,6 +133,43 @@ The callback will be invoked with a single argument:
 
 * `maxStreams` {number} The new maximum number of unidirectional streams
 
+### Event: `'keylog'`
+<!-- YAML
+added: REPLACEME
+-->
+
+Emitted when key material is generated or received by a `QuicSession` (typically
+during or immediately following the handshake process). This keying material can be
+stored for debugging, as it allows captured TLS traffic to be decrypted. It may be
+emitted multiple times per `QuicSession` instance.
+
+The callback will be invoked with a single argument:
+
+* `line` <Buffer> Line of ASCII text, in NSS SSLKEYLOGFILE format.
+
+A typical use case is to append received lines to a common text file, which is later
+used by software (such as Wireshark) to decrypt the traffic:
+
+```
+const log = fs.createWriteStream('/tmp/ssl-keys.log', { flags: 'a' });
+// ...
+session.on('keylog', (line) => log.write(line));
+```
+
+### Event: `'pathValidation'`
+<!-- YAML
+added: REPLACEME
+-->
+
+Emitted when a path validation result as been determined.
+
+The callback will be invoked with three arguments:
+
+* `result` {string} Either `'failure'` or `'success'`, denoting the status
+  of the path challenge.
+* `local` {Address} The local address component of the tested path.
+* `remote` {Address} The remote address component of the tested path.
+
 ### Event: `'secure'`
 <!-- YAML
 added: REPLACEME
@@ -154,6 +194,7 @@ added: REPLACEME
 -->
 
 Emitted when a new `QuicStream` has been initiated by the connected peer.
+
 
 ### quicsession.alpnProtocol
 <!-- YAML
@@ -301,7 +342,22 @@ added: REPLACEME
 The `QuicClientSession` class implements the client side of a QUIC connection.
 Instances are created using the `quicsocket.connect()` method.
 
+### Event: `'OCSPResponse'`
+<!-- YAML
+added: REPLACEME
+-->
+
+Emitted when the `QuicClientSession` receives a requested OCSP certificate status
+response from the QUIC server peer.
+
+The callback is invoked with a single argument:
+
+* `response` {Buffer}
+
 ### Event: `'sessionTicket'`
+<!-- YAML
+added: REPLACEME
+-->
 
 The `'sessionTicket'` event is emitted when a new TLS session ticket has been
 generated for the current `QuicClientSession`. The callback is invoked with
@@ -314,6 +370,23 @@ three arguments:
 
 The `sessionTicket` and `remoteTransportParams` are useful when creating a new
 `QuicClientSession` to more quickly resume an existing session.
+
+### Event: `'versionNegotiation'`
+<!-- YAML
+added: REPLACEME
+-->
+
+Emitted when the `QuicSession` has received a version negotiation response from
+a server. The `QuicSession` will be immediately destroyed after the `'versionNegotiation'`
+event has been emitted.
+
+The callback will be invoked with three arguments:
+
+* `version` { number } The QUIC protocol version used by the `QuicClientSession`.
+* `requestedVersions` { number[] } The QUIC protocol versions supported by the
+  QUIC server.
+* `supportedVersions` { number[] } The QUIC protocol versions supposed by the
+  current Node.js implementation.
 
 ### quicclientsession.ephemeralKeyInfo
 <!-- YAML
@@ -377,6 +450,39 @@ added: REPLACEME
 The `QuicServerSession` class implements the server side of a QUIC connection.
 Instances are created internally and are emitted using the `QuicSocket`
 `'session'` event.
+
+### Event: `'clientHello'`
+<!-- YAML
+added: REPLACEME
+-->
+
+Emitted at the start of the TLS handshake when the `QuicServerSession` receives the
+initial TLS Client Hello.
+
+The event handler is given a callback function that *must* be invoked for the handshake
+to continue.
+
+The callback is invoked with four arguments:
+
+* `alpn` {string} The ALPN protocol identifier requested by the client.
+* `servername` {string} The SNI servername requested by the client.
+* `ciphers` {string[]} The list of TLS cipher algorithms requested by the client.
+* `callback` {Function} A callback function that must be called in order for the
+  TLS handshake to continue.
+
+### Event: `'OCSPRequest'`
+<!-- YAML
+added: REPLACEME
+-->
+
+Emitted when the `QuicServerSession` has received a OCSP certificate status request as
+part of the TLS handshake.
+
+The callback is invoked with three arguments:
+
+* `servername` {string}
+* `context` {ServerContext}
+* `callback` {Function}
 
 ## Class: QuicSocket
 <!-- YAML
@@ -544,7 +650,7 @@ added: REPLACEME
     `object.passphrase` is optional. Encrypted keys will be decrypted with
     `object.passphrase` if provided, or `options.passphrase` if it is not.
   * `maxAckDelay` {number}
-  * `maxCidLen` {number}
+  * `maxCryptoBuffer` {number}
   * `maxData` {number}
   * `maxPacketSize` {number}
   * `maxStreamDataBidiLocal` {number}
@@ -552,7 +658,6 @@ added: REPLACEME
   * `maxStreamDataUni` {number}
   * `maxStreamsBidi` {number}
   * `maxStreamsUni` {number}
-  * `minCidLen` {number}
   * `passphrase` {string} Shared passphrase used for a single private key and/or
     a PFX.
   * `pfx` {string|string[]|Buffer|Buffer[]|Object[]} PFX or PKCS12 encoded
@@ -570,10 +675,14 @@ added: REPLACEME
     transport parameters from a previously established session. These would
     have been provided as part of the `'sessionTicket'` event on a previous
     `QuicClientSession` object.
+  * `requestOCSP` {boolean} If `true`, specifies that the OCSP status request
+    extension will be added to the client hello and an `'OCSPResponse'` event
+    will be emitted before establishing a secure communication.
   * `secureOptions` {number} Optionally affect the OpenSSL protocol behavior,
     which is not usually necessary. This should be used carefully if at all!
     Value is a numeric bitmask of the `SSL_OP_*` options from
     [OpenSSL Options][].
+  * `servername` {string} The SNI servername.
   * `sessionIdContext` {string} Opaque identifier used by servers to ensure
     session state is not shared between applications. Unused by clients.
   * `sessionTicket`: {Buffer|TypedArray|DataView} The serialized TLS Session
@@ -698,7 +807,7 @@ added: REPLACEME
     `object.passphrase` is optional. Encrypted keys will be decrypted with
     `object.passphrase` if provided, or `options.passphrase` if it is not.
   * `maxAckDelay` {number}
-  * `maxCidLen` {number}
+  * `maxCryptoBuffer` {number}
   * `maxData` {number}
   * `maxPacketSize` {number}
   * `maxStreamsBidi` {number}
@@ -706,7 +815,6 @@ added: REPLACEME
   * `maxStreamDataBidiLocal` {number}
   * `maxStreamDataBidiRemote` {number}
   * `maxStreamDataUni` {number}
-  * `minCidLen` {number}
   * `passphrase` {string} Shared passphrase used for a single private key and/or
     a PFX.
   * `pfx` {string|string[]|Buffer|Buffer[]|Object[]} PFX or PKCS12 encoded
@@ -722,6 +830,10 @@ added: REPLACEME
     * `address` {string}
     * `port` {number}
     * `type` {string} `'udp4'` or `'udp6'`.
+  * `requestCert` {boolean} Request a certificate used to authenticate the client.
+  * `rejectUnauthorized` {boolean} If not `false` the server will reject any
+    connection which is not authorized with the list of supplied CAs. This option
+    only has an effect if `requestCert` is `true`. Default: `true`.
   * `secureOptions` {number} Optionally affect the OpenSSL protocol behavior,
     which is not usually necessary. This should be used carefully if at all!
     Value is a numeric bitmask of the `SSL_OP_*` options from
@@ -898,12 +1010,31 @@ added: REPLACEME
 -->
 * Extends: {stream.Duplex}
 
+### Event: `'abort'`
+<!-- YAML
+added: REPLACEME
+-->
+
+Emitted when the `QuicStream` is close abruptly before the readable
+or writable side has closed naturally.
+
+The callback is invoked with two arguments:
+
+* `code` {number} The QUIC application error code used to terminate the stream.
+* `finalSize` {number} The total number of bytes received by the `QuicStream`
+  as of the moment the stream was closed.
+
 ### Event: `'close'`
 <!-- YAML
 added: REPLACEME
 -->
 
 ### Event: `'data'`
+<!-- YAML
+added: REPLACEME
+-->
+
+### Event: `'end'`
 <!-- YAML
 added: REPLACEME
 -->

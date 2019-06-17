@@ -507,8 +507,7 @@ inline int QuicSession::OnSelectPreferredAddress(
   return 0;
 }
 
-// Called by ngtcp2 when a stream has been closed for any
-// reason.
+// Called by ngtcp2 when a stream has been closed for any reason.
 inline int QuicSession::OnStreamClose(
     ngtcp2_conn* conn,
     int64_t stream_id,
