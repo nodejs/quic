@@ -49,7 +49,7 @@ server.on('session', common.mustCall((session) => {
       assert.strictEqual(finalSize, 0);
     }));
 
-    // end will be called because the writable side is closed before
+    // End will be called because the writable side is closed before
     // close is event called. The data event will never be emitted.
     uni.on('data', common.mustNotCall());
     uni.on('end', common.mustCall());
@@ -120,7 +120,7 @@ server.on('ready', common.mustCall(() => {
       assert.strict(finalSize, 11); // The server sent 'hello there'
     }));
 
-    // finish and end are not called because the stream has closed abruptly
+    // Finish and end are not called because the stream has closed abruptly
     // before the stream was finished.
     stream.on('finish', common.mustNotCall());
     stream.on('end', common.mustNotCall());
@@ -138,8 +138,8 @@ server.on('ready', common.mustCall(() => {
 
     stream.on('abort', common.mustCall((code, finalSize) => {
       debug('Unidirectional, Server-initiated stream %d aborted', stream.id);
-      assert.strictEqual(2, code);
-      assert.strictEqual(2, finalSize);
+      assert.strictEqual(code, 2);
+      assert.strictEqual(finalSize, 2);
     }));
 
     // The data event will be emitted once...

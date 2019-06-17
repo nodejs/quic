@@ -4,7 +4,8 @@
 
 > Stability: 1 - Experimental
 
-The `quic` module provides an implementation of the QUIC protocol. To access it:
+The `quic` module provides an implementation of the QUIC protocol. To
+access it:
 
 ```js
 const quic = require('quic');
@@ -138,19 +139,19 @@ The callback will be invoked with a single argument:
 added: REPLACEME
 -->
 
-Emitted when key material is generated or received by a `QuicSession` (typically
-during or immediately following the handshake process). This keying material can be
-stored for debugging, as it allows captured TLS traffic to be decrypted. It may be
-emitted multiple times per `QuicSession` instance.
+Emitted when key material is generated or received by a `QuicSession`
+(typically during or immediately following the handshake process). This keying
+material can be stored for debugging, as it allows captured TLS traffic to be
+decrypted. It may be emitted multiple times per `QuicSession` instance.
 
 The callback will be invoked with a single argument:
 
 * `line` <Buffer> Line of ASCII text, in NSS SSLKEYLOGFILE format.
 
-A typical use case is to append received lines to a common text file, which is later
-used by software (such as Wireshark) to decrypt the traffic:
+A typical use case is to append received lines to a common text file, which is
+later used by software (such as Wireshark) to decrypt the traffic:
 
-```
+```js
 const log = fs.createWriteStream('/tmp/ssl-keys.log', { flags: 'a' });
 // ...
 session.on('keylog', (line) => log.write(line));
@@ -347,8 +348,8 @@ Instances are created using the `quicsocket.connect()` method.
 added: REPLACEME
 -->
 
-Emitted when the `QuicClientSession` receives a requested OCSP certificate status
-response from the QUIC server peer.
+Emitted when the `QuicClientSession` receives a requested OCSP certificate
+status response from the QUIC server peer.
 
 The callback is invoked with a single argument:
 
@@ -377,8 +378,8 @@ added: REPLACEME
 -->
 
 Emitted when the `QuicSession` has received a version negotiation response from
-a server. The `QuicSession` will be immediately destroyed after the `'versionNegotiation'`
-event has been emitted.
+a server. The `QuicSession` will be immediately destroyed after the
+`'versionNegotiation'` event has been emitted.
 
 The callback will be invoked with three arguments:
 
@@ -456,27 +457,28 @@ Instances are created internally and are emitted using the `QuicSocket`
 added: REPLACEME
 -->
 
-Emitted at the start of the TLS handshake when the `QuicServerSession` receives the
-initial TLS Client Hello.
+Emitted at the start of the TLS handshake when the `QuicServerSession` receives
+the initial TLS Client Hello.
 
-The event handler is given a callback function that *must* be invoked for the handshake
-to continue.
+The event handler is given a callback function that *must* be invoked for the
+handshake to continue.
 
 The callback is invoked with four arguments:
 
 * `alpn` {string} The ALPN protocol identifier requested by the client.
 * `servername` {string} The SNI servername requested by the client.
-* `ciphers` {string[]} The list of TLS cipher algorithms requested by the client.
-* `callback` {Function} A callback function that must be called in order for the
-  TLS handshake to continue.
+* `ciphers` {string[]} The list of TLS cipher algorithms requested by the
+  client.
+* `callback` {Function} A callback function that must be called in order for
+  the TLS handshake to continue.
 
 ### Event: `'OCSPRequest'`
 <!-- YAML
 added: REPLACEME
 -->
 
-Emitted when the `QuicServerSession` has received a OCSP certificate status request as
-part of the TLS handshake.
+Emitted when the `QuicServerSession` has received a OCSP certificate status
+request as part of the TLS handshake.
 
 The callback is invoked with three arguments:
 
@@ -815,8 +817,8 @@ added: REPLACEME
   * `maxStreamDataBidiLocal` {number}
   * `maxStreamDataBidiRemote` {number}
   * `maxStreamDataUni` {number}
-  * `passphrase` {string} Shared passphrase used for a single private key and/or
-    a PFX.
+  * `passphrase` {string} Shared passphrase used for a single private key
+    and/or a PFX.
   * `pfx` {string|string[]|Buffer|Buffer[]|Object[]} PFX or PKCS12 encoded
     private key and certificate chain. `pfx` is an alternative to providing
     `key` and `cert` individually. PFX is usually encrypted, if it is,
@@ -830,10 +832,11 @@ added: REPLACEME
     * `address` {string}
     * `port` {number}
     * `type` {string} `'udp4'` or `'udp6'`.
-  * `requestCert` {boolean} Request a certificate used to authenticate the client.
+  * `requestCert` {boolean} Request a certificate used to authenticate the
+    client.
   * `rejectUnauthorized` {boolean} If not `false` the server will reject any
-    connection which is not authorized with the list of supplied CAs. This option
-    only has an effect if `requestCert` is `true`. Default: `true`.
+    connection which is not authorized with the list of supplied CAs. This
+    option only has an effect if `requestCert` is `true`. Default: `true`.
   * `secureOptions` {number} Optionally affect the OpenSSL protocol behavior,
     which is not usually necessary. This should be used carefully if at all!
     Value is a numeric bitmask of the `SSL_OP_*` options from

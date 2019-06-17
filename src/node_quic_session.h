@@ -376,7 +376,7 @@ class QuicSession : public AsyncWrap,
   virtual void VersionNegotiation(
       const ngtcp2_pkt_hd* hd,
       const uint32_t* sv,
-      size_t nsv) {};
+      size_t nsv) {}
 
   virtual void InitTLS_Post() = 0;
   virtual ngtcp2_crypto_level GetServerCryptoLevel() = 0;

@@ -780,8 +780,8 @@ void QuicSocketSetDiagnosticPacketLoss(
   ASSIGN_OR_RETURN_UNWRAP(&socket, args.Holder());
   double rx = 0.0f;
   double tx = 0.0f;
-  args[0]->NumberValue(env->context()).To(&rx);
-  args[1]->NumberValue(env->context()).To(&tx);
+  USE(args[0]->NumberValue(env->context()).To(&rx));
+  USE(args[1]->NumberValue(env->context()).To(&tx));
   CHECK_GE(rx, 0.0f);
   CHECK_GE(tx, 0.0f);
   CHECK_LE(rx, 1.0f);

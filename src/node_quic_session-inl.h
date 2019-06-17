@@ -18,16 +18,12 @@ using crypto::EntropySource;
 
 namespace quic {
 
-namespace {
-
 inline void SetConfig(Environment* env, int idx, uint64_t* val) {
   AliasedFloat64Array& buffer = env->quic_state()->quicsessionconfig_buffer;
   uint64_t flags = buffer[IDX_QUIC_SESSION_CONFIG_COUNT];
   if (flags & (1 << idx))
     *val = buffer[idx];
 }
-
-}  // namespace
 
 inline void QuicSessionConfig::ResetToDefaults() {
   max_stream_data_bidi_local_ = 256 * 1024;
