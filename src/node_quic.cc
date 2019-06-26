@@ -56,12 +56,14 @@ void QuicSetCallbacks(const FunctionCallbackInfo<Value>& args) {
   SETFUNCTION("onSessionHandshake", session_handshake);
   SETFUNCTION("onSessionKeylog", session_keylog);
   SETFUNCTION("onSessionPathValidation", session_path_validation);
+  SETFUNCTION("onSessionSilentClose", session_silent_close);
   SETFUNCTION("onSessionStatus", session_status);
   SETFUNCTION("onSessionTicket", session_ticket);
   SETFUNCTION("onSessionVersionNegotiation", session_version_negotiation);
   SETFUNCTION("onStreamReady", stream_ready);
   SETFUNCTION("onStreamClose", stream_close);
   SETFUNCTION("onStreamError", stream_error);
+  SETFUNCTION("onStreamReset", stream_reset);
 
 #undef SETFUNCTION
 }

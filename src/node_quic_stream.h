@@ -120,6 +120,10 @@ class QuicStream : public AsyncWrap,
     return session_ == nullptr;
   }
 
+  inline bool IsFin() {
+    return flags_ & QUICSTREAM_FLAG_FIN;
+  }
+
   inline bool IsWritable() {
     return (flags_ & QUICSTREAM_FLAG_WRITE) == 0;
   }
@@ -147,8 +151,6 @@ class QuicStream : public AsyncWrap,
   QuicSession* Session() { return session_; }
 
   virtual void AckedDataOffset(uint64_t offset, size_t datalen);
-
-  virtual void DoClose(uint16_t app_error_code = 0);
 
   virtual void Close(uint16_t app_error_code = 0);
 
@@ -210,9 +212,14 @@ class QuicStream : public AsyncWrap,
     QUICSTREAM_FLAG_INITIAL = 0,
     QUICSTREAM_FLAG_READ = 1,
     QUICSTREAM_FLAG_WRITE = 2,
-    QUICSTREAM_FLAG_READ_STARTED = 3,
-    QUICSTREAM_FLAG_READ_PAUSED = 8
+    QUICSTREAM_FLAG_READ_STARTED = 4,
+    QUICSTREAM_FLAG_FIN = 8,
+    QUICSTREAM_FLAG_READ_PAUSED = 10
   };
+
+  inline void SetFin() {
+    flags_ |= QUICSTREAM_FLAG_FIN;
+  }
 
   inline void SetWriteClose() {
     flags_ |= QUICSTREAM_FLAG_WRITE;

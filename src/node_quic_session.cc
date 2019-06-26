@@ -195,7 +195,7 @@ void QuicSession::AckedStreamDataOffset(
 // streams added must be removed before the QuicSession instance is freed.
 void QuicSession::AddStream(QuicStream* stream) {
   CHECK(!IsDestroyed());
-  CHECK(!IsClosing());
+  CHECK(!IsGracefullyClosing());
   Debug(this, "Adding stream %llu to session.", stream->GetID());
   streams_.emplace(stream->GetID(), stream);
 
@@ -230,11 +230,18 @@ void QuicSession::AssociateCID(ngtcp2_cid* cid) {
   Socket()->AssociateCID(&id, &scid);
 }
 
-// Called when the QuicSession is closed and we need to let the javascript
-// side know. The error may be either a QUIC connection error code or an
-// application error code, with the type differentiating between the two.
-// The default type is QUIC_CLOSE_CONNECTION.
-void QuicSession::Close() {
+void QuicSession::ImmediateClose() {
+  // Like the silent close, the immediate close must start with
+  // the JavaScript side, first shutting down any existing
+  // streams before entering the closing period. Unlike silent
+  // close, however, all streams are closed using proper
+  // STOP_SENDING and RESET_STREAM frames and a CONNECTION_CLOSE
+  // frame is ultimately sent to the peer. This makes the
+  // naming a bit of a misnomer in that the connection is
+  // not immediately torn down, but is allowed to drain
+  // properly per the QUIC spec description of "immediate close".
+  Debug(this, "Immediate close for Quic%sSession",
+        IsServer() ? "Server" : "Client");
   CHECK(!IsDestroyed());
   HandleScope scope(env()->isolate());
   Local<Context> context = env()->context();
@@ -251,7 +258,7 @@ void QuicSession::Close() {
 // This has to be called from within a handlescope/contextscope.
 QuicStream* QuicSession::CreateStream(int64_t stream_id) {
   CHECK(!IsDestroyed());
-  CHECK(!IsClosing());
+  CHECK(!IsGracefullyClosing());
   QuicStream* stream = QuicStream::New(this, stream_id);
   CHECK_NOT_NULL(stream);
   Local<Value> argv[] = {
@@ -265,18 +272,12 @@ QuicStream* QuicSession::CreateStream(int64_t stream_id) {
 // Destroy the QuicSession and free it. The QuicSession
 // cannot be safely used after this is called.
 void QuicSession::Destroy() {
+  Debug(this, "Destroying");
   if (IsDestroyed())
     return;
 
-  // Streams should have already been closed and destroyed by this point...
+  // Streams should have already been destroyed by this point...
   CHECK(streams_.empty());
-
-  Debug(this, "Destroying a %s QuicSession.", IsServer() ? "server" : "client");
-
-  // The first step is to transmit a CONNECTION_CLOSE to the connected peer.
-  // This is going to be fire-and-forget because we're not going to wait
-  // around for it to be received.
-  SendConnectionClose();
 
   // Hold on to a reference until the function exits
   // so the instance is not prematurely deleted when
@@ -293,8 +294,6 @@ void QuicSession::Destroy() {
   handshake_.Cancel();
   txbuf_->Cancel();
 
-  // Removing from the socket will free the shared_ptr there
-  // that is keeping this alive.
   RemoveFromSocket();
   socket_ = nullptr;
   destroyed_ = true;
@@ -629,20 +628,6 @@ bool QuicSession::IsHandshakeCompleted() {
   return ngtcp2_conn_get_handshake_completed(connection_);
 }
 
-// This differs from IsClosing in that IsClosing indicates
-// only that we've started a graceful shutdown of the QuicSession,
-// while IsInClosingPeriod reflects the state of the underlying
-// ngtcp2 connection.
-bool QuicSession::IsInClosingPeriod() {
-  CHECK(!IsDestroyed());
-  return ngtcp2_conn_is_in_closing_period(connection_);
-}
-
-bool QuicSession::IsInDrainingPeriod() {
-  CHECK(!IsDestroyed());
-  return ngtcp2_conn_is_in_draining_period(connection_);
-}
-
 // TLS Keylogging is enabled per-QuicSession by attaching an handler to the
 // "keylog" event. Each keylog line is emitted to JavaScript where it can
 // be routed to whatever destination makes sense. Typically, this will be
@@ -663,13 +648,13 @@ void QuicSession::Keylog(const char* line) {
 
 int QuicSession::OpenBidirectionalStream(int64_t* stream_id) {
   CHECK(!IsDestroyed());
-  CHECK(!IsClosing());
+  CHECK(!IsGracefullyClosing());
   return ngtcp2_conn_open_bidi_stream(connection_, stream_id, nullptr);
 }
 
 int QuicSession::OpenUnidirectionalStream(int64_t* stream_id) {
   CHECK(!IsDestroyed());
-  CHECK(!IsClosing());
+  CHECK(!IsGracefullyClosing());
   int err = ngtcp2_conn_open_uni_stream(connection_, stream_id, nullptr);
   ngtcp2_conn_shutdown_stream_read(connection_, *stream_id, 0);
   return err;
@@ -798,7 +783,7 @@ int QuicSession::ReceiveStreamData(
   QuicStream* stream = FindStream(stream_id);
   if (stream == nullptr) {
     // Shutdown the stream explicitly if the session is being closed.
-    if (IsClosing()) {
+    if (IsGracefullyClosing()) {
       return ngtcp2_conn_shutdown_stream(
           connection_,
           stream_id,
@@ -858,7 +843,7 @@ void QuicSession::RemoveFromSocket() {
     socket_->DisassociateCID(&id);
   }
 
-  Debug(this, "Remove this QuicClientSession from the QuicSocket.");
+  Debug(this, "Removed from the QuicSocket.");
   QuicCID scid(scid_);
   socket_->RemoveSession(&scid, **GetRemoteAddress());
 }
@@ -876,6 +861,7 @@ void QuicSession::ScheduleRetransmit() {
   uint64_t now = uv_hrtime();
   uint64_t expiry = ngtcp2_conn_get_expiry(connection_);
   uint64_t interval = (expiry < now) ? 1 : (expiry - now);
+  Debug(this, "Scheduling the retransmit timer for %llu", interval);
   retransmit_->Update(interval);
 }
 
@@ -940,11 +926,15 @@ int QuicSession::Send0RTTStreamData(
 }
 
 // Sends buffered stream data.
-int QuicSession::SendStreamData(
-    QuicStream* stream) {
+int QuicSession::SendStreamData(QuicStream* stream) {
   CHECK(!IsDestroyed());
   ssize_t ndatalen = 0;
   QuicPathStorage path;
+
+  // During the draining or closing periods, we should not
+  // send any frames to the peer.
+  if (IsInDrainingPeriod() || IsInClosingPeriod())
+    return 0;
 
   // If we are blocked from sending any data because of
   // flow control, don't try.
@@ -1036,11 +1026,12 @@ int QuicSession::SendPendingData() {
     return 0;
 
   // If the server is in the process of closing or draining
-  // the connection, do nothing.
+  // the connection, we cannot send any packets to the peer.
   if (IsServer() && (IsInClosingPeriod() || IsInDrainingPeriod()))
     return 0;
 
-  // If there's anything currently in the sendbuf_, send it.
+  // If there's anything currently in the sendbuf_, send it before
+  // serializing anything else.
   RETURN_RET_IF_FAIL(SendPacket(), 0);
 
   // If the handshake is not yet complete, perform the handshake.
@@ -1076,12 +1067,30 @@ int QuicSession::SetRemoteTransportParams(ngtcp2_transport_params* params) {
 
 int QuicSession::ShutdownStream(int64_t stream_id, uint16_t code) {
   CHECK(!IsDestroyed());
+  // First, update the internal ngtcp2 state of the given stream
+  // and schedule the STOP_SENDING and RESET_STREAM frames as
+  // appropriate.
   RETURN_RET_IF_FAIL(
       ngtcp2_conn_shutdown_stream(
           connection_,
           stream_id,
           code), 0);
+  // Once scheduled, trigger immediately serialization and sending
+  // of the STOP_SENDING and RESET_STREAM frames. Additional frames
+  // may also be sent at this time.
   return WritePackets();
+}
+
+void QuicSession::SilentClose() {
+  // Silent Close must start with the JavaScript side, which must
+  // clean up state, abort any still existing QuicSessions, then
+  // destroy the handle when done. The most important characteristic
+  // of the SilentClose is that no frames are sent to the peer.
+  Debug(this, "Silent close for Quic%sSession",
+        IsServer() ? "Server" : "Client");
+  HandleScope scope(env()->isolate());
+  Context::Scope context_scope(env()->context());
+  MakeCallback(env()->quic_on_session_silent_close_function(), 0, nullptr);
 }
 
 // Called by ngtcp2 when a stream has been closed. If the stream does
@@ -1091,9 +1100,19 @@ void QuicSession::StreamClose(int64_t stream_id, uint16_t app_error_code) {
   if (IsDestroyed())
     return;
   Debug(this, "Closing stream %llu with code %d", stream_id, app_error_code);
-  QuicStream* stream = FindStream(stream_id);
-  if (stream != nullptr)
-    stream->Close(app_error_code);
+
+  if (FindStream(stream_id) == nullptr)
+    return;
+
+  HandleScope scope(env()->isolate());
+  Context::Scope context_scope(env()->context());
+
+  Local<Value> argv[] = {
+    Number::New(env()->isolate(), static_cast<double>(stream_id)),
+    Integer::New(env()->isolate(), app_error_code)
+  };
+
+  MakeCallback(env()->quic_on_stream_close_function(), arraysize(argv), argv);
 }
 
 // Called by ngtcp2 when a stream has been opened. If the stream has already
@@ -1104,7 +1123,7 @@ void QuicSession::StreamClose(int64_t stream_id, uint16_t app_error_code) {
 // that we are not committing resources until we actually need to.
 int QuicSession::StreamOpen(int64_t stream_id) {
   CHECK(!IsDestroyed());
-  if (IsClosing()) {
+  if (IsGracefullyClosing()) {
     return ngtcp2_conn_shutdown_stream(
         connection_,
         stream_id,
@@ -1117,21 +1136,38 @@ int QuicSession::StreamOpen(int64_t stream_id) {
   if (stream != nullptr)
     return NGTCP2_STREAM_STATE_ERROR;
   CreateStream(stream_id);
-  idle_->Update(idle_timeout_);
+  UpdateIdleTimer(idle_timeout_);
   return 0;
 }
 
-// Called by ngtcp2 when a stream has been reset. Resetting a streams
-// allows it's state to be completely reset for the purposes of canceling
-// transmission of stream data.
+// Called when the QuicSession has received a RESET_STREAM frame from the
+// peer, indicating that it will no longer send additional frames for the
+// stream. If the stream is not yet known, reset is ignored. If the stream
+// has already received a STREAM frame with fin set, the stream reset is
+// ignored (the QUIC spec permits implementations to handle this situation
+// however they want.) If the stream has not yet received a STREAM frame
+// with the fin set, then the RESET_STREAM causes the readable side of the
+// stream to be abruptly closed and any additional stream frames that may
+// be received will be discarded if their offset is greater than final_size.
+// On the JavaScript side, receiving a StreamReset is undistinguishable from
+// a normal end-of-stream. No additional data events will be emitted, the
+// end event will be emitted, and the readable side of the duplex will be
+// closed.
+//
+// If the stream is still writable, no additional action is taken. If,
+// however, the writable side of the stream has been closed (or was never
+// open in the first place as in the case of peer-initiated unidirectional
+// streams), the reset will cause the stream to be immediately destroyed.
 void QuicSession::StreamReset(
     int64_t stream_id,
     uint64_t final_size,
     uint16_t app_error_code) {
   CHECK(!IsDestroyed());
   QuicStream* stream = FindStream(stream_id);
-  if (stream != nullptr)
-    stream->Reset(final_size, app_error_code);
+  if (stream == nullptr)
+    return;
+
+  stream->Reset(final_size, app_error_code);
 }
 
 // Incrementally performs the TLS handshake. This function is called
@@ -1172,6 +1208,10 @@ int QuicSession::TLSRead() {
   return ClearTLS(ssl(), !IsServer());
 }
 
+void QuicSession::UpdateIdleTimer(uint64_t timeout) {
+  idle_->Update(timeout);
+}
+
 void QuicSession::WriteHandshake(const uint8_t* data, size_t datalen) {
   CHECK(!IsDestroyed());
   Debug(this, "Writing %d bytes of handshake data.", datalen);
@@ -1185,8 +1225,31 @@ void QuicSession::WriteHandshake(const uint8_t* data, size_t datalen) {
   handshake_.Push(std::move(buffer));
 }
 
-// Write any packets current pending for the ngtcp2 connection
+// Write any packets current pending for the ngtcp2 connection based on
+// the current state of the QuicSession. If the QuicSession is in the
+// closing period, only CONNECTION_CLOSE packets may be written. If the
+// QuicSession is in the draining period, no packets may be written.
+//
+// Packets are flushed to the underlying QuicSocket uv_udp_t as soon
+// as they are written. The WritePackets method may cause zero or more
+// packets to be serialized.
+//
+// If there are any acks or retransmissions pending, those will be
+// serialized at this point as well. However, WritePackets does not
+// serialize stream data that is being sent initially.
 int QuicSession::WritePackets() {
+  CHECK(!IsDestroyed());
+
+  // During the draining period, we must not send any frames at all.
+  if (IsInDrainingPeriod())
+    return 0;
+
+  // During the closing period, we are only permitted to send
+  // CONNECTION_CLOSE frames.
+  if (IsInClosingPeriod())
+    return SendConnectionClose() ? 0 : -1;
+
+  // Otherwise, serialize and send pending frames
   QuicPathStorage path;
   for (;;) {
     MallocedBuffer<uint8_t> data(max_pktlen_);
@@ -1347,7 +1410,6 @@ QuicServerSession::QuicServerSession(
         alpn),
     pscid_{},
     rcid_(*rcid),
-    draining_(false),
     reject_unauthorized_(reject_unauthorized),
     request_cert_(request_cert) {
   Init(addr, dcid, ocid, version);
@@ -1422,7 +1484,7 @@ int QuicServerSession::DoHandshake(
 int QuicServerSession::HandleError() {
   if (!SendConnectionClose()) {
     SetLastError(QUIC_ERROR_SESSION, NGTCP2_ERR_INTERNAL);
-    Close();
+    ImmediateClose();
   }
   return 0;
 }
@@ -1467,7 +1529,7 @@ void QuicServerSession::Init(
   if (ocid)
     ngtcp2_conn_set_retry_ocid(connection_, ocid);
 
-  idle_->Update(idle_timeout_);
+  UpdateIdleTimer(idle_timeout_);
 }
 
 void QuicServerSession::InitTLS_Post() {
@@ -1483,10 +1545,15 @@ void QuicServerSession::InitTLS_Post() {
 
 void QuicServerSession::MaybeTimeout() {
   uint64_t now = uv_hrtime();
-  if (ngtcp2_conn_loss_detection_expiry(connection_) <= now) {
+  uint64_t loss_detection = ngtcp2_conn_loss_detection_expiry(connection_);
+  Debug(this, "Checking loss detection. loss <= now? %s",
+        loss_detection <= now ? "Yes" : "No");
+  if (loss_detection <= now) {
+    Debug(this, "Updating the loss detection timer. Retransmitting.");
     CHECK_EQ(ngtcp2_conn_on_loss_detection_timer(connection_, uv_hrtime()), 0);
     SendPendingData();
   } else if (ngtcp2_conn_ack_delay_expiry(connection_) <= now) {
+    Debug(this, "Ack delay expired. Retransmitting.");
     SendPendingData();
   }
 }
@@ -1785,13 +1852,10 @@ int QuicServerSession::OnTLSStatus() {
 }
 
 void QuicServerSession::OnIdleTimeout() {
-  if (connection_ == nullptr)
+  if (IsDestroyed())
     return;
 
-  if (IsInClosingPeriod() || IsDraining())
-    return Close();
-
-  StartDrainingPeriod();
+  return SilentClose();
 }
 
 int QuicServerSession::Receive(
@@ -1802,12 +1866,11 @@ int QuicServerSession::Receive(
     unsigned int flags) {
   CHECK(!IsDestroyed());
 
-  SendScope scope(this);
   IncrementStat(nread, &session_stats_, &session_stats::bytes_received);
 
   // Closing period starts once ngtcp2 has detected that the session
   // is being shutdown locally. Note that this is different that the
-  // IsClosing() function, which indicates a graceful shutdown that
+  // IsGracefullyClosing() function, which indicates a graceful shutdown that
   // allows the session and streams to finish naturally. When
   // IsInClosingPeriod is true, ngtcp2 is actively in the process
   // of shutting down the connection and a CONNECTION_CLOSE has
@@ -1822,12 +1885,15 @@ int QuicServerSession::Receive(
     return HandleError();
   }
 
-  // Draining period starts once we've detected an idle timeout on
-  // this session and we're in the process of shutting down. We
-  // don't want to accept any new packets during this time, so we
-  // simply ignore them.
-  if (IsDraining())
+  // When IsInDrainingPeriod is true, ngtcp2 has received a
+  // connection close and is simply discarding received packets.
+  // No outbound packets may be sent.
+  if (IsInDrainingPeriod())
     return 0;
+
+  // Causes any data in the outbound send buffer to be sent
+  // once the function scope exits.
+  SendScope scope(this);
 
   // It's possible for the remote address to change from one
   // packet to the next so we have to look at the addr on
@@ -1879,8 +1945,11 @@ void QuicServerSession::RemoveFromSocket() {
 // the end of this QuicSession.
 bool QuicServerSession::SendConnectionClose() {
   CHECK(!IsDestroyed());
+
+  RETURN_RET_IF_FAIL(WritePackets(), 0);
+
   RETURN_IF_FAIL(StartClosingPeriod(), 0, false);
-  idle_->Update(idle_timeout_);
+  UpdateIdleTimer(idle_timeout_);
   CHECK_GT(conn_closebuf_.size, 0);
   sendbuf_.Cancel();
   // We don't use std::move here because we do not want
@@ -1899,7 +1968,7 @@ int QuicServerSession::StartClosingPeriod() {
     return 0;
 
   retransmit_->Stop();
-  idle_->Update(idle_timeout_);
+  UpdateIdleTimer(idle_timeout_);
 
   sendbuf_.Cancel();
 
@@ -1925,11 +1994,8 @@ int QuicServerSession::StartClosingPeriod() {
 
 void QuicServerSession::StartDrainingPeriod() {
   CHECK(!IsDestroyed());
-  if (draining_)
-    return;
   retransmit_->Stop();
-  draining_ = true;
-  idle_->Update(idle_timeout_);
+  UpdateIdleTimer(idle_timeout_);
 }
 
 int QuicServerSession::TLSHandshake_Initial() {
@@ -2076,11 +2142,11 @@ int QuicClientSession::DoHandshake(
   int err = DoHandshakeReadOnce(path, data, datalen);
   if (err == NGTCP2_ERR_RECV_VERSION_NEGOTIATION) {
     SetLastError(QUIC_ERROR_SESSION, err);
-    Close();
+    ImmediateClose();
     return -1;
   } else if (err != 0) {
     SetLastError(QUIC_ERROR_CRYPTO, err);
-    Close();
+    ImmediateClose();
     return -1;
   }
 
@@ -2108,7 +2174,7 @@ int QuicClientSession::HandleError() {
 
   if (!SendConnectionClose()) {
     SetLastError(QUIC_ERROR_SESSION, NGTCP2_ERR_INTERNAL);
-    Close();
+    ImmediateClose();
   }
   return 0;
 }
@@ -2173,7 +2239,7 @@ int QuicClientSession::Init(
   if (session_ticket->IsArrayBufferView())
     RETURN_RET_IF_FAIL(SetSession(session_ticket), 0);
 
-  idle_->Update(settings.idle_timeout);
+  UpdateIdleTimer(settings.idle_timeout);
   return 0;
 }
 
@@ -2253,7 +2319,7 @@ int QuicClientSession::SetSocket(
     QuicSocket* socket,
     bool nat_rebinding) {
   CHECK(!IsDestroyed());
-  CHECK(!IsClosing());
+  CHECK(!IsGracefullyClosing());
   if (socket == nullptr || socket == socket_)
     return 0;
 
@@ -2344,10 +2410,10 @@ void QuicClientSession::MaybeTimeout() {
 }
 
 void QuicClientSession::OnIdleTimeout() {
-  if (connection_ == nullptr)
+  if (IsDestroyed())
     return;
   Debug(this, "Idle timeout");
-  Close();
+  SilentClose();
 }
 
 int QuicClientSession::OnKey(
@@ -2455,7 +2521,7 @@ int QuicClientSession::Receive(
 
   int err = ReceivePacket(&path, data, nread);
   if (ngtcp2_err_is_fatal(err)) {
-    Close();
+    ImmediateClose();
     return err;
   }
 
@@ -2476,7 +2542,7 @@ int QuicClientSession::ReceiveRetry() {
 // based on the current value of last_error_.
 bool QuicClientSession::SendConnectionClose() {
   CHECK(!IsDestroyed());
-  idle_->Update(idle_timeout_);
+  UpdateIdleTimer(idle_timeout_);
   MallocedBuffer<uint8_t> data(max_pktlen_);
   sendbuf_.Cancel();
   QuicError error = GetLastError();
@@ -2486,6 +2552,9 @@ bool QuicClientSession::SendConnectionClose() {
       error.code == NGTCP2_ERR_RECV_VERSION_NEGOTIATION) {
     return 0;
   }
+
+  RETURN_RET_IF_FAIL(WritePackets(), 0);
+
   ssize_t nwrite =
       SelectCloseFn(error.family)(
         connection_,
@@ -2620,14 +2689,35 @@ void QuicSessionSetSocket(const FunctionCallbackInfo<Value>& args) {
   args.GetReturnValue().Set(session->SetSocket(socket));
 }
 
-// Closing the QuicSession flips a flag that prevents new local streams
+// Perform an immediate close on the QuicSession, causing a
+// CONNECTION_CLOSE frame to be scheduled and sent and starting
+// the closing period for this session. The name "ImmediateClose"
+// is a bit of an unfortunate misnomer as the session will not
+// be immediately shutdown. The naming is pulled from the QUIC
+// spec to indicate a state where the session immediately enters
+// the closing period, but the session will not be destroyed
+// until either the idle timeout fires or destroy is explicitly
+// called.
+void QuicSessionClose(const FunctionCallbackInfo<Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  QuicSession* session;
+  ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
+  int code = NGTCP2_NO_ERROR;
+  int family = QUIC_ERROR_SESSION;
+  USE(args[0]->Int32Value(env->context()).To(&code));
+  USE(args[1]->Int32Value(env->context()).To(&family));
+  session->SetLastError(static_cast<QuicErrorFamily>(family), code);
+  session->SendConnectionClose();
+}
+
+// GracefulClose flips a flag that prevents new local streams
 // from being opened and new remote streams from being received. It is
 // important to note that this does *NOT* send a CONNECTION_CLOSE packet
 // to the peer. Existing streams are permitted to close gracefully.
-void QuicSessionClose(const FunctionCallbackInfo<Value>& args) {
+void QuicSessionGracefulClose(const FunctionCallbackInfo<Value>& args) {
   QuicSession* session;
   ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
-  session->SetClosing();
+  session->StartGracefulClose();
 }
 
 // Destroying the QuicSession will trigger sending of a CONNECTION_CLOSE
@@ -2849,6 +2939,7 @@ void AddMethods(Environment* env, Local<FunctionTemplate> session) {
   env->SetProtoMethod(session,
                       "getPeerCertificate",
                       QuicSessionGetPeerCertificate);
+  env->SetProtoMethod(session, "gracefulClose", QuicSessionGracefulClose);
 }
 }  // namespace
 

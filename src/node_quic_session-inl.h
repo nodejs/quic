@@ -610,6 +610,16 @@ inline void QuicSession::SetLastError(QuicErrorFamily family, int code) {
   SetLastError(InitQuicError(family, code));
 }
 
+inline bool QuicSession::IsInClosingPeriod() {
+  CHECK(!IsDestroyed());
+  return ngtcp2_conn_is_in_closing_period(connection_);
+}
+
+inline bool QuicSession::IsInDrainingPeriod() {
+  CHECK(!IsDestroyed());
+  return ngtcp2_conn_is_in_draining_period(connection_);
+}
+
 // Locate the QuicStream with the given id or return nullptr
 inline QuicStream* QuicSession::FindStream(int64_t id) {
   auto it = streams_.find(id);
@@ -620,20 +630,11 @@ inline QuicStream* QuicSession::FindStream(int64_t id) {
 
 inline QuicError QuicSession::GetLastError() { return last_error_; }
 
-// closing_ will only be set when the QuicSession::Closing() method is called.
-inline bool QuicSession::IsClosing() { return closing_; }
+inline bool QuicSession::IsGracefullyClosing() { return closing_; }
 
-// destroyed_ will only be set when the QuicSession::Destroy method is called.
 inline bool QuicSession::IsDestroyed() { return destroyed_; }
 
-// Setting the closing_ flag disables the ability to open or accept
-// new streams for this Session. Existing streams are allowed to
-// close gracefully on their own. Once called, the QuicSession will
-// be destroyed once there are no remaining streams. Note that no
-// notification is given to the connecting peer that we're in a
-// closing state. A CONNECTION_CLOSE will be sent when the
-// QuicSession is destroyed.
-inline void QuicSession::SetClosing() {
+inline void QuicSession::StartGracefulClose() {
   closing_ = true;
   session_stats_.closing_at = uv_hrtime();
 }

@@ -10,6 +10,7 @@
 #include "node_quic_socket.h"
 #include "node_quic_util.h"
 #include "v8.h"
+#include "uv.h"
 
 #include <algorithm>
 #include <limits>
@@ -121,7 +122,7 @@ QuicStream::~QuicStream() {
         "QuicStream %llu destroyed.\n"
         "  Duration: %llu\n"
         "  Bytes Received: %llu\n"
-        "  Bytes Sent: %llu\n",
+        "  Bytes Sent: %llu",
         GetID(),
         now - stream_stats_.created_at,
         stream_stats_.bytes_received,
@@ -156,22 +157,10 @@ inline void QuicStream::SetInitialFlags() {
   }
 }
 
-// Abruptly closes the stream and triggers the sending of STOP_SENDING
-// and RESET_STREAM frames to the peer if necessary
-void QuicStream::DoClose(uint16_t app_error_code) {
-  // Mark the stream no longer readable or writable.
-  SetWriteClose();
-  SetReadClose();
-  // Triggers emitting STOP_SENDING and RESET_STREAM frames
-  // to the peer.
-  session_->ShutdownStream(GetID(), app_error_code);
-}
-
 // QuicStream::Close() is called by the QuicSession when ngtcp2 detects that
 // a stream has been closed. This, in turn, calls out to the JavaScript to
 // start the process of tearing down and destroying the QuicStream instance.
 void QuicStream::Close(uint16_t app_error_code) {
-  Debug(this, "Stream %llu closed with code %d", GetID(), app_error_code);
   SetReadClose();
   SetWriteClose();
   HandleScope scope(env()->isolate());
@@ -182,12 +171,19 @@ void QuicStream::Close(uint16_t app_error_code) {
   MakeCallback(env()->quic_on_stream_close_function(), arraysize(argv), argv);
 }
 
-// Receiving a reset means that any data we've accumulated to send
-// can be discarded and we don't want to keep writing data, so
-// we want to clear our outbound buffers here and notify
-// the JavaScript side that we've been reset so that we stop
-// pumping data out.
+// Receiving a STREAM_RESET means that the peer will no longer be sending
+// new frames for the given stream, although retransmissions of prior
+// frames may still be received. Once the reset is received, the readable
+// side of the stream is closed without waiting for a STREAM frame with
+// the fin. If a fin has already been received, the reset is ignored.
+// From the JavaScript API point of view, a reset is largely indistinguishable
+// from a normal end-of-stream with the exception that the receivedReset
+// property will be set with the final size and application error code
+// specified.
 void QuicStream::Reset(uint64_t final_size, uint16_t app_error_code) {
+  // Ignore the reset completely if fin has already been received.
+  if (IsFin())
+    return;
   Debug(this,
         "Resetting stream %llu with app error code %d, and final size %llu",
         GetID(),
@@ -200,20 +196,28 @@ void QuicStream::Reset(uint64_t final_size, uint16_t app_error_code) {
     Number::New(env()->isolate(), app_error_code),
     Number::New(env()->isolate(), static_cast<double>(final_size)),
   };
-  MakeCallback(env()->quic_on_stream_close_function(), arraysize(argv), argv);
+  MakeCallback(env()->quic_on_stream_reset_function(), arraysize(argv), argv);
 }
 
 void QuicStream::Destroy() {
+  Debug(this, "Destroying QuicStream %llu on %s",
+        stream_id_,
+        session_->IsServer() ? "server" : "client");
   SetReadClose();
   SetWriteClose();
   streambuf_.Cancel();
   session_->RemoveStream(stream_id_);
   session_ = nullptr;
+  // Explicitly delete the QuicStream. We won't be
+  // needing it any longer.
+  delete this;
 }
 
 // Do shutdown is called when the JS stream writable side is closed.
 // We want to mark the writable side closed and send pending data.
 int QuicStream::DoShutdown(ShutdownWrap* req_wrap) {
+  Debug(this, "Shutdown QuicStream %llu writable side on Quic%sSession",
+        GetID(), session_->IsServer() ? "Server" : "Client");
   if (IsDestroyed())
     return UV_EPIPE;
   // Do nothing if the stream was already shutdown. Specifically,
@@ -420,6 +424,7 @@ void QuicStream::ReceiveData(
   // When fin != 0, we've received that last chunk of data for this
   // stream, indicating that the stream is no longer readable.
   if (fin) {
+    SetFin();
     SetReadClose();
     EmitRead(UV_EOF);
   }
@@ -489,21 +494,26 @@ void OpenBidirectionalStream(const FunctionCallbackInfo<Value>& args) {
   args.GetReturnValue().Set(stream->object());
 }
 
-void QuicStreamClose(const FunctionCallbackInfo<Value>& args) {
-  Environment* env = Environment::GetCurrent(args);
-  QuicStream* stream;
-  ASSIGN_OR_RETURN_UNWRAP(&stream, args.Holder());
-  uint32_t app_error_code = NGTCP2_APP_NOERROR;
-  USE(args[0]->Uint32Value(env->context()).To(&app_error_code));
-  CHECK_LE(app_error_code, std::numeric_limits<uint16_t>::max());
-  stream->DoClose(static_cast<uint16_t>(app_error_code));
-}
-
 void QuicStreamDestroy(const FunctionCallbackInfo<Value>& args) {
   QuicStream* stream;
   ASSIGN_OR_RETURN_UNWRAP(&stream, args.Holder());
   stream->Destroy();
 }
+
+void QuicStreamShutdown(const FunctionCallbackInfo<Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  QuicStream* stream;
+  ASSIGN_OR_RETURN_UNWRAP(&stream, args.Holder());
+
+  uint32_t code = NGTCP2_APP_NOERROR;
+  uint32_t family = QUIC_ERROR_APPLICATION;
+  USE(args[0]->Uint32Value(env->context()).To(&code));
+  USE(args[1]->Uint32Value(env->context()).To(&family));
+
+  stream->Session()->ShutdownStream(
+      stream->GetID(),
+      family == QUIC_ERROR_APPLICATION ? code : 0);
+ }
 }  // namespace
 
 void QuicStream::Initialize(
@@ -519,10 +529,8 @@ void QuicStream::Initialize(
   Local<ObjectTemplate> streamt = stream->InstanceTemplate();
   streamt->SetInternalFieldCount(StreamBase::kStreamBaseFieldCount);
   streamt->Set(env->owner_symbol(), Null(env->isolate()));
-  env->SetProtoMethod(stream, "close", QuicStreamClose);
-  env->SetProtoMethod(stream,
-                      "destroy",
-                      QuicStreamDestroy);
+  env->SetProtoMethod(stream, "destroy", QuicStreamDestroy);
+  env->SetProtoMethod(stream, "shutdownStream", QuicStreamShutdown);
   env->SetProtoMethod(stream, "id", QuicStreamGetID);
   env->set_quicserverstream_constructor_template(streamt);
   target->Set(env->context(),

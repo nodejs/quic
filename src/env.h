@@ -450,10 +450,9 @@ constexpr size_t kFsStatsBufferLength =
   V(process_object, v8::Object)                                                \
   V(primordials, v8::Object)                                                   \
   V(promise_reject_callback, v8::Function)                                     \
-  V(quic_on_socket_ready_function, v8::Function)                               \
   V(quic_on_socket_close_function, v8::Function)                               \
   V(quic_on_socket_error_function, v8::Function)                               \
-  V(quic_on_session_ready_function, v8::Function)                              \
+  V(quic_on_socket_ready_function, v8::Function)                               \
   V(quic_on_session_cert_function, v8::Function)                               \
   V(quic_on_session_client_hello_function, v8::Function)                       \
   V(quic_on_session_close_function, v8::Function)                              \
@@ -461,13 +460,16 @@ constexpr size_t kFsStatsBufferLength =
   V(quic_on_session_extend_function, v8::Function)                             \
   V(quic_on_session_handshake_function, v8::Function)                          \
   V(quic_on_session_keylog_function, v8::Function)                             \
+  V(quic_on_session_path_validation_function, v8::Function)                    \
+  V(quic_on_session_ready_function, v8::Function)                              \
+  V(quic_on_session_silent_close_function, v8::Function)                       \
   V(quic_on_session_status_function, v8::Function)                             \
   V(quic_on_session_ticket_function, v8::Function)                             \
-  V(quic_on_session_path_validation_function, v8::Function)                    \
   V(quic_on_session_version_negotiation_function, v8::Function)                \
-  V(quic_on_stream_ready_function, v8::Function)                               \
   V(quic_on_stream_close_function, v8::Function)                               \
   V(quic_on_stream_error_function, v8::Function)                               \
+  V(quic_on_stream_ready_function, v8::Function)                               \
+  V(quic_on_stream_reset_function, v8::Function)                               \
   V(script_data_constructor_function, v8::Function)                            \
   V(tick_callback_function, v8::Function)                                      \
   V(timers_callback_function, v8::Function)                                    \

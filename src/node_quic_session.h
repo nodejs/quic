@@ -160,9 +160,23 @@ class QuicSession : public AsyncWrap,
   ~QuicSession() override;
 
   inline QuicError GetLastError();
-  inline bool IsClosing();
+
+  // Returns true if StartGracefulClose() has been called and the
+  // QuicSession is currently in the process of a graceful close.
+  inline bool IsGracefullyClosing();
+
+  // Returns true if Destroy() has been called and the
+  // QuicSession is no longer usable.
   inline bool IsDestroyed();
-  inline void SetClosing();
+
+  // Starting a GracefulClose disables the ability to open or accept
+  // new streams for this session. Existing streams are allowed to
+  // close naturally on their own. Once called, the QuicSession will
+  // be immediately closed once there are no remaining streams. Note
+  // that no notification is given to the connecting peer that we're
+  // in a graceful closing state. A CONNECTION_CLOSE will be sent only
+  // once ImmediateClose() is called.
+  inline void StartGracefulClose();
   inline void SetTLSAlert(int err);
 
   const std::string& GetALPN() { return alpn_; }
@@ -177,6 +191,10 @@ class QuicSession : public AsyncWrap,
   SSL* ssl() { return ssl_.get(); }
 
   void AddStream(QuicStream* stream);
+
+  // Immediately discards the state of the QuicSession
+  // and renders the QuicSession instance completely
+  // unusable.
   void Destroy();
   void ExtendStreamOffset(QuicStream* stream, size_t amount);
   void GetLocalTransportParams(ngtcp2_transport_params* params);
@@ -202,6 +220,34 @@ class QuicSession : public AsyncWrap,
       });
   inline void SetLastError(QuicErrorFamily family, int code);
   int SetRemoteTransportParams(ngtcp2_transport_params* params);
+
+  // ShutdownStream will cause ngtcp2 to queue a
+  // RESET_STREAM and STOP_SENDING frame, as appropriate,
+  // for the given stream_id. For a locally-initiated
+  // unidirectional stream, only a RESET_STREAM frame
+  // will be scheduled and the stream will be immediately
+  // closed. For a bi-directional stream, a STOP_SENDING
+  // frame will be sent.
+  //
+  // It is important to note that the QuicStream is
+  // not destroyed immediately following ShutdownStream.
+  // The sending QuicSession will not close the stream
+  // until the RESET_STREAM is acknowledged.
+  //
+  // Once the RESET_STREAM is sent, the QuicSession
+  // should not send any new frames for the stream,
+  // and all inbound stream frames should be discarded.
+  // Once ngtcp2 receives the appropriate notification
+  // that the RESET_STREAM has been acknowledged, the
+  // stream will be closed.
+  //
+  // Once the stream has been closed, it will be
+  // destroyed and memory will be freed. User code
+  // can request that a stream be immediately and
+  // abruptly destroyed without calling ShutdownStream.
+  // Likewise, an idle timeout may cause the stream
+  // to be silently destroyed without calling
+  // ShutdownStream.
   int ShutdownStream(
       int64_t stream_id,
       uint16_t code = NGTCP2_APP_NOERROR);
@@ -248,7 +294,22 @@ class QuicSession : public AsyncWrap,
   inline void DecrementAllocatedSize(size_t size) override;
 
  private:
+
+  // Returns true if the QuicSession has entered the
+  // closing period following a call to ImmediateClose.
+  // While true, the QuicSession is only permitted to
+  // transmit CONNECTION_CLOSE frames until either the
+  // idle timeout period elapses or until the QuicSession
+  // is explicitly destroyed.
   inline bool IsInClosingPeriod();
+
+  // Returns true if the QuicSession has received a
+  // CONNECTION_CLOSE frame from the peer. Once in
+  // the draining period, the QuicSession is not
+  // permitted to send any frames to the peer. The
+  // QuicSession will be silently closed after either
+  // the idle timeout period elapses or until the
+  // QuicSession is explicitly destroyed.
   inline bool IsInDrainingPeriod();
   inline QuicStream* FindStream(int64_t id);
 
@@ -265,7 +326,39 @@ class QuicSession : public AsyncWrap,
       uint64_t offset,
       size_t datalen);
   void AssociateCID(ngtcp2_cid* cid);
-  void Close();
+
+  // Immediately close the QuicSession. All currently open
+  // streams are implicitly reset and closed with RESET_STREAM
+  // and STOP_SENDING frames transmitted as necessary. A
+  // CONNECTION_CLOSE frame will be sent and the session
+  // will enter the closing period until either the idle
+  // timeout period elapses or until the QuicSession is
+  // explicitly destroyed. During the closing period,
+  // the only frames that may be transmitted to the peer
+  // are repeats of the already sent CONNECTION_CLOSE.
+  //
+  // The CONNECTION_CLOSE will use the error code set using
+  // the most recent call to SetLastError()
+  void ImmediateClose();
+
+  // Silently, and immediately close the QuicSession. This is
+  // generally only done during an idle timeout. That is, per
+  // the QUIC specification, if the session remains idle for
+  // longer than both the advertised idle timeout and three
+  // times the current probe timeout (PTO). In such cases, all
+  // currently open streams are implicitly reset and closed
+  // without sending corresponding RESET_STREAM and
+  // STOP_SENDING frames, the connection state is
+  // discarded, and the QuicSession is destroyed without
+  // sending a CONNECTION_CLOSE frame.
+  //
+  // Silent close may also be used to explicitly destroy
+  // a QuicSession that has either already entered the
+  // closing or draining periods; or in response to user
+  // code requests to forcefully terminate a QuicSession
+  // without transmitting any additional frames to the
+  // peer.
+  void SilentClose();
   QuicStream* CreateStream(int64_t stream_id);
   int DoHandshakeReadOnce(
       const ngtcp2_path* path,
@@ -572,6 +665,8 @@ class QuicSession : public AsyncWrap,
       void* user_data);
   static inline void OnKeylog(const SSL* ssl, const char* line);
 
+  void UpdateIdleTimer(uint64_t timeout);
+
   typedef ssize_t(*ngtcp2_close_fn)(
     ngtcp2_conn* conn,
     ngtcp2_path* path,
@@ -765,7 +860,7 @@ class QuicSession : public AsyncWrap,
    public:
     explicit SendScope(QuicSession* session) : session_(session) {}
     ~SendScope() {
-      if (session_->IsDestroyed())
+      if (session_->IsDestroyed() || session_->IsInDrainingPeriod())
         return;
       session_->SendPendingData();
       session_->idle_->Update(session_->idle_timeout_);
@@ -808,7 +903,6 @@ class QuicServerSession : public QuicSession {
       const ngtcp2_cid* dcid,
       const ngtcp2_cid* ocid,
       uint32_t version);
-  bool IsDraining() { return draining_; }
   bool IsServer() const override { return true; }
   int OnCert() override;
   void OnCertDone(
@@ -818,6 +912,9 @@ class QuicServerSession : public QuicSession {
   void OnClientHelloDone() override;
   int OnTLSStatus() override;
   void MaybeTimeout() override;
+
+  // Serializes and sends a CONNECTION_CLOSE frame as appropriate.
+  bool SendConnectionClose() override;
 
   const ngtcp2_cid* rcid() const { return &rcid_; }
   ngtcp2_cid* pscid() { return &pscid_; }
@@ -858,7 +955,7 @@ class QuicServerSession : public QuicSession {
       const struct sockaddr* addr,
       unsigned int flags) override;
   void RemoveFromSocket() override;
-  bool SendConnectionClose() override;
+
   int TLSHandshake_Initial() override;
   int VerifyPeerIdentity(const char* hostname) override;
 
@@ -887,7 +984,6 @@ class QuicServerSession : public QuicSession {
 
   ngtcp2_cid pscid_;
   ngtcp2_cid rcid_;
-  bool draining_;
   bool reject_unauthorized_;
   bool request_cert_;
 
@@ -976,6 +1072,8 @@ class QuicClientSession : public QuicSession {
   int SetSession(SSL_SESSION* session);
   int SetSession(v8::Local<v8::Value> buffer);
 
+  bool SendConnectionClose() override;
+
   void MemoryInfo(MemoryTracker* tracker) const override {}
   SET_MEMORY_INFO_NAME(QuicClientSession)
   SET_SELF_SIZE(QuicClientSession)
@@ -999,7 +1097,6 @@ class QuicClientSession : public QuicSession {
   int SelectPreferredAddress(
     ngtcp2_addr* dest,
     const ngtcp2_preferred_addr* paddr) override;
-  bool SendConnectionClose() override;
   int Start() override;
   void StoreRemoteTransportParams(ngtcp2_transport_params* params) override;
   int TLSHandshake_Complete() override;
