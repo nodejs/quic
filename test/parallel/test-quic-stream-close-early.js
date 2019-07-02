@@ -40,25 +40,16 @@ server.on('session', common.mustCall((session) => {
   session.on('secure', common.mustCall((servername, alpn, cipher) => {
     const uni = session.openStream({ halfOpen: true });
     uni.write('hi');
-    uni.close(2);
+    uni.close(3);
 
     uni.on('abort', common.mustCall((code, finalSize) => {
-      // TODO(@jasnell): Code is currently 0 for some reason..
-      // need to investigate
-      // assert.strictEqual(code, 2);
-      assert.strictEqual(finalSize, 0);
+      assert.strictEqual(code, 3);
+      assert.strictEqual(finalSize, 2);
     }));
 
-    // End will be called because the writable side is closed before
-    // close is event called. The data event will never be emitted.
     uni.on('data', common.mustNotCall());
     uni.on('end', common.mustCall());
-
-    // Finish will not emitted because the stream is closed abruptly
-    // before the stream can complete.
-    uni.on('finish', common.mustNotCall());
-
-    // The close event will always emit, however
+    uni.on('finish', common.mustCall());
     uni.on('close', common.mustCall());
 
     debug('Unidirectional, Server-initiated stream %d opened', uni.id);
@@ -67,19 +58,8 @@ server.on('session', common.mustCall((session) => {
   session.on('stream', common.mustCall((stream) => {
     debug('Bidirectional, Client-initiated stream %d received', stream.id);
     stream.write('hello there');
-
-    stream.on('abort', common.mustCall((code, finalSize) => {
-      debug('Bidirectional, Client-initiated stream %d aborted', stream.id);
-      assert.strictEqual(code, 1);
-      assert.strictEqual(finalSize, 5);  // The client sent 'hello'
-    }));
-
-    // Because the stream ended abruptly, abort is emitted but end and
-    // finish are not.
     stream.on('end', common.mustNotCall());
     stream.on('finish', common.mustNotCall());
-
-    // Close is always emitted, however.
     stream.on('close', common.mustCall());
   }));
 
@@ -120,10 +100,8 @@ server.on('ready', common.mustCall(() => {
       assert.strict(finalSize, 11); // The server sent 'hello there'
     }));
 
-    // Finish and end are not called because the stream has closed abruptly
-    // before the stream was finished.
-    stream.on('finish', common.mustNotCall());
-    stream.on('end', common.mustNotCall());
+    stream.on('finish', common.mustCall());
+    stream.on('end', common.mustCall());
 
     stream.on('close', common.mustCall(() => {
       debug('Bidirectional, Client-initiated stream %d closed', stream.id);
@@ -135,21 +113,9 @@ server.on('ready', common.mustCall(() => {
 
   req.on('stream', common.mustCall((stream) => {
     debug('Unidirectional, Server-initiated stream %d received', stream.id);
-
-    stream.on('abort', common.mustCall((code, finalSize) => {
-      debug('Unidirectional, Server-initiated stream %d aborted', stream.id);
-      assert.strictEqual(code, 2);
-      assert.strictEqual(finalSize, 2);
-    }));
-
-    // The data event will be emitted once...
+    stream.on('abort', common.mustNotCall());
     stream.on('data', common.mustCall());
-
-    // But because the stream has been closed abruptly, the abort event
-    // will be emitted and end will never emit.
-    stream.on('end', common.mustNotCall());
-
-    // The close event will always emit.
+    stream.on('end', common.mustCall());
     stream.on('close', common.mustCall(() => {
       debug('Unidirectional, Server-initiated stream %d closed', stream.id);
       countdown.dec();

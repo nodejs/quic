@@ -402,8 +402,8 @@ class QuicBuffer : public MemoryRetainer {
       auto root = root_.get();
       // Never allow for partial consumption of head when using a
       // non-cancel status
-      if (status == 0 && head_ == root)
-        break;
+      // if (status == 0 && head_ == root)
+      //   break;
       size_t len = root->buf.len - root->offset;
       if (len > amt) {
         length_ -= amt;

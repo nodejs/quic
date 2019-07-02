@@ -71,11 +71,11 @@ class QuicStreamListener : public StreamListener {
 // | On Client  |   Client     |       Closed       |         Open        |
 // +------------+--------------+--------------------+---------------------+
 //
-// The Closed states is terminal. A stream may be destroyed
+// The Closed state is terminal. A stream may be destroyed
 // naturally when both the read and write states are Closed.
 // Although, any stream may be abruptly terminated at any time.
 //
-// A stream that is Open Writable may have data pending or not.
+// A stream that is Open Writable may have data pending.
 //
 // A QuicSession should only attempt to send stream data when (a) there
 // is data pending to send of (b) there is no remaining data to send and
@@ -116,27 +116,27 @@ class QuicStream : public AsyncWrap,
 
   uint64_t GetID() const { return stream_id_; }
 
-  inline bool IsDestroyed() {
+  inline bool IsDestroyed() const {
     return session_ == nullptr;
   }
 
-  inline bool IsFin() {
+  inline bool IsFin() const {
     return flags_ & QUICSTREAM_FLAG_FIN;
   }
 
-  inline bool IsWritable() {
+  inline bool IsWritable() const {
     return (flags_ & QUICSTREAM_FLAG_WRITE) == 0;
   }
 
-  inline bool IsReadable() {
+  inline bool IsReadable() const {
     return (flags_ & QUICSTREAM_FLAG_READ) == 0;
   }
 
-  inline bool IsReadStarted() {
+  inline bool IsReadStarted() const {
     return flags_ & QUICSTREAM_FLAG_READ_STARTED;
   }
 
-  inline bool IsReadPaused() {
+  inline bool IsReadPaused() const {
     return flags_ & QUICSTREAM_FLAG_READ_PAUSED;
   }
 
@@ -148,7 +148,7 @@ class QuicStream : public AsyncWrap,
     return !IsWritable() && !IsReadable();
   }
 
-  QuicSession* Session() { return session_; }
+  QuicSession* Session() const { return session_; }
 
   virtual void AckedDataOffset(uint64_t offset, size_t datalen);
 
@@ -185,7 +185,7 @@ class QuicStream : public AsyncWrap,
   size_t DrainInto(
     std::vector<ngtcp2_vec>* vec);
 
-  void Commit(size_t count);
+  void Commit(uint64_t length);
 
   AsyncWrap* GetAsyncWrap() override { return this; }
 
@@ -219,6 +219,7 @@ class QuicStream : public AsyncWrap,
 
   inline void SetFin() {
     flags_ |= QUICSTREAM_FLAG_FIN;
+    SetReadClose();
   }
 
   inline void SetWriteClose() {
@@ -246,8 +247,8 @@ class QuicStream : public AsyncWrap,
   QuicStreamListener stream_listener_;
   QuicSession* session_;
   uint64_t stream_id_;
-  uint32_t flags_;
   uint64_t max_offset_;
+  uint32_t flags_;
 
   QuicBuffer streambuf_;
   size_t available_outbound_length_;
@@ -292,11 +293,6 @@ class QuicStream : public AsyncWrap,
   // for this stream. This data can be used to detect peers that are
   // generally taking too long to acknowledge sent stream data.
   Histogram data_rx_ack_;
-
-  // data_rx_acksize_ measures the size of data acks for this stream.
-  // This data can be used to detect potentially malicious peers that
-  // are acknoledging data at too slow of a rate.
-  Histogram data_rx_acksize_;
 
   AliasedBigUint64Array stats_buffer_;
 };

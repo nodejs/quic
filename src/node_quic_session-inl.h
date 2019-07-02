@@ -177,6 +177,7 @@ inline int QuicSession::OnClientInitial(
     ngtcp2_conn* conn,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   RETURN_IF_FAIL(
       session->TLSHandshake(), 0,
       NGTCP2_ERR_CALLBACK_FAILURE);
@@ -190,6 +191,7 @@ inline int QuicSession::OnReceiveClientInitial(
     const ngtcp2_cid* dcid,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   RETURN_IF_FAIL(
       session->ReceiveClientInitial(dcid), 0,
       NGTCP2_ERR_CALLBACK_FAILURE);
@@ -206,6 +208,7 @@ inline int QuicSession::OnReceiveCryptoData(
     size_t datalen,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   return session->ReceiveCryptoData(crypto_level, offset, data, datalen);
 }
 
@@ -217,6 +220,7 @@ inline int QuicSession::OnReceiveRetry(
     const ngtcp2_pkt_retry* retry,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   RETURN_IF_FAIL(
       session->ReceiveRetry(), 0,
       NGTCP2_ERR_CALLBACK_FAILURE);
@@ -231,6 +235,7 @@ inline int QuicSession::OnExtendMaxStreamsBidi(
     uint64_t max_streams,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   RETURN_IF_FAIL(
       session->ExtendMaxStreamsBidi(max_streams), 0,
       NGTCP2_ERR_CALLBACK_FAILURE);
@@ -245,6 +250,7 @@ inline int QuicSession::OnExtendMaxStreamsUni(
     uint64_t max_streams,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   RETURN_IF_FAIL(
       session->ExtendMaxStreamsUni(max_streams), 0,
       NGTCP2_ERR_CALLBACK_FAILURE);
@@ -258,6 +264,7 @@ inline int QuicSession::OnExtendMaxStreamData(
     void* user_data,
     void* stream_user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   session->ExtendMaxStreamData(stream_id, max_data);
   return 0;
 }
@@ -269,6 +276,7 @@ inline int QuicSession::OnHandshakeCompleted(
     ngtcp2_conn* conn,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   session->HandshakeCompleted();
   return 0;
 }
@@ -289,6 +297,7 @@ inline ssize_t QuicSession::OnDoHSEncrypt(
     size_t adlen,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   ssize_t nwrite =
       session->DoHSEncrypt(
           dest, destlen,
@@ -317,6 +326,7 @@ inline ssize_t QuicSession::OnDoHSDecrypt(
     size_t adlen,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   ssize_t nwrite =
       session->DoHSDecrypt(
           dest, destlen,
@@ -345,6 +355,7 @@ inline ssize_t QuicSession::OnDoEncrypt(
     size_t adlen,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   ssize_t nwrite =
       session->DoEncrypt(
           dest, destlen,
@@ -373,6 +384,7 @@ inline ssize_t QuicSession::OnDoDecrypt(
     size_t adlen,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   ssize_t nwrite =
       session->DoDecrypt(
           dest, destlen,
@@ -395,6 +407,7 @@ inline ssize_t QuicSession::OnDoInHPMask(
     size_t samplelen,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   ssize_t nwrite =
       session->DoInHPMask(
           dest, destlen,
@@ -415,6 +428,7 @@ inline ssize_t QuicSession::OnDoHPMask(
     size_t samplelen,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   ssize_t nwrite =
       session->DoHPMask(
           dest, destlen,
@@ -437,6 +451,7 @@ inline int QuicSession::OnReceiveStreamData(
     void* user_data,
     void* stream_user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   RETURN_IF_FAIL(
       session->ReceiveStreamData(stream_id, fin, data, datalen, offset), 0,
       NGTCP2_ERR_CALLBACK_FAILURE);
@@ -464,6 +479,7 @@ inline int QuicSession::OnAckedCryptoOffset(
     size_t datalen,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   session->AckedCryptoOffset(crypto_level, offset, datalen);
   return 0;
 }
@@ -478,6 +494,7 @@ inline int QuicSession::OnAckedStreamDataOffset(
     void* user_data,
     void* stream_user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   session->AckedStreamDataOffset(stream_id, offset, datalen);
   return 0;
 }
@@ -495,6 +512,7 @@ inline int QuicSession::OnSelectPreferredAddress(
     const ngtcp2_preferred_addr* paddr,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   RETURN_IF_FAIL(
       session->SelectPreferredAddress(dest, paddr), 0,
       NGTCP2_ERR_CALLBACK_FAILURE);
@@ -509,6 +527,7 @@ inline int QuicSession::OnStreamClose(
     void* user_data,
     void* stream_user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   session->StreamClose(stream_id, app_error_code);
   return 0;
 }
@@ -521,6 +540,7 @@ inline int QuicSession::OnStreamReset(
     void* user_data,
     void* stream_user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   session->StreamReset(stream_id, final_size, app_error_code);
   return 0;
 }
@@ -545,6 +565,7 @@ inline int QuicSession::OnGetNewConnectionID(
     size_t cidlen,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   session->GetNewConnectionID(cid, token, cidlen);
   return 0;
 }
@@ -554,6 +575,7 @@ inline int QuicSession::OnUpdateKey(
     ngtcp2_conn* conn,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   RETURN_IF_FAIL(session->UpdateKey(), 0, NGTCP2_ERR_CALLBACK_FAILURE);
   return 0;
 }
@@ -565,6 +587,7 @@ inline int QuicSession::OnRemoveConnectionID(
     const ngtcp2_cid* cid,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   session->RemoveConnectionID(cid);
   return 0;
 }
@@ -578,6 +601,7 @@ inline int QuicSession::OnPathValidation(
     ngtcp2_path_validation_result res,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   RETURN_IF_FAIL(session->PathValidation(path, res), 0, -1);
   return 0;
 }
@@ -589,6 +613,7 @@ inline int QuicSession::OnVersionNegotiation(
     size_t nsv,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
   session->VersionNegotiation(hd, sv, nsv);
   return 0;
 }

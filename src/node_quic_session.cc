@@ -68,7 +68,6 @@ QuicSession::QuicSession(
     socket_(socket),
     hs_crypto_ctx_{},
     crypto_ctx_{},
-    txbuf_(new QuicBuffer()),
     ncread_(0),
     state_(env()->isolate(), IDX_QUIC_SESSION_STATE_COUNT),
     current_ngtcp2_memory_(0),
@@ -78,6 +77,7 @@ QuicSession::QuicSession(
     cert_cb_running_(false),
     client_hello_cb_running_(false),
     is_tls_callback_(false),
+    is_ngtcp2_callback_(false),
     stats_buffer_(
       socket->env()->isolate(),
       sizeof(session_stats_) / sizeof(uint64_t),
@@ -100,13 +100,13 @@ QuicSession::QuicSession(
     session->MaybeTimeout();
   }, this);
 
+  session_stats_.created_at = uv_hrtime();
+
   USE(wrap->DefineOwnProperty(
       env()->context(),
       env()->state_string(),
       state_.GetJSArray(),
       PropertyAttribute::ReadOnly));
-
-  session_stats_.created_at = uv_hrtime();
 
   USE(wrap->DefineOwnProperty(
       env()->context(),
@@ -126,6 +126,22 @@ QuicSession::QuicSession(
 
 QuicSession::~QuicSession() {
   CHECK(destroyed_);
+
+  Debug(this,
+        "There are %llu bytes remaining in the send buffer when destroying",
+        sendbuf_.Length());
+  sendbuf_.Cancel();
+
+  Debug(this,
+        "There are %llu bytes remaining in the handshake buffer "
+        "when destroying", handshake_.Length());
+  handshake_.Cancel();
+
+  Debug(this,
+        "There are %llu bytes remaining in the transmission buffer "
+        "when destroying", txbuf_.Length());
+  txbuf_.Cancel();
+
   ssl_.reset();
   ngtcp2_conn_del(connection_);
   uint64_t now = uv_hrtime();
@@ -161,6 +177,9 @@ void QuicSession::AckedCryptoOffset(
     ngtcp2_crypto_level crypto_level,
     uint64_t offset,
     size_t datalen) {
+  // It is possible for the QuicSession to have been destroyed but not yet
+  // deconstructed. In such cases, we want to ignore the callback as there
+  // is nothing to do but wait for further cleanup to happen.
   if (IsDestroyed())
     return;
   Debug(this, "Received acknowledgement for %d bytes of crypto data.", datalen);
@@ -173,20 +192,21 @@ void QuicSession::AckedCryptoOffset(
   // session to retain memory and/or send extraneous retransmissions.
 }
 
-// Because of the fire-and-forget nature of UDP, the QuicSession must retain
-// the data sent as packets until the recipient has acknowledged that data.
-// This applies to TLS Handshake data as well as stream data. Once acknowledged,
-// the buffered data can be released. This function is called only by the
-// OnAckedStreamDataOffset ngtcp2 callback function.
 void QuicSession::AckedStreamDataOffset(
     int64_t stream_id,
     uint64_t offset,
     size_t datalen) {
+  // It is possible for the QuicSession to have been destroyed but not yet
+  // deconstructed. In such cases, we want to ignore the callback as there
+  // is nothing to do but wait for further cleanup to happen.
   if (IsDestroyed())
     return;
   Debug(this, "Received acknowledgement for %d bytes of stream %llu data",
         datalen, stream_id);
   QuicStream* stream = FindStream(stream_id);
+  // It is possible that the QuicStream has already been destroyed and
+  // removed from the collection. In such cases, we want to ignore the
+  // callback as there is nothing further to do.
   if (stream != nullptr)
     stream->AckedDataOffset(offset, datalen);
 }
@@ -240,9 +260,8 @@ void QuicSession::ImmediateClose() {
   // naming a bit of a misnomer in that the connection is
   // not immediately torn down, but is allowed to drain
   // properly per the QUIC spec description of "immediate close".
-  Debug(this, "Immediate close for Quic%sSession",
-        IsServer() ? "Server" : "Client");
   CHECK(!IsDestroyed());
+  Debug(this, "Immediate close");
   HandleScope scope(env()->isolate());
   Local<Context> context = env()->context();
   Context::Scope context_scope(context);
@@ -269,8 +288,9 @@ QuicStream* QuicSession::CreateStream(int64_t stream_id) {
   return stream;
 }
 
-// Destroy the QuicSession and free it. The QuicSession
-// cannot be safely used after this is called.
+// Mark the QuicSession instance destroyed. After this is called,
+// the QuicSession instance will be generally unusable but most
+// likely will not be immediately freed.
 void QuicSession::Destroy() {
   Debug(this, "Destroying");
   if (IsDestroyed())
@@ -279,27 +299,24 @@ void QuicSession::Destroy() {
   // Streams should have already been destroyed by this point...
   CHECK(streams_.empty());
 
-  // Hold on to a reference until the function exits
-  // so the instance is not prematurely deleted when
-  // the session is removed from the socket.
-  std::shared_ptr<QuicSession> ptr = shared_from_this();
+  destroyed_ = true;
+  closing_ = false;
 
+  // Stop the idle and retransmission timers if they are active
   idle_->Stop();
   idle_ = nullptr;
 
   retransmit_->Stop();
   retransmit_ = nullptr;
 
-  sendbuf_.Cancel();
-  handshake_.Cancel();
-  txbuf_->Cancel();
-
+  // The QuicSession instances are kept alive using
+  // std::shared_ptr. The only persistent shared_ptr
+  // is the map in the associated QuicSocket. Removing
+  // the QuicSession from the QuicSocket will free
+  // that pointer, allowing the QuicSession to be
+  // deconstructed once the stack unwinds and any
+  // remaining shared_ptr instances fall out of scope.
   RemoveFromSocket();
-  socket_ = nullptr;
-  destroyed_ = true;
-  closing_ = false;
-
-  // TODO(@jasnell): Memory accounting
 }
 
 ssize_t QuicSession::DoDecrypt(
@@ -421,6 +438,10 @@ int QuicSession::DoHandshakeReadOnce(
     const ngtcp2_path* path,
     const uint8_t* data,
     size_t datalen) {
+  // ngtcp2 forbid the ngtcp2_conn_read_handshake function
+  // from being called from within any of the ngtcp2 callback
+  // functions.
+  CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
   if (LIKELY(datalen > 0)) {
     RETURN_RET_IF_FAIL(
         ngtcp2_conn_read_handshake(
@@ -436,6 +457,10 @@ int QuicSession::DoHandshakeReadOnce(
 // Serialize and send a chunk of TLS Handshake data to the peer.
 // This is called multiple times until the internal buffer is cleared.
 int QuicSession::DoHandshakeWriteOnce() {
+  // ngtcp2 forbid the ngtcp2_conn_write_handshake function
+  // from being called from within any of the ngtcp2 callback
+  // functions.
+  CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
   MallocedBuffer<uint8_t> data(max_pktlen_);
   ssize_t nwrite =
       ngtcp2_conn_write_handshake(
@@ -453,10 +478,10 @@ int QuicSession::DoHandshakeWriteOnce() {
   return SendPacket();
 }
 
-void QuicSession::ExtendMaxStreamData(
-    int64_t stream_id,
-    uint64_t max_data) {
-  // TODO(@jasnell): Extend max stream data
+void QuicSession::ExtendMaxStreamData(int64_t stream_id, uint64_t max_data) {
+  // QuicStream* stream = FindStream(stream_id);
+  // if (stream != nullptr)
+  //   SendStreamData(stream);
 }
 
 int QuicSession::ExtendMaxStreams(bool bidi, uint64_t max_streams) {
@@ -532,44 +557,15 @@ void QuicSession::HandshakeCompleted() {
   Local<Context> context = env()->context();
   Context::Scope context_scope(context);
 
-  Local<Value> servername;
-  Local<Value> alpn;
-  Local<Value> cipher;
-  Local<Value> version;
-
-  // Get the SNI hostname requested by the client for the session
   const char* host_name =
       SSL_get_servername(
           ssl_.get(),
           TLSEXT_NAMETYPE_host_name);
-  if (host_name != nullptr) {
-    servername = String::NewFromUtf8(
-        env()->isolate(),
-        host_name,
-        v8::NewStringType::kNormal).ToLocalChecked();
-  }
 
-  // Get the ALPN protocol identifier that was negotiated for the session
-  const unsigned char* alpn_buf = nullptr;
-  unsigned int alpnlen;
-
-  SSL_get0_alpn_selected(ssl_.get(), &alpn_buf, &alpnlen);
-  if (alpnlen == sizeof(NGTCP2_ALPN_H3) - 2 &&
-      memcmp(alpn_buf, NGTCP2_ALPN_H3 + 1, sizeof(NGTCP2_ALPN_H3) - 2) == 0) {
-    alpn = env()->quic_alpn_string();
-  } else {
-    alpn = OneByteString(env()->isolate(), alpn_buf, alpnlen);
-  }
-
-  // Get the cipher and version
-  const SSL_CIPHER* c = SSL_get_current_cipher(ssl_.get());
-  if (c != nullptr) {
-    const char* cipher_name = SSL_CIPHER_get_name(c);
-    const char* cipher_version = SSL_CIPHER_get_version(c);
-    cipher = OneByteString(env()->isolate(), cipher_name);
-    version = OneByteString(env()->isolate(), cipher_version);
-  }
-
+  Local<Value> servername = GetServerName(env(), ssl_.get(), host_name);
+  Local<Value> alpn = GetALPNProtocol(env(), ssl_.get());
+  Local<Value> cipher = GetCipherName(env(), ssl_.get());
+  Local<Value> version = GetCipherVersion(env(), ssl_.get());
   Local<Value> maxPacketLength = Integer::New(env()->isolate(), max_pktlen_);
 
   // Verify the identity of the peer (this check varies based on whether
@@ -644,6 +640,13 @@ void QuicSession::Keylog(const char* line) {
   char* data = Buffer::Data(line_bf);
   data[size] = '\n';
   MakeCallback(env()->quic_on_session_keylog_function(), 1, &line_bf);
+}
+
+void QuicSession::OnIdleTimeout() {
+  if (IsDestroyed())
+    return;
+  Debug(this, "Idle timeout");
+  return SilentClose();
 }
 
 int QuicSession::OpenBidirectionalStream(int64_t* stream_id) {
@@ -750,8 +753,13 @@ int QuicSession::ReceivePacket(
     QuicPath* path,
     const uint8_t* data,
     ssize_t nread) {
+  CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
   uint64_t now = uv_hrtime();
   session_stats_.session_received_at = now;
+  Debug(this, " Entering ngtcp2 receive callbacks");
+  OnScopeLeave leave([this]() {
+    Debug(this, " Exiting ngtcp2 receive callbacks");
+  });
   return ngtcp2_conn_read_pkt(
       connection_,
       **path,
@@ -846,6 +854,7 @@ void QuicSession::RemoveFromSocket() {
   Debug(this, "Removed from the QuicSocket.");
   QuicCID scid(scid_);
   socket_->RemoveSession(&scid, **GetRemoteAddress());
+  socket_ = nullptr;
 }
 
 // Removes the given stream from the QuicSession. All streams must
@@ -868,12 +877,14 @@ void QuicSession::ScheduleRetransmit() {
 // Sends 0RTT stream data.
 int QuicSession::Send0RTTStreamData(
     QuicStream* stream) {
+  CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
   CHECK(!IsDestroyed());
   ssize_t ndatalen = 0;
 
   std::vector<ngtcp2_vec> vec;
-  size_t count = stream->DrainInto(&vec);
-  size_t c = count;
+  stream->DrainInto(&vec);
+
+  size_t c = vec.size();
   ngtcp2_vec* v = vec.data();
 
   for (;;) {
@@ -908,8 +919,10 @@ int QuicSession::Send0RTTStreamData(
     if (nwrite == 0)
       return 0;
 
-    if (ndatalen > 0)
+    if (ndatalen > 0) {
       Consume(&v, &c, ndatalen);
+      stream->Commit(ndatalen);
+    }
 
     dest.Realloc(nwrite);
     sendbuf_.Push(std::move(dest));
@@ -919,14 +932,12 @@ int QuicSession::Send0RTTStreamData(
       break;
   }
 
-  // Advance the read head of the source buffer
-  stream->Commit(count);
-
   return 0;
 }
 
 // Sends buffered stream data.
 int QuicSession::SendStreamData(QuicStream* stream) {
+  CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
   CHECK(!IsDestroyed());
   ssize_t ndatalen = 0;
   QuicPathStorage path;
@@ -942,7 +953,7 @@ int QuicSession::SendStreamData(QuicStream* stream) {
     return 0;
 
   std::vector<ngtcp2_vec> vec;
-  size_t count = stream->DrainInto(&vec);
+  stream->DrainInto(&vec);
 
   size_t c = vec.size();
   ngtcp2_vec* v = vec.data();
@@ -982,8 +993,10 @@ int QuicSession::SendStreamData(QuicStream* stream) {
     if (nwrite == 0)
       return 0;
 
-    if (ndatalen > 0)
+    if (ndatalen > 0) {
       Consume(&v, &c, ndatalen);
+      stream->Commit(ndatalen);
+    }
 
     dest.Realloc(nwrite);
     sendbuf_.Push(std::move(dest));
@@ -993,9 +1006,6 @@ int QuicSession::SendStreamData(QuicStream* stream) {
     if (Empty(v, c))
       break;
   }
-
-  // Advance the read head of the source buffer
-  stream->Commit(count);
 
   return 0;
 }
@@ -1009,20 +1019,25 @@ int QuicSession::SendPacket() {
         sendbuf_.Length(),
         &session_stats_,
         &session_stats::bytes_sent);
-    *txbuf_ += std::move(sendbuf_);
+    txbuf_ += std::move(sendbuf_);
   }
   // There's nothing to send, so let's not try
-  if (txbuf_->Length() == 0)
+  if (txbuf_.Length() == 0)
     return 0;
-  Debug(this, "There are %llu bytes in txbuf_ to send", txbuf_->Length());
+  Debug(this, "There are %llu bytes in txbuf_ to send", txbuf_.Length());
   session_stats_.session_sent_at = uv_hrtime();
   ScheduleRetransmit();
-  return Socket()->SendPacket(&remote_address_, txbuf_);
+  return Socket()->SendPacket(
+      *remote_address_,
+      &txbuf_,
+      this->shared_from_this());
 }
 
 // Sends any pending handshake or session packet data.
 int QuicSession::SendPendingData() {
-  if (UNLIKELY(IsDestroyed()))
+  // If we are in a callback or the session is destroyed, do nothing
+  // because we're not allowed to call the serialize packet functions.
+  if (Ngtcp2CallbackScope::InNgtcp2CallbackScope(this) || IsDestroyed())
     return 0;
 
   // If the server is in the process of closing or draining
@@ -1037,6 +1052,10 @@ int QuicSession::SendPendingData() {
   // If the handshake is not yet complete, perform the handshake.
   if (!IsHandshakeCompleted())
     return DoHandshake(nullptr, nullptr, 0);
+
+  // Try purging any pending stream data
+  for (auto stream : streams_)
+    RETURN_RET_IF_FAIL(SendStreamData(stream.second), 0);
 
   // Otherwise, serialize and send any packets waiting in the queue.
   int err = WritePackets();
@@ -1075,10 +1094,7 @@ int QuicSession::ShutdownStream(int64_t stream_id, uint16_t code) {
           connection_,
           stream_id,
           code), 0);
-  // Once scheduled, trigger immediately serialization and sending
-  // of the STOP_SENDING and RESET_STREAM frames. Additional frames
-  // may also be sent at this time.
-  return WritePackets();
+  return 0;
 }
 
 void QuicSession::SilentClose() {
@@ -1238,6 +1254,7 @@ void QuicSession::WriteHandshake(const uint8_t* data, size_t datalen) {
 // serialized at this point as well. However, WritePackets does not
 // serialize stream data that is being sent initially.
 int QuicSession::WritePackets() {
+  CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
   CHECK(!IsDestroyed());
 
   // During the draining period, we must not send any frames at all.
@@ -1544,6 +1561,7 @@ void QuicServerSession::InitTLS_Post() {
 }
 
 void QuicServerSession::MaybeTimeout() {
+  CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
   uint64_t now = uv_hrtime();
   uint64_t loss_detection = ngtcp2_conn_loss_detection_expiry(connection_);
   Debug(this, "Checking loss detection. loss <= now? %s",
@@ -1851,13 +1869,6 @@ int QuicServerSession::OnTLSStatus() {
   return SSL_TLSEXT_ERR_OK;
 }
 
-void QuicServerSession::OnIdleTimeout() {
-  if (IsDestroyed())
-    return;
-
-  return SilentClose();
-}
-
 int QuicServerSession::Receive(
     ngtcp2_pkt_hd* hd,
     ssize_t nread,
@@ -1944,6 +1955,7 @@ void QuicServerSession::RemoveFromSocket() {
 // Transmits the CONNECTION_CLOSE to the peer, signaling
 // the end of this QuicSession.
 bool QuicServerSession::SendConnectionClose() {
+  CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
   CHECK(!IsDestroyed());
 
   RETURN_RET_IF_FAIL(WritePackets(), 0);
@@ -2389,6 +2401,7 @@ void QuicClientSession::InitTLS_Post() {
 }
 
 void QuicClientSession::MaybeTimeout() {
+  CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
   int err;
   uint64_t now = uv_hrtime();
   if (ngtcp2_conn_loss_detection_expiry(connection_) <= now) {
@@ -2407,13 +2420,6 @@ void QuicClientSession::MaybeTimeout() {
       HandleError();
     }
   }
-}
-
-void QuicClientSession::OnIdleTimeout() {
-  if (IsDestroyed())
-    return;
-  Debug(this, "Idle timeout");
-  SilentClose();
 }
 
 int QuicClientSession::OnKey(
@@ -2541,6 +2547,7 @@ int QuicClientSession::ReceiveRetry() {
 // close to the peer. The choice of which is send is
 // based on the current value of last_error_.
 bool QuicClientSession::SendConnectionClose() {
+  CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
   CHECK(!IsDestroyed());
   UpdateIdleTimer(idle_timeout_);
   MallocedBuffer<uint8_t> data(max_pktlen_);

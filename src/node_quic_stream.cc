@@ -87,14 +87,13 @@ QuicStream::QuicStream(
     StreamBase(session->env()),
     session_(session),
     stream_id_(stream_id),
-    flags_(QUICSTREAM_FLAG_INITIAL),
     max_offset_(0),
+    flags_(QUICSTREAM_FLAG_INITIAL),
     available_outbound_length_(0),
     inbound_consumed_data_while_paused_(0),
     data_rx_rate_(1, std::numeric_limits<int64_t>::max()),
     data_rx_size_(1, NGTCP2_MAX_PKT_SIZE),
     data_rx_ack_(1, std::numeric_limits<int64_t>::max()),
-    data_rx_acksize_(1, NGTCP2_MAX_PKT_SIZE),
     stats_buffer_(
       session->env()->isolate(),
       sizeof(stream_stats_) / sizeof(uint64_t),
@@ -226,7 +225,8 @@ int QuicStream::DoShutdown(ShutdownWrap* req_wrap) {
     return 1;
   stream_stats_.closing_at = uv_hrtime();
   SetWriteClose();
-  session_->SendStreamData(this);
+  if (!QuicSession::Ngtcp2CallbackScope::InNgtcp2CallbackScope(session_))
+    session_->SendStreamData(this);
   return 1;
 }
 
@@ -243,50 +243,21 @@ int QuicStream::DoWrite(
     req_wrap->Done(UV_EOF);
     return 0;
   }
-  // There's a difficult balance required here:
-  //
-  // Unlike typical UDP, which is fire-and-forget, QUIC packets
-  // have to be acknowledged. If a packet is not acknowledged
-  // soon enough, it is retransmitted. The exact arrangement
-  // of packets being retransmitted varies over the course of
-  // the connection on many factors. Fortunately, ngtcp2 takes
-  // care of most of the details here, we just need to retain
-  // the data until we're certain it's no longer needed.
-  //
-  // That said, on the JS Streams API side, we can only write
-  // one batch of buffers at a time. That is, DoWrite won't be
-  // called again until the previous DoWrite is completed by
-  // calling WriteWrap::Done(). The challenge, however, is that
-  // calling Done() essentially signals that we're done with
-  // the buffers being written, allowing those to be freed.
-  //
-  // In other words, if we just store the given buffers and
-  // wait to call Done() when we receive an acknowledgement,
-  // we severely limit our throughput and kill performance
-  // because the JavaScript side won't be able to send additional
-  // buffers until we receive the acknowledgement from the peer.
-  // However, if we call Done() here to allow the next chunk to
-  // be written, we have to copy the data because the buffers
-  // may end up being freed once the callback is invoked. The
-  // memcpy obviously incurs a cost but it'll at least be less
-  // than waiting for the acknowledgement, allowing data to be
-  // written faster but at the cost of a data copy.
-  //
-  // Because of the need to copy, performing many small writes
-  // will incur a performance penalty over a smaller number of
-  // larger writes, but only up to a point. Frequently copying
-  // large chunks of data will end up slowing things down also.
-  //
-  // Because we are copying to allow the JS side to write
-  // faster independently of the underlying send, we will have
-  // to be careful not to allow the internal buffer to grow
-  // too large, or we'll run into several other problems.
 
-  uint64_t len = streambuf_.Copy(bufs, nbufs);
-  IncrementStat(len, &stream_stats_, &stream_stats::bytes_sent);
-  req_wrap->Done(0);
+  uint64_t length =
+      streambuf_.Push(
+          bufs,
+          nbufs,
+          [&](int status, void* user_data) {
+            WriteWrap* req_wrap = static_cast<WriteWrap*>(user_data);
+            req_wrap->Done(status);
+          },
+          req_wrap,
+          req_wrap->object());
+  IncrementStat(length, &stream_stats_, &stream_stats::bytes_sent);
   stream_stats_.stream_sent_at = uv_hrtime();
-  session_->SendStreamData(this);
+  if (!QuicSession::Ngtcp2CallbackScope::InNgtcp2CallbackScope(session_))
+    session_->SendStreamData(this);
 
   // IncrementAvailableOutboundLength(len);
   return 0;
@@ -295,25 +266,11 @@ int QuicStream::DoWrite(
 void QuicStream::AckedDataOffset(uint64_t offset,  size_t datalen) {
   if (IsDestroyed())
     return;
-  streambuf_.Consume(datalen);
 
   uint64_t now = uv_hrtime();
   if (stream_stats_.stream_acked_at > 0)
     data_rx_ack_.Record(now - stream_stats_.stream_acked_at);
   stream_stats_.stream_acked_at = now;
-  data_rx_acksize_.Record(datalen);
-
-  // TODO(@jasnell): One possible DOS attack vector is a peer that sends
-  // very small acks at a rate that is just fast enough not to run afoul
-  // of the idle timeout. This can force a QuicStream to hold on to
-  // buffered data for long periods of time, eating up resources. The
-  // data_rx_ack_ and data_rx_acksize_ histograms can be used to detect
-  // this behavior. There are, however, legitimate reasons why a peer
-  // would send small acks at a slow rate, so there are no blanket rules
-  // that we can apply to this. We need to determine a reasonable default
-  // that can be overriden by user code. When the activity falls below
-  // that threshold, we will emit an event that the user code can respond
-  // to.
 }
 
 size_t QuicStream::DrainInto(
@@ -321,8 +278,8 @@ size_t QuicStream::DrainInto(
   return streambuf_.DrainInto(vec);
 }
 
-void QuicStream::Commit(size_t count) {
-  streambuf_.SeekHead(count);
+void QuicStream::Commit(uint64_t length) {
+  streambuf_.Consume(length);
 }
 
 inline void QuicStream::IncrementAvailableOutboundLength(size_t amount) {
@@ -368,6 +325,7 @@ void QuicStream::ReceiveData(
   Debug(this, "Receiving %d bytes of data. Final? %s. Readable? %s",
         datalen, fin ? "yes" : "no", IsReadable() ? "yes" : "no");
 
+  // If the QuicStream is not readable, just ignore the chunk
   if (!IsReadable())
     return;
 
@@ -425,7 +383,6 @@ void QuicStream::ReceiveData(
   // stream, indicating that the stream is no longer readable.
   if (fin) {
     SetFin();
-    SetReadClose();
     EmitRead(UV_EOF);
   }
 }
@@ -513,7 +470,7 @@ void QuicStreamShutdown(const FunctionCallbackInfo<Value>& args) {
   stream->Session()->ShutdownStream(
       stream->GetID(),
       family == QUIC_ERROR_APPLICATION ? code : 0);
- }
+}
 }  // namespace
 
 void QuicStream::Initialize(

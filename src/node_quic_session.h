@@ -32,8 +32,8 @@ class QuicStream;
 constexpr int ERR_INVALID_REMOTE_TRANSPORT_PARAMS = -1;
 constexpr int ERR_INVALID_TLS_SESSION_TICKET = -2;
 
-constexpr size_t MINIMUM_MAX_CRYPTO_BUFFER = 4096;
-constexpr size_t DEFAULT_MAX_CRYPTO_BUFFER = MINIMUM_MAX_CRYPTO_BUFFER * 4;
+constexpr uint64_t MINIMUM_MAX_CRYPTO_BUFFER = 4096;
+constexpr uint64_t DEFAULT_MAX_CRYPTO_BUFFER = MINIMUM_MAX_CRYPTO_BUFFER * 4;
 
 // The QuicSessionConfig class holds the initial transport parameters and
 // configuration options set by the JavaScript side when either a
@@ -200,6 +200,7 @@ class QuicSession : public AsyncWrap,
   void GetLocalTransportParams(ngtcp2_transport_params* params);
   uint32_t GetNegotiatedVersion();
   bool IsHandshakeCompleted();
+  void OnIdleTimeout();
   int OpenBidirectionalStream(int64_t* stream_id);
   int OpenUnidirectionalStream(int64_t* stream_id);
   size_t ReadPeerHandshake(uint8_t* buf, size_t buflen);
@@ -273,7 +274,6 @@ class QuicSession : public AsyncWrap,
       size_t datalen) = 0;
   virtual int HandleError() = 0;
   virtual void MaybeTimeout() = 0;
-  virtual void OnIdleTimeout() = 0;
   virtual int OnKey(
       int name,
       const uint8_t* secret,
@@ -292,6 +292,28 @@ class QuicSession : public AsyncWrap,
   inline void CheckAllocatedSize(size_t previous_size) override;
   inline void IncrementAllocatedSize(size_t size) override;
   inline void DecrementAllocatedSize(size_t size) override;
+
+  // Tracks whether or not we are currently within an ngtcp2 callback
+  // function. Certain ngtcp2 APIs are not supposed to be called when
+  // within a callback. We use this as a gate to check.
+  class Ngtcp2CallbackScope {
+   public:
+    explicit Ngtcp2CallbackScope(QuicSession* session) : session_(session) {
+      CHECK(!session_->is_ngtcp2_callback_);
+      session_->is_ngtcp2_callback_ = true;
+    }
+
+    ~Ngtcp2CallbackScope() {
+      session_->is_ngtcp2_callback_ = false;
+    }
+
+    static bool InNgtcp2CallbackScope(QuicSession* session) {
+      return session->is_ngtcp2_callback_;
+    }
+
+   private:
+    QuicSession* session_;
+  };
 
  private:
   // Returns true if the QuicSession has entered the
@@ -714,14 +736,8 @@ class QuicSession : public AsyncWrap,
 
   // The txbuf_ contains all of the data that has been passed off
   // to the QuicSocket. The data will remain in the txbuf_ until
-  // it is successfully sent. This is a std::shared_ptr because
-  // references of txbuf_ are shared with QuicSocket::SendWrap
-  // instances that are responsible for actually sending the data.
-  // Each QuicSocket::SendWrap uses a std::weak_ptr. When the
-  // QuicSession object is destroyed, those QuicSocket::SendWrap
-  // instances may still be alive but will not invoke the Done
-  // callback.
-  std::shared_ptr<QuicBuffer> txbuf_;
+  // it is successfully sent.
+  QuicBuffer txbuf_;
 
   // Temporary holding for inbound TLS handshake data.
   std::vector<uint8_t> peer_handshake_;
@@ -741,6 +757,7 @@ class QuicSession : public AsyncWrap,
   bool cert_cb_running_;
   bool client_hello_cb_running_;
   bool is_tls_callback_;
+  bool is_ngtcp2_callback_;
 
   struct session_stats {
     // The timestamp at which the session was created
@@ -942,7 +959,6 @@ class QuicServerSession : public QuicSession {
       size_t datalen) override;
   int HandleError() override;
   void InitTLS_Post() override;
-  void OnIdleTimeout() override;
   int OnKey(
       int name,
       const uint8_t* secret,
@@ -1084,7 +1100,6 @@ class QuicClientSession : public QuicSession {
       size_t datalen) override;
   int HandleError() override;
   void InitTLS_Post() override;
-  void OnIdleTimeout() override;
   int OnKey(int name, const uint8_t* secret, size_t secretlen) override;
   int Receive(
       ngtcp2_pkt_hd* hd,

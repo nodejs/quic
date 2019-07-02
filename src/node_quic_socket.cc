@@ -294,6 +294,10 @@ void QuicSocket::Receive(
   auto dcid_str = dcid.ToStr();
   Debug(this, "Received a QUIC packet for dcid %s", dcid_hex.c_str());
 
+  // Grabbing a shared pointer to prevent the QuicSession from
+  // desconstructing while we're still using it. The session may
+  // end up being destroyed, however, so we have to make sure
+  // we're checking for that.
   std::shared_ptr<QuicSession> session;
 
   // Identify the appropriate handler
@@ -324,6 +328,8 @@ void QuicSocket::Receive(
 
   CHECK_NOT_NULL(session);
   if (session->IsDestroyed()) {
+    // If the session has been destroyed already, there's nothing to do
+    // and we simply fall-through and do nothing.
     Debug(this, "Ignoring packet because session is destroyed!");
     IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
     return;
@@ -573,25 +579,15 @@ int QuicSocket::DropMembership(const char* address, const char* iface) {
 }
 
 int QuicSocket::SendPacket(
-    SocketAddress* dest,
-    std::shared_ptr<QuicBuffer> buffer) {
-  if (buffer->Length() == 0 || buffer->ReadRemaining() == 0)
-    return 0;
-  char* host;
-  SocketAddress::GetAddress(**dest, &host);
-  Debug(this, "Sending to %s at port %d", host, SocketAddress::GetPort(**dest));
-  return (new QuicSocket::SendWrap(this, dest, buffer))->Send();
-}
-
-int QuicSocket::SendPacket(
     const sockaddr* dest,
-    std::shared_ptr<QuicBuffer> buffer) {
+    QuicBuffer* buffer,
+    std::shared_ptr<QuicSession> session) {
   if (buffer->Length() == 0 || buffer->ReadRemaining() == 0)
     return 0;
   char* host;
   SocketAddress::GetAddress(dest, &host);
   Debug(this, "Sending to %s at port %d", host, SocketAddress::GetPort(dest));
-  return (new QuicSocket::SendWrap(this, dest, buffer))->Send();
+  return (new QuicSocket::SendWrap(this, dest, buffer, session))->Send();
 }
 
 void QuicSocket::SetServerSessionSettings(
@@ -654,9 +650,11 @@ int QuicSocket::SendWrapStack::Send() {
 QuicSocket::SendWrap::SendWrap(
     QuicSocket* socket,
     SocketAddress* dest,
-    std::shared_ptr<QuicBuffer> buffer) :
+    QuicBuffer* buffer,
+    std::shared_ptr<QuicSession> session) :
     socket_(socket),
-    buffer_(buffer) {
+    buffer_(buffer),
+    session_(session) {
   req_.data = this;
   address_.Copy(dest);
 }
@@ -664,9 +662,11 @@ QuicSocket::SendWrap::SendWrap(
 QuicSocket::SendWrap::SendWrap(
     QuicSocket* socket,
     const sockaddr* dest,
-    std::shared_ptr<QuicBuffer> buffer) :
+    QuicBuffer* buffer,
+    std::shared_ptr<QuicSession> session) :
     socket_(socket),
-    buffer_(buffer) {
+    buffer_(buffer),
+    session_(session) {
   req_.data = this;
   address_.Copy(dest);
 }
@@ -674,12 +674,10 @@ QuicSocket::SendWrap::SendWrap(
 void QuicSocket::SendWrap::Done(int status) {
   // If the weak_ref to the QuicBuffer is still valid
   // consume the data, otherwise, do nothing
-  if (auto buf = buffer_.lock()) {
-    if (status == 0)
-      buf->Consume(length_);
-    else
-      buf->Cancel(status);
-  }
+  if (status == 0)
+    buffer_->Consume(length_);
+  else
+    buffer_->Cancel(status);
 }
 
 void QuicSocket::SendWrap::OnSend(
@@ -703,33 +701,30 @@ void QuicSocket::SendWrap::OnSend(
 // and forward it off to the uv_udp_t handle.
 int QuicSocket::SendWrap::Send() {
   std::vector<uv_buf_t> vec;
-  if (auto buf = buffer_.lock()) {
-    size_t len = buf->DrainInto(&vec, &length_);
-    if (len == 0) return 0;
-    Debug(socket_, "Sending %llu bytes (%d buffers of %d remaining)",
-          length_, len, buf->ReadRemaining());
-    if (socket_->IsDiagnosticPacketLoss(socket_->tx_loss_)) {
-      Debug(socket_, "Simulating transmitted packet loss.");
-      // Advance even though we're not actually sending. This
-      // way the local code continues to act as if a write
-      // occurred.
-      buf->SeekHead(len);
-      OnSend(&req_, 0);
-      return 0;
-    }
-    int err = uv_udp_send(
-        &req_,
-        &socket_->handle_,
-        vec.data(),
-        vec.size(),
-        *address_,
-        OnSend);
-    // If sending was successful, advance the read head
-    if (err == 0)
-      buf->SeekHead(len);
-    return err;
+  size_t len = buffer_->DrainInto(&vec, &length_);
+  if (len == 0) return 0;
+  Debug(socket_, "Sending %llu bytes (%d buffers of %d remaining)",
+        length_, len, buffer_->ReadRemaining());
+  if (socket_->IsDiagnosticPacketLoss(socket_->tx_loss_)) {
+    Debug(socket_, "Simulating transmitted packet loss.");
+    // Advance even though we're not actually sending. This
+    // way the local code continues to act as if a write
+    // occurred.
+    buffer_->SeekHead(len);
+    OnSend(&req_, 0);
+    return 0;
   }
-  return -1;
+  int err = uv_udp_send(
+      &req_,
+      &socket_->handle_,
+      vec.data(),
+      vec.size(),
+      *address_,
+      OnSend);
+  // If sending was successful, advance the read head
+  if (err == 0)
+    buffer_->SeekHead(len);
+  return err;
 }
 
 bool QuicSocket::IsDiagnosticPacketLoss(double prob) {

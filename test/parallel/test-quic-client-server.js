@@ -30,8 +30,11 @@ const filedata = fs.readFileSync(__filename, { encoding: 'utf8' });
 
 const { createSocket } = require('quic');
 
+const kServerPort = process.env.NODE_DEBUG_KEYLOG ? 5678 : 0;
+const kClientPort = process.env.NODE_DEBUG_KEYLOG ? 5679 : 0;
+
 let client;
-const server = createSocket({ port: 0, validateAddress: true });
+const server = createSocket({ port: kServerPort, validateAddress: true });
 
 // Diagnostic Packet Loss allows packets to be randomly ignored
 // to simulate network packet loss conditions. This is not a
@@ -129,6 +132,11 @@ server.on('session', common.mustCall((session) => {
     assert(kKeylogs.shift().test(line));
   }, kKeylogs.length));
 
+  if (process.env.NODE_DEBUG_KEYLOG) {
+    const kl = fs.createWriteStream(process.env.NODE_DEBUG_KEYLOG);
+    session.on('keylog', kl.write.bind(kl));
+  }
+
   session.on('secure', common.mustCall((servername, alpn, cipher) => {
     debug('QuicServerSession TLS Handshake Complete');
     debug('  Server name: %s', servername);
@@ -183,7 +191,7 @@ server.on('session', common.mustCall((session) => {
 server.on('ready', common.mustCall(() => {
   debug('Server is listening on port %d', server.address.port);
   client = createSocket({
-    port: 0,
+    port: kClientPort,
     client: {
       key,
       cert,

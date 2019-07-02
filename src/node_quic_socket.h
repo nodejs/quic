@@ -88,11 +88,9 @@ class QuicSocket : public HandleWrap {
   int SetTTL(
       int ttl);
   int SendPacket(
-      SocketAddress* dest,
-      std::shared_ptr<QuicBuffer> buf);
-  int SendPacket(
       const sockaddr* dest,
-      std::shared_ptr<QuicBuffer> buf);
+      QuicBuffer* buf,
+      std::shared_ptr<QuicSession> session);
   void SetServerSessionSettings(
       ngtcp2_cid* pscid,
       ngtcp2_settings* settings,
@@ -250,12 +248,14 @@ class QuicSocket : public HandleWrap {
     SendWrap(
         QuicSocket* socket,
         SocketAddress* dest,
-        std::shared_ptr<QuicBuffer> buffer);
+        QuicBuffer* buffer,
+        std::shared_ptr<QuicSession> session);
 
     SendWrap(
         QuicSocket* socket,
         const sockaddr* dest,
-        std::shared_ptr<QuicBuffer> buffer);
+        QuicBuffer* buffer,
+        std::shared_ptr<QuicSession> session);
 
     static void OnSend(
         uv_udp_send_t* req,
@@ -270,7 +270,8 @@ class QuicSocket : public HandleWrap {
    private:
     uv_udp_send_t req_;
     QuicSocket* socket_;
-    std::weak_ptr<QuicBuffer> buffer_;
+    QuicBuffer* buffer_;
+    std::shared_ptr<QuicSession> session_;
     uint64_t length_ = 0;
     SocketAddress address_;
   };

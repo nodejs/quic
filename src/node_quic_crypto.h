@@ -7,6 +7,7 @@
 #include "node_quic_session-inl.h"
 #include "node_quic_util.h"
 #include "node_url.h"
+#include "v8.h"
 
 #include <ngtcp2/ngtcp2.h>
 #include <openssl/bio.h>
@@ -1834,6 +1835,58 @@ inline const char* X509ErrorCode(int err) {
   }
 #undef CASE_X509_ERR
   return code;
+}
+
+// Get the SNI hostname requested by the client for the session
+inline v8::Local<v8::Value> GetServerName(
+    Environment* env,
+    SSL* ssl,
+    const char* host_name) {
+  v8::Local<v8::Value> servername;
+  if (host_name != nullptr) {
+    servername = v8::String::NewFromUtf8(
+        env->isolate(),
+        host_name,
+        v8::NewStringType::kNormal).ToLocalChecked();
+  }
+  return servername;
+}
+
+// Get the ALPN protocol identifier that was negotiated for the session
+inline v8::Local<v8::Value> GetALPNProtocol(Environment* env, SSL* ssl) {
+  v8::Local<v8::Value> alpn;
+  const unsigned char* alpn_buf = nullptr;
+  unsigned int alpnlen;
+
+  SSL_get0_alpn_selected(ssl, &alpn_buf, &alpnlen);
+  if (alpnlen == sizeof(NGTCP2_ALPN_H3) - 2 &&
+      memcmp(alpn_buf, NGTCP2_ALPN_H3 + 1, sizeof(NGTCP2_ALPN_H3) - 2) == 0) {
+    alpn = env->quic_alpn_string();
+  } else {
+    alpn = OneByteString(env->isolate(), alpn_buf, alpnlen);
+  }
+  return alpn;
+}
+
+inline v8::Local<v8::Value> GetCipherName(Environment* env, SSL* ssl) {
+  v8::Local<v8::Value> cipher;
+  const SSL_CIPHER* c = SSL_get_current_cipher(ssl);
+  if (c != nullptr) {
+    const char* cipher_name = SSL_CIPHER_get_name(c);
+    cipher = OneByteString(env->isolate(), cipher_name);
+  }
+  return cipher;
+}
+
+inline v8::Local<v8::Value> GetCipherVersion(Environment* env, SSL* ssl) {
+  v8::Local<v8::Value> version;
+  // Get the cipher and version
+  const SSL_CIPHER* c = SSL_get_current_cipher(ssl);
+  if (c != nullptr) {
+    const char* cipher_version = SSL_CIPHER_get_version(c);
+    version = OneByteString(env->isolate(), cipher_version);
+  }
+  return version;
 }
 
 }  // namespace quic
