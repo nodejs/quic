@@ -294,7 +294,6 @@ class QuicSession : public AsyncWrap,
   inline void DecrementAllocatedSize(size_t size) override;
 
  private:
-
   // Returns true if the QuicSession has entered the
   // closing period following a call to ImmediateClose.
   // While true, the QuicSession is only permitted to
