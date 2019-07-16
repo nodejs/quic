@@ -45,12 +45,13 @@ class AliasedBufferBase {
       buffer_(buffer) {
     CHECK_GT(count, 0);
     const v8::HandleScope handle_scope(isolate_);
-
+    const size_t size_in_bytes =
+        MultiplyWithOverflowCheck(sizeof(NativeT), count);
     v8::Local<v8::ArrayBuffer> ab =
         v8::ArrayBuffer::New(
             isolate_,
             buffer,
-            count);
+            size_in_bytes);
 
     v8::Local<V8T> js_array = V8T::New(ab, byte_offset_, count);
     js_array_ = v8::Global<V8T>(isolate, js_array);
