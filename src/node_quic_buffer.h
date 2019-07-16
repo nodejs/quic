@@ -258,7 +258,11 @@ class QuicBuffer : public MemoryRetainer {
   inline void Consume(ssize_t amount = -1) { Consume(0, amount); }
 
   // Cancels the remaining bytes within the buffer
-  inline void Cancel(int status = UV_ECANCELED) { Consume(status, -1); }
+  inline uint64_t Cancel(int status = UV_ECANCELED) {
+    uint64_t remaining = Length();
+    Consume(status, -1);
+    return remaining;
+  }
 
   // The total buffered bytes
   inline uint64_t Length() {

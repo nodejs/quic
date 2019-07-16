@@ -24,6 +24,8 @@
 namespace node {
 namespace quic {
 
+using ConnectionPointer = DeleteFnPtr<ngtcp2_conn, ngtcp2_conn_del>;
+
 class QuicClientSession;
 class QuicServerSession;
 class QuicSocket;
@@ -189,6 +191,7 @@ class QuicSession : public AsyncWrap,
   const ngtcp2_cid* scid() const { return &scid_; }
   QuicSocket* Socket() { return socket_; }
   SSL* ssl() { return ssl_.get(); }
+  ngtcp2_conn* connection() { return connection_.get(); }
 
   void AddStream(QuicStream* stream);
 
@@ -204,7 +207,7 @@ class QuicSession : public AsyncWrap,
   int OpenBidirectionalStream(int64_t* stream_id);
   int OpenUnidirectionalStream(int64_t* stream_id);
   size_t ReadPeerHandshake(uint8_t* buf, size_t buflen);
-  int ReceiveStreamData(
+  void ReceiveStreamData(
       int64_t stream_id,
       int fin,
       const uint8_t* data,
@@ -472,7 +475,7 @@ class QuicSession : public AsyncWrap,
       uint64_t final_size,
       uint16_t app_error_code);
   int TLSHandshake();
-  int UpdateKey();
+  bool UpdateKey();
   int WritePackets();
   int WritePeerHandshake(
       ngtcp2_crypto_level crypto_level,
@@ -687,6 +690,9 @@ class QuicSession : public AsyncWrap,
   static inline void OnKeylog(const SSL* ssl, const char* line);
 
   void UpdateIdleTimer(uint64_t timeout);
+  void UpdateRetransmitTimer(uint64_t timeout);
+  void StopRetransmitTimer();
+  void StopIdleTimer();
 
   typedef ssize_t(*ngtcp2_close_fn)(
     ngtcp2_conn* conn,
@@ -709,7 +715,7 @@ class QuicSession : public AsyncWrap,
   bool destroyed_;
   bool initial_;
   crypto::SSLPointer ssl_;
-  ngtcp2_conn* connection_;
+  ConnectionPointer connection_;
   SocketAddress remote_address_;
   size_t max_pktlen_;
   uint64_t idle_timeout_;
@@ -882,7 +888,7 @@ class QuicSession : public AsyncWrap,
       session_->idle_->Update(session_->idle_timeout_);
 
       ngtcp2_rcvry_stat stat;
-      ngtcp2_conn_get_rcvry_stat(session_->connection_, &stat);
+      ngtcp2_conn_get_rcvry_stat(session_->connection(), &stat);
       session_->recovery_stats_.min_rtt = stat.min_rtt;
       session_->recovery_stats_.latest_rtt = stat.latest_rtt;
       session_->recovery_stats_.smoothed_rtt = stat.smoothed_rtt;

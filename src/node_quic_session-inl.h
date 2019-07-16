@@ -452,9 +452,7 @@ inline int QuicSession::OnReceiveStreamData(
     void* stream_user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
   QuicSession::Ngtcp2CallbackScope callback_scope(session);
-  RETURN_IF_FAIL(
-      session->ReceiveStreamData(stream_id, fin, data, datalen, offset), 0,
-      NGTCP2_ERR_CALLBACK_FAILURE);
+  session->ReceiveStreamData(stream_id, fin, data, datalen, offset);
   return 0;
 }
 
@@ -576,8 +574,7 @@ inline int QuicSession::OnUpdateKey(
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
   QuicSession::Ngtcp2CallbackScope callback_scope(session);
-  RETURN_IF_FAIL(session->UpdateKey(), 0, NGTCP2_ERR_CALLBACK_FAILURE);
-  return 0;
+  return session->UpdateKey() ? 0 : NGTCP2_ERR_CALLBACK_FAILURE;
 }
 
 // When a connection is closed, ngtcp2 will call this multiple
@@ -637,12 +634,12 @@ inline void QuicSession::SetLastError(QuicErrorFamily family, int code) {
 
 inline bool QuicSession::IsInClosingPeriod() {
   CHECK(!IsDestroyed());
-  return ngtcp2_conn_is_in_closing_period(connection_);
+  return ngtcp2_conn_is_in_closing_period(connection());
 }
 
 inline bool QuicSession::IsInDrainingPeriod() {
   CHECK(!IsDestroyed());
-  return ngtcp2_conn_is_in_draining_period(connection_);
+  return ngtcp2_conn_is_in_draining_period(connection());
 }
 
 // Locate the QuicStream with the given id or return nullptr
