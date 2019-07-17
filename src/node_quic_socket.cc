@@ -68,6 +68,8 @@ QuicSocket::QuicSocket(
     HandleWrap(env, wrap,
                reinterpret_cast<uv_handle_t*>(&handle_),
                AsyncWrap::PROVIDER_QUICSOCKET),
+    pending_callbacks_(0),
+    pending_close_(false),
     server_listening_(false),
     validate_addr_(validate_address),
     max_connections_per_host_(max_connections_per_host),
@@ -188,6 +190,33 @@ int QuicSocket::Bind(
   socket_stats_.bound_at = uv_hrtime();
   return 0;
 }
+
+void QuicSocket::Close(Local<Value> close_callback) {
+  if (!IsInitialized() || pending_close_)
+    return;
+  pending_close_ = true;
+
+  CHECK_EQ(false, persistent().IsEmpty());
+  if (!close_callback.IsEmpty() && close_callback->IsFunction()) {
+    object()->Set(env()->context(),
+                  env()->handle_onclose_symbol(),
+                  close_callback).Check();
+  }
+
+  MaybeClose();
+}
+
+// A QuicSocket can close if there are no pending udp send
+// callbacks and QuicSocket::Close() has been called.
+void QuicSocket::MaybeClose() {
+  if (!IsInitialized() || !pending_close_ || pending_callbacks_ > 0)
+    return;
+
+  CHECK_EQ(false, persistent().IsEmpty());
+  uv_close(GetHandle(), OnClose);
+  MarkAsClosing();
+}
+
 
 void QuicSocket::DisassociateCID(QuicCID* cid) {
   Debug(this, "Removing associations for cid %s", cid->ToHex().c_str());
@@ -381,7 +410,7 @@ int QuicSocket::SendVersionNegotiation(
   EntropySource(&unused_random, 1);
 
   ssize_t nwrite = ngtcp2_pkt_write_version_negotiation(
-      **req,
+      req->buffer(),
       NGTCP2_MAX_PKTLEN_IPV6,
       unused_random,
       &chd->scid,
@@ -397,7 +426,6 @@ int QuicSocket::SendVersionNegotiation(
 int QuicSocket::SendRetry(
     const ngtcp2_pkt_hd* chd,
     const sockaddr* addr) {
-
   SendWrapStack* req = new SendWrapStack(this, addr, NGTCP2_MAX_PKTLEN_IPV6);
 
   std::array<uint8_t, 256> token;
@@ -427,7 +455,7 @@ int QuicSocket::SendRetry(
 
   ssize_t nwrite =
       ngtcp2_pkt_write_retry(
-          **req,
+          req->buffer(),
           NGTCP2_MAX_PKTLEN_IPV4,
           &hd,
           &chd->dcid,
@@ -436,6 +464,7 @@ int QuicSocket::SendRetry(
   if (nwrite <= 0)
     return nwrite;
   req->SetLength(nwrite);
+
   return req->Send();
 }
 
@@ -598,21 +627,19 @@ void QuicSocket::SetServerSessionSettings(
   *max_crypto_buffer = server_session_config_.GetMaxCryptoBuffer();
 }
 
-QuicSocket::SendWrapStack::SendWrapStack(
+
+
+QuicSocket::SendWrapBase::SendWrapBase(
     QuicSocket* socket,
-    const sockaddr* dest,
-    size_t len) :
-    socket_(socket) {
+    const sockaddr* dest) : socket_(socket) {
   req_.data = this;
-  buf_.AllocateSufficientStorage(len);
   address_.Copy(dest);
+  socket->IncrementPendingCallbacks();
 }
 
-void QuicSocket::SendWrapStack::OnSend(
-    uv_udp_send_t* req,
-    int status) {
-  std::unique_ptr<QuicSocket::SendWrapStack> wrap(
-      static_cast<QuicSocket::SendWrapStack*>(req->data));
+void QuicSocket::SendWrapBase::OnSend(uv_udp_send_t* req, int status) {
+  std::unique_ptr<QuicSocket::SendWrapBase> wrap(
+      static_cast<QuicSocket::SendWrapBase*>(req->data));
 
   wrap->Socket()->IncrementSocketStat(
     wrap->Length(),
@@ -622,15 +649,27 @@ void QuicSocket::SendWrapStack::OnSend(
     1,
     &wrap->socket_->socket_stats_,
     &QuicSocket::socket_stats::packets_sent);
+
+  wrap->Socket()->DecrementPendingCallbacks();
+  wrap->Socket()->MaybeClose();
+}
+
+
+QuicSocket::SendWrapStack::SendWrapStack(
+    QuicSocket* socket,
+    const sockaddr* dest,
+    size_t len) :
+    SendWrapBase(socket, dest) {
+  buf_.AllocateSufficientStorage(len);
 }
 
 int QuicSocket::SendWrapStack::Send() {
   if (buf_.length() == 0)
     return 0;
-  Debug(socket_, "Sending %llu bytes", buf_.length());
-  if (socket_->IsDiagnosticPacketLoss(socket_->tx_loss_)) {
-    Debug(socket_, "Simulating transmitted packet loss.");
-    OnSend(&req_, 0);
+  Debug(Socket(), "Sending %llu bytes", buf_.length());
+  if (Socket()->IsDiagnosticPacketLoss(Socket()->tx_loss_)) {
+    Debug(Socket(), "Simulating transmitted packet loss.");
+    OnSend(req(), 0);
     return 0;
   }
   uv_buf_t buf =
@@ -638,10 +677,10 @@ int QuicSocket::SendWrapStack::Send() {
           reinterpret_cast<char*>(*buf_),
           buf_.length());
   return uv_udp_send(
-      &req_,
-      &socket_->handle_,
+      req(),
+      &Socket()->handle_,
       &buf, 1,
-      *address_,
+      **Address(),
       OnSend);
 }
 
@@ -652,24 +691,18 @@ QuicSocket::SendWrap::SendWrap(
     SocketAddress* dest,
     QuicBuffer* buffer,
     std::shared_ptr<QuicSession> session) :
-    socket_(socket),
+    SendWrapBase(socket, **dest),
     buffer_(buffer),
-    session_(session) {
-  req_.data = this;
-  address_.Copy(dest);
-}
+    session_(session) {}
 
 QuicSocket::SendWrap::SendWrap(
     QuicSocket* socket,
     const sockaddr* dest,
     QuicBuffer* buffer,
     std::shared_ptr<QuicSession> session) :
-    socket_(socket),
+    SendWrapBase(socket, dest),
     buffer_(buffer),
-    session_(session) {
-  req_.data = this;
-  address_.Copy(dest);
-}
+    session_(session) {}
 
 void QuicSocket::SendWrap::Done(int status) {
   // If the weak_ref to the QuicBuffer is still valid
@@ -680,46 +713,29 @@ void QuicSocket::SendWrap::Done(int status) {
     buffer_->Cancel(status);
 }
 
-void QuicSocket::SendWrap::OnSend(
-    uv_udp_send_t* req,
-    int status) {
-  std::unique_ptr<QuicSocket::SendWrap> wrap(
-      static_cast<QuicSocket::SendWrap*>(req->data));
-  wrap->Done(status);
-
-  wrap->Socket()->IncrementSocketStat(
-    wrap->length_,
-    &wrap->socket_->socket_stats_,
-    &QuicSocket::socket_stats::bytes_sent);
-  wrap->socket_->IncrementSocketStat(
-    1,
-    &wrap->socket_->socket_stats_,
-    &QuicSocket::socket_stats::packets_sent);
-}
-
 // Sending will take the current content of the QuicBuffer
 // and forward it off to the uv_udp_t handle.
 int QuicSocket::SendWrap::Send() {
   std::vector<uv_buf_t> vec;
   size_t len = buffer_->DrainInto(&vec, &length_);
   if (len == 0) return 0;
-  Debug(socket_, "Sending %llu bytes (%d buffers of %d remaining)",
+  Debug(Socket(), "Sending %llu bytes (%d buffers of %d remaining)",
         length_, len, buffer_->ReadRemaining());
-  if (socket_->IsDiagnosticPacketLoss(socket_->tx_loss_)) {
-    Debug(socket_, "Simulating transmitted packet loss.");
+  if (Socket()->IsDiagnosticPacketLoss(Socket()->tx_loss_)) {
+    Debug(Socket(), "Simulating transmitted packet loss.");
     // Advance even though we're not actually sending. This
     // way the local code continues to act as if a write
     // occurred.
     buffer_->SeekHead(len);
-    OnSend(&req_, 0);
+    OnSend(req(), 0);
     return 0;
   }
   int err = uv_udp_send(
-      &req_,
-      &socket_->handle_,
+      req(),
+      &(Socket()->handle_),
       vec.data(),
       vec.size(),
-      *address_,
+      **Address(),
       OnSend);
   // If sending was successful, advance the read head
   if (err == 0)

@@ -45,6 +45,11 @@ class QuicSocket : public HandleWrap {
 
   SocketAddress* GetLocalAddress() { return &local_address_; }
 
+  void Close(
+      v8::Local<v8::Value> close_callback = v8::Local<v8::Value>()) override;
+
+  void MaybeClose();
+
   int AddMembership(
       const char* address,
       const char* iface);
@@ -107,6 +112,14 @@ class QuicSocket : public HandleWrap {
   SET_MEMORY_INFO_NAME(QuicSocket)
   SET_SELF_SIZE(QuicSocket)
 
+  void IncrementPendingCallbacks() {
+    pending_callbacks_++;
+  }
+
+  void DecrementPendingCallbacks() {
+    pending_callbacks_--;
+  }
+
  private:
   static void OnAlloc(
       uv_handle_t* handle,
@@ -158,6 +171,8 @@ class QuicSocket : public HandleWrap {
   typedef uv_udp_t HandleType;
 
   uv_udp_t handle_;
+  size_t pending_callbacks_;
+  bool pending_close_;
   SocketAddress local_address_;
   bool server_listening_;
   bool validate_addr_;
@@ -240,10 +255,38 @@ class QuicSocket : public HandleWrap {
     access(a, mems...) += delta;
   }
 
+  class SendWrapBase {
+   public:
+    SendWrapBase(QuicSocket* socket, const sockaddr* dest);
+
+    virtual void Done(int status) {}
+
+    virtual int Send() = 0;
+
+    uv_udp_send_t* operator*() { return &req_; }
+
+    uv_udp_send_t* req() { return &req_; }
+
+    QuicSocket* Socket() { return socket_; }
+
+    SocketAddress* Address() { return &address_; }
+
+    static void OnSend(
+        uv_udp_send_t* req,
+        int status);
+
+    virtual size_t Length() = 0;
+
+   private:
+    uv_udp_send_t req_;
+    QuicSocket* socket_;
+    SocketAddress address_;
+  };
+
   // The SendWrap drains the given QuicBuffer and sends it to the
   // uv_udp_t handle. When the async operation completes, the done_cb
   // is invoked with the status and the user_data forwarded on.
-  class SendWrap {
+  class SendWrap : public SendWrapBase {
    public:
     SendWrap(
         QuicSocket* socket,
@@ -257,55 +300,37 @@ class QuicSocket : public HandleWrap {
         QuicBuffer* buffer,
         std::shared_ptr<QuicSession> session);
 
-    static void OnSend(
-        uv_udp_send_t* req,
-        int status);
+    void Done(int status) override;
 
-    void Done(int status);
+    int Send() override;
 
-    int Send();
-
-    QuicSocket* Socket() const { return socket_; }
+    size_t Length() override { return length_; }
 
    private:
-    uv_udp_send_t req_;
-    QuicSocket* socket_;
     QuicBuffer* buffer_;
     std::shared_ptr<QuicSession> session_;
-    uint64_t length_ = 0;
-    SocketAddress address_;
+    size_t length_ = 0;
   };
 
-  class SendWrapStack {
+  class SendWrapStack : public SendWrapBase {
    public:
     SendWrapStack(
         QuicSocket* socket,
         const sockaddr* dest,
         size_t len);
 
-    static void OnSend(
-        uv_udp_send_t* req,
-        int status);
+    int Send() override;
 
-    int Send();
-
-    uint8_t* operator*() { return *buf_; }
+    uint8_t* buffer() { return *buf_; }
 
     void SetLength(size_t len) {
       buf_.SetLength(len);
     }
 
-    size_t Length() {
-      return buf_.length();
-    }
-
-    QuicSocket* Socket() const { return socket_; }
+    size_t Length() override { return buf_.length(); }
 
    private:
-    uv_udp_send_t req_;
-    QuicSocket* socket_;
     MaybeStackBuffer<uint8_t> buf_;
-    SocketAddress address_;
   };
 };
 
