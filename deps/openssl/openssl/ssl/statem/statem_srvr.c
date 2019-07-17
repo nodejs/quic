@@ -776,10 +776,6 @@ static ossl_inline int conn_is_closed(void)
     case ECONNRESET:
         return 1;
 #endif
-#if defined(WSAECONNRESET)
-    case WSAECONNRESET:
-        return 1;
-#endif
     default:
         return 0;
     }
