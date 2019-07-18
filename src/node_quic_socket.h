@@ -112,14 +112,6 @@ class QuicSocket : public HandleWrap {
   SET_MEMORY_INFO_NAME(QuicSocket)
   SET_SELF_SIZE(QuicSocket)
 
-  void IncrementPendingCallbacks() {
-    pending_callbacks_++;
-  }
-
-  void DecrementPendingCallbacks() {
-    pending_callbacks_--;
-  }
-
  private:
   static void OnAlloc(
       uv_handle_t* handle,
@@ -157,6 +149,9 @@ class QuicSocket : public HandleWrap {
   void IncrementSocketAddressCounter(const sockaddr* addr);
   void DecrementSocketAddressCounter(const sockaddr* addr);
   size_t GetCurrentSocketAddressCounter(const sockaddr* addr);
+
+  void IncrementPendingCallbacks() { pending_callbacks_++; }
+  void DecrementPendingCallbacks() { pending_callbacks_--; }
 
   template <typename T,
             int (*F)(const typename T::HandleType*, sockaddr*, int*)>
@@ -276,6 +271,8 @@ class QuicSocket : public HandleWrap {
         int status);
 
     virtual size_t Length() = 0;
+
+    bool IsDiagnosticPacketLoss();
 
    private:
     uv_udp_send_t req_;

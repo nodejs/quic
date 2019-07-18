@@ -252,8 +252,8 @@ server.on('ready', common.mustCall(() => {
     // The server's identity won't be valid because the requested
     // SNI hostname does not match the certificate used.
     debug('QuicClientSession server is %sauthenticated',
-          req.authenicated ? '' : 'not ');
-    assert(!req.authenicated);
+          req.authenticated ? '' : 'not ');
+    assert(!req.authenticated);
     common.expectsError(() => { throw req.authenticationError; }, {
       code: 'ERR_QUIC_VERIFY_HOSTNAME_MISMATCH',
       message: 'Hostname mismatch'

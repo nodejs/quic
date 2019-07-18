@@ -654,6 +654,14 @@ void QuicSocket::SendWrapBase::OnSend(uv_udp_send_t* req, int status) {
   wrap->Socket()->MaybeClose();
 }
 
+bool QuicSocket::SendWrapBase::IsDiagnosticPacketLoss() {
+  if (Socket()->IsDiagnosticPacketLoss(Socket()->tx_loss_)) {
+    Debug(Socket(), "Simulating transmitted packet loss.");
+    OnSend(req(), 0);
+    return true;
+  }
+  return false;
+}
 
 QuicSocket::SendWrapStack::SendWrapStack(
     QuicSocket* socket,
@@ -667,11 +675,8 @@ int QuicSocket::SendWrapStack::Send() {
   if (buf_.length() == 0)
     return 0;
   Debug(Socket(), "Sending %llu bytes", buf_.length());
-  if (Socket()->IsDiagnosticPacketLoss(Socket()->tx_loss_)) {
-    Debug(Socket(), "Simulating transmitted packet loss.");
-    OnSend(req(), 0);
+  if (UNLIKELY(IsDiagnosticPacketLoss()))
     return 0;
-  }
   uv_buf_t buf =
       uv_buf_init(
           reinterpret_cast<char*>(*buf_),
@@ -721,15 +726,8 @@ int QuicSocket::SendWrap::Send() {
   if (len == 0) return 0;
   Debug(Socket(), "Sending %llu bytes (%d buffers of %d remaining)",
         length_, len, buffer_->ReadRemaining());
-  if (Socket()->IsDiagnosticPacketLoss(Socket()->tx_loss_)) {
-    Debug(Socket(), "Simulating transmitted packet loss.");
-    // Advance even though we're not actually sending. This
-    // way the local code continues to act as if a write
-    // occurred.
-    buffer_->SeekHead(len);
-    OnSend(req(), 0);
+  if (UNLIKELY(IsDiagnosticPacketLoss()))
     return 0;
-  }
   int err = uv_udp_send(
       req(),
       &(Socket()->handle_),
