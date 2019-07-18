@@ -320,7 +320,7 @@ constexpr size_t kFsStatsBufferLength =
   V(promise_string, "promise")                                                 \
   V(pubkey_string, "pubkey")                                                   \
   V(query_string, "query")                                                     \
-  V(quic_alpn_string, "h3-20")                                                 \
+  V(quic_alpn_string, "h3-22")                                                 \
   V(raw_string, "raw")                                                         \
   V(read_host_object_string, "_readHostObject")                                \
   V(readable_string, "readable")                                               \

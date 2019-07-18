@@ -27,6 +27,7 @@ using v8::HandleScope;
 using v8::Integer;
 using v8::Isolate;
 using v8::Local;
+using v8::Number;
 using v8::Object;
 using v8::PropertyAttribute;
 using v8::String;
@@ -275,7 +276,7 @@ void QuicSocket::OnRecv(
     Environment* env = socket->env();
     HandleScope scope(env->isolate());
     Context::Scope context_scope(env->context());
-    Local<Value> arg = Integer::New(env->isolate(), nread);
+    Local<Value> arg = Number::New(env->isolate(), static_cast<double>(nread));
     socket->MakeCallback(env->quic_on_socket_error_function(), 1, &arg);
     return;
   }
@@ -298,15 +299,22 @@ void QuicSocket::Receive(
   }
 
   IncrementSocketStat(nread, &socket_stats_, &socket_stats::bytes_received);
-  ngtcp2_pkt_hd hd;
   int err;
 
   const uint8_t* data = reinterpret_cast<const uint8_t*>(buf->base);
 
-  // Parse the packet header...
-  err = (buf->base[0] & 0x80) ?
-      ngtcp2_pkt_decode_hd_long(&hd, data, nread) :
-      ngtcp2_pkt_decode_hd_short(&hd, data, nread, NGTCP2_SV_SCIDLEN);
+  uint32_t pversion;
+  const uint8_t* pdcid;
+  size_t pdcidlen;
+  const uint8_t* pscid;
+  size_t pscidlen;
+  err = ngtcp2_pkt_decode_version_cid(
+      &pversion,
+      &pdcid,
+      &pdcidlen,
+      &pscid,
+      &pscidlen,
+      data, nread, NGTCP2_SV_SCIDLEN);
 
   if (err < 0) {
     // There's nothing we should really do here but return. The packet is
@@ -317,8 +325,19 @@ void QuicSocket::Receive(
     return;
   }
 
+  if (pdcidlen > NGTCP2_MAX_CIDLEN || pscidlen > NGTCP2_MAX_CIDLEN) {
+    // TODO(@jasnell): QUIC currently requires CID lengths of max
+    // NGTCP2_MAX_CIDLEN. The ngtcp2 API allows non-standard lengths,
+    // and we may want to allow non-standard lengths later. But for now,
+    // we're going to ignore any packet with a non-standard CID length.
+    IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
+    return;
+  }
+
   // Extract the DCID
-  QuicCID dcid(hd.dcid);
+  QuicCID dcid(pdcid, pdcidlen);
+  QuicCID scid(pscid, pscidlen);
+
   auto dcid_hex = dcid.ToHex();
   auto dcid_str = dcid.ToStr();
   Debug(this, "Received a QUIC packet for dcid %s", dcid_hex.c_str());
@@ -340,7 +359,14 @@ void QuicSocket::Receive(
         IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
         return;
       }
-      session = ServerReceive(&dcid, &hd, nread, data, addr, flags);
+      session = ServerReceive(
+        pversion,
+        &dcid,
+        &scid,
+        nread,
+        data,
+        addr,
+        flags);
       if (!session) {
         Debug(this, "Could not initialize a new QuicServerSession.");
         // TODO(@jasnell): Should this be fatal for the QuicSocket?
@@ -363,7 +389,7 @@ void QuicSocket::Receive(
     IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
     return;
   }
-  err = session->Receive(&hd, nread, data, addr, flags);
+  err = session->Receive(nread, data, addr, flags);
   if (err != 0) {
     // Packet was not successfully processed for some reason, possibly
     // due to being malformed or malicious in some way. Ignore.
@@ -397,13 +423,15 @@ void QuicSocket::ReportSendError(int error) {
   return;
 }
 
-int QuicSocket::SendVersionNegotiation(
-    const ngtcp2_pkt_hd* chd,
+void QuicSocket::SendVersionNegotiation(
+      uint32_t version,
+      QuicCID* dcid,
+      QuicCID* scid,
     const sockaddr* addr) {
   SendWrapStack* req = new SendWrapStack(this, addr, NGTCP2_MAX_PKTLEN_IPV6);
 
   std::array<uint32_t, 2> sv;
-  sv[0] = GenerateReservedVersion(addr, chd->version);
+  sv[0] = GenerateReservedVersion(addr, version);
   sv[1] = NGTCP2_PROTO_VER;
 
   uint8_t unused_random;
@@ -413,18 +441,22 @@ int QuicSocket::SendVersionNegotiation(
       req->buffer(),
       NGTCP2_MAX_PKTLEN_IPV6,
       unused_random,
-      &chd->scid,
-      &chd->dcid,
+      dcid->data(),
+      dcid->length(),
+      scid->data(),
+      scid->length(),
       sv.data(),
       sv.size());
   if (nwrite < 0)
-    return -1;
+    return;
   req->SetLength(nwrite);
-  return req->Send();
+  req->Send();
 }
 
-int QuicSocket::SendRetry(
-    const ngtcp2_pkt_hd* chd,
+ssize_t QuicSocket::SendRetry(
+    uint32_t version,
+    QuicCID* dcid,
+    QuicCID* scid,
     const sockaddr* addr) {
   SendWrapStack* req = new SendWrapStack(this, addr, NGTCP2_MAX_PKTLEN_IPV6);
 
@@ -434,31 +466,31 @@ int QuicSocket::SendRetry(
   if (GenerateRetryToken(
           token.data(), &tokenlen,
           addr,
-          &chd->dcid,
+          **dcid,
           &token_crypto_ctx_,
           &token_secret_) != 0) {
     return -1;
   }
 
   ngtcp2_pkt_hd hd;
-  hd.version = chd->version;
+  hd.version = version;
   hd.flags = NGTCP2_PKT_FLAG_LONG_FORM;
   hd.type = NGTCP2_PKT_RETRY;
   hd.pkt_num = 0;
   hd.token = nullptr;
   hd.tokenlen = 0;
   hd.len = 0;
-  hd.dcid = chd->scid;
+  hd.dcid = ***scid;
   hd.scid.datalen = NGTCP2_SV_SCIDLEN;
 
-  EntropySource(hd.scid.data, hd.scid.datalen);
+  EntropySource(hd.scid.data, NGTCP2_SV_SCIDLEN);
 
   ssize_t nwrite =
       ngtcp2_pkt_write_retry(
           req->buffer(),
           NGTCP2_MAX_PKTLEN_IPV4,
           &hd,
-          &chd->dcid,
+          **dcid,
           token.data(),
           tokenlen);
   if (nwrite <= 0)
@@ -469,8 +501,9 @@ int QuicSocket::SendRetry(
 }
 
 std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
+    uint32_t version,
     QuicCID* dcid,
-    ngtcp2_pkt_hd* hd,
+    QuicCID* scid,
     ssize_t nread,
     const uint8_t* data,
     const struct sockaddr* addr,
@@ -488,7 +521,8 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
   }
 
   int err;
-  err = ngtcp2_accept(hd, data, nread);
+  ngtcp2_pkt_hd hd;
+  err = ngtcp2_accept(&hd, data, nread);
   if (err == -1) {
     // Not a valid QUIC packet. Ignore so we don't commit any further
     // resources to handling.
@@ -498,7 +532,7 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
   if (err == 1) {
     // It was a QUIC packet, but it was the wrong version. Send a version
     // negotiation in response but do nothing else.
-    SendVersionNegotiation(hd, addr);
+    SendVersionNegotiation(version, dcid, scid, addr);
     return session;
   }
   if (GetCurrentSocketAddressCounter(addr) >= max_connections_per_host_) {
@@ -518,16 +552,16 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
   // retry token in the packet. If one does not exist, we send a retry with
   // a new token. If it does exist, and if it's valid, we grab the original
   // cid and continue.
-  if (validate_addr_ && hd->type == NGTCP2_PKT_INITIAL) {
+  if (validate_addr_ && hd.type == NGTCP2_PKT_INITIAL) {
     Debug(this, "Performing explicit address validation.");
-    if (hd->tokenlen == 0 ||
+    if (hd.tokenlen == 0 ||
         VerifyRetryToken(
             env(), &ocid,
-            hd, addr,
+            &hd, addr,
             &token_crypto_ctx_,
             &token_secret_,
             retry_token_expiration_) != 0) {
-      SendRetry(hd, addr);
+      SendRetry(version, dcid, scid, addr);
       return session;
     }
     Debug(this, "A valid retry token was found. Continuing.");
@@ -537,11 +571,11 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
   session =
       QuicServerSession::New(
           this,
-          &hd->dcid,
+          **dcid,
           addr,
-          &hd->scid,
+          **scid,
           ocid_ptr,
-          hd->version,
+          version,
           server_alpn_,
           reject_unauthorized_,
           request_cert_);

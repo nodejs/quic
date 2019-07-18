@@ -36,6 +36,7 @@ constexpr int ERR_INVALID_TLS_SESSION_TICKET = -2;
 
 constexpr uint64_t MINIMUM_MAX_CRYPTO_BUFFER = 4096;
 constexpr uint64_t DEFAULT_MAX_CRYPTO_BUFFER = MINIMUM_MAX_CRYPTO_BUFFER * 4;
+constexpr uint64_t DEFAULT_ACTIVE_CONNECTION_ID_LIMIT = 10;
 
 // The QuicSessionConfig class holds the initial transport parameters and
 // configuration options set by the JavaScript side when either a
@@ -68,6 +69,7 @@ class QuicSessionConfig {
   uint64_t GetMaxCryptoBuffer() { return max_crypto_buffer_; }
 
  private:
+  uint64_t active_connection_id_limit_ = DEFAULT_ACTIVE_CONNECTION_ID_LIMIT;
   uint64_t max_stream_data_bidi_local_ = 256 * 1024;
   uint64_t max_stream_data_bidi_remote_ = 256 * 1024;
   uint64_t max_stream_data_uni_ = 256 * 1024;
@@ -214,15 +216,14 @@ class QuicSession : public AsyncWrap,
       size_t datalen,
       uint64_t offset);
   void RemoveStream(int64_t stream_id);
-  int Send0RTTStreamData(QuicStream* stream);
-  int SendPendingData();
-  int SendStreamData(QuicStream* stream);
+  ssize_t SendPendingData();
+  ssize_t SendStreamData(QuicStream* stream);
   inline void SetLastError(
       QuicError error = {
           QUIC_ERROR_SESSION,
           NGTCP2_NO_ERROR
       });
-  inline void SetLastError(QuicErrorFamily family, int code);
+  inline void SetLastError(QuicErrorFamily family, uint64_t error_code);
   int SetRemoteTransportParams(ngtcp2_transport_params* params);
 
   // ShutdownStream will cause ngtcp2 to queue a
@@ -254,7 +255,7 @@ class QuicSession : public AsyncWrap,
   // ShutdownStream.
   int ShutdownStream(
       int64_t stream_id,
-      uint16_t code = NGTCP2_APP_NOERROR);
+      uint64_t error_code = NGTCP2_APP_NOERROR);
   int TLSRead();
   void WriteHandshake(const uint8_t* data, size_t datalen);
 
@@ -271,10 +272,6 @@ class QuicSession : public AsyncWrap,
 
   // These must be implemented by QuicSession types
   virtual void AddToSocket(QuicSocket* socket) = 0;
-  virtual int DoHandshake(
-      const ngtcp2_path* path,
-      const uint8_t* data,
-      size_t datalen) = 0;
   virtual int HandleError() = 0;
   virtual void MaybeTimeout() = 0;
   virtual int OnKey(
@@ -283,7 +280,6 @@ class QuicSession : public AsyncWrap,
       size_t secretlen) = 0;
   virtual int OnTLSStatus() = 0;
   virtual int Receive(
-      ngtcp2_pkt_hd* hd,
       ssize_t nread,
       const uint8_t* data,
       const struct sockaddr* addr,
@@ -384,10 +380,6 @@ class QuicSession : public AsyncWrap,
   // peer.
   void SilentClose();
   QuicStream* CreateStream(int64_t stream_id);
-  int DoHandshakeReadOnce(
-      const ngtcp2_path* path,
-      const uint8_t* data,
-      size_t datalen);
   ssize_t DoHSEncrypt(
       uint8_t* dest,
       size_t destlen,
@@ -446,7 +438,6 @@ class QuicSession : public AsyncWrap,
       size_t keylen,
       const uint8_t* sample,
       size_t samplelen);
-  int DoHandshakeWriteOnce();
   void ExtendMaxStreamData(int64_t stream_id, uint64_t max_data);
   int ExtendMaxStreams(bool bidi, uint64_t max_streams);
   int GetNewConnectionID(ngtcp2_cid* cid, uint8_t* token, size_t cidlen);
@@ -468,15 +459,15 @@ class QuicSession : public AsyncWrap,
   int SendPacket();
   void SetHandshakeCompleted();
   void SetLocalAddress(const ngtcp2_addr* addr);
-  void StreamClose(int64_t stream_id, uint16_t app_error_code);
+  void StreamClose(int64_t stream_id, uint64_t app_error_code);
   int StreamOpen(int64_t stream_id);
   void StreamReset(
       int64_t stream_id,
       uint64_t final_size,
-      uint16_t app_error_code);
+      uint64_t app_error_code);
   int TLSHandshake();
   bool UpdateKey();
-  int WritePackets();
+  ssize_t WritePackets();
   int WritePeerHandshake(
       ngtcp2_crypto_level crypto_level,
       const uint8_t* data,
@@ -490,7 +481,6 @@ class QuicSession : public AsyncWrap,
     ngtcp2_addr* dest,
     const ngtcp2_preferred_addr* paddr) { return 0; }
   virtual void StoreRemoteTransportParams(ngtcp2_transport_params* params) {}
-  virtual int Start() { return 0; }
   virtual void VersionNegotiation(
       const ngtcp2_pkt_hd* hd,
       const uint32_t* sv,
@@ -627,7 +617,7 @@ class QuicSession : public AsyncWrap,
   static inline int OnStreamClose(
       ngtcp2_conn* conn,
       int64_t stream_id,
-      uint16_t app_error_code,
+      uint64_t app_error_code,
       void* user_data,
       void* stream_user_data);
   static inline int OnStreamOpen(
@@ -638,7 +628,7 @@ class QuicSession : public AsyncWrap,
       ngtcp2_conn* conn,
       int64_t stream_id,
       uint64_t final_size,
-      uint16_t app_error_code,
+      uint64_t app_error_code,
       void* user_data,
       void* stream_user_data);
   static inline int OnRand(
@@ -699,7 +689,7 @@ class QuicSession : public AsyncWrap,
     ngtcp2_path* path,
     uint8_t* dest,
     size_t destlen,
-    uint16_t error_code,
+    uint64_t error_code,
     ngtcp2_tstamp ts);
 
   static inline ngtcp2_close_fn SelectCloseFn(QuicErrorFamily family) {
@@ -889,9 +879,12 @@ class QuicSession : public AsyncWrap,
 
       ngtcp2_rcvry_stat stat;
       ngtcp2_conn_get_rcvry_stat(session_->connection(), &stat);
-      session_->recovery_stats_.min_rtt = stat.min_rtt;
-      session_->recovery_stats_.latest_rtt = stat.latest_rtt;
-      session_->recovery_stats_.smoothed_rtt = stat.smoothed_rtt;
+      session_->recovery_stats_.min_rtt =
+          static_cast<double>(stat.min_rtt);
+      session_->recovery_stats_.latest_rtt =
+          static_cast<double>(stat.latest_rtt);
+      session_->recovery_stats_.smoothed_rtt =
+          static_cast<double>(stat.smoothed_rtt);
     }
    private:
     QuicSession* session_;
@@ -959,10 +952,6 @@ class QuicServerSession : public QuicSession {
       bool request_cert);
 
   void DisassociateCID(const ngtcp2_cid* cid) override;
-  int DoHandshake(
-      const ngtcp2_path* path,
-      const uint8_t* data,
-      size_t datalen) override;
   int HandleError() override;
   void InitTLS_Post() override;
   int OnKey(
@@ -970,7 +959,6 @@ class QuicServerSession : public QuicSession {
       const uint8_t* secret,
       size_t secretlen) override;
   int Receive(
-      ngtcp2_pkt_hd* hd,
       ssize_t nread,
       const uint8_t* data,
       const struct sockaddr* addr,
@@ -1089,7 +1077,7 @@ class QuicClientSession : public QuicSession {
   int OnTLSStatus() override;
 
   int SetEarlyTransportParams(v8::Local<v8::Value> buffer);
-  int SetSocket(QuicSocket* socket, bool nat_rebinding = false);
+  ssize_t SetSocket(QuicSocket* socket, bool nat_rebinding = false);
   int SetSession(SSL_SESSION* session);
   int SetSession(v8::Local<v8::Value> buffer);
 
@@ -1100,15 +1088,10 @@ class QuicClientSession : public QuicSession {
   SET_SELF_SIZE(QuicClientSession)
 
  private:
-  int DoHandshake(
-      const ngtcp2_path* path,
-      const uint8_t* data,
-      size_t datalen) override;
   int HandleError() override;
   void InitTLS_Post() override;
   int OnKey(int name, const uint8_t* secret, size_t secretlen) override;
   int Receive(
-      ngtcp2_pkt_hd* hd,
       ssize_t nread,
       const uint8_t* data,
       const struct sockaddr* addr,
@@ -1117,7 +1100,6 @@ class QuicClientSession : public QuicSession {
   int SelectPreferredAddress(
     ngtcp2_addr* dest,
     const ngtcp2_preferred_addr* paddr) override;
-  int Start() override;
   void StoreRemoteTransportParams(ngtcp2_transport_params* params) override;
   int TLSHandshake_Complete() override;
   int TLSHandshake_Initial() override;

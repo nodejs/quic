@@ -131,19 +131,24 @@ class QuicSocket : public HandleWrap {
       const struct sockaddr* addr,
       unsigned int flags);
 
-  int SendVersionNegotiation(
-      const ngtcp2_pkt_hd* chd,
+  void SendVersionNegotiation(
+      uint32_t version,
+      QuicCID* dcid,
+      QuicCID* scid,
       const sockaddr* addr);
 
   std::shared_ptr<QuicSession> ServerReceive(
+      uint32_t version,
       QuicCID* dcid,
-      ngtcp2_pkt_hd* hd,
+      QuicCID* scid,
       ssize_t nread,
       const uint8_t* data,
       const struct sockaddr* addr,
       unsigned int flags);
-  int SendRetry(
-      const ngtcp2_pkt_hd* chd,
+  ssize_t SendRetry(
+      uint32_t version,
+      QuicCID* dcid,
+      QuicCID* scid,
       const sockaddr* addr);
 
   void IncrementSocketAddressCounter(const sockaddr* addr);

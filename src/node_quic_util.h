@@ -18,10 +18,10 @@
 namespace node {
 namespace quic {
 
-constexpr uint16_t NGTCP2_APP_NOERROR = 0xff00;
+constexpr uint64_t NGTCP2_APP_NOERROR = 0xff00;
 
 constexpr size_t MIN_INITIAL_QUIC_PKT_SIZE = 1200;
-constexpr size_t NGTCP2_SV_SCIDLEN = 18;
+constexpr size_t NGTCP2_SV_SCIDLEN = NGTCP2_MAX_CIDLEN;
 constexpr size_t TOKEN_RAND_DATALEN = 16;
 constexpr size_t TOKEN_SECRETLEN = 16;
 constexpr size_t DEFAULT_MAX_STREAM_DATA_BIDI_LOCAL = 256 * 1024;
@@ -36,12 +36,6 @@ constexpr uint64_t DEFAULT_RETRYTOKEN_EXPIRATION = 10ULL;
   } while (0)
 
 #define RETURN_IF_FAIL_OPENSSL(test) RETURN_IF_FAIL(test, 1, -1)
-
-#define RETURN_RET_IF_FAIL(test, success)                                      \
-  do {                                                                         \
-    int ret = test;                                                            \
-    if (UNLIKELY((ret) != (success))) return (ret);                            \
-  } while (0)
 
 enum SelectPreferredAddressPolicy {
   // Ignore the server-provided preferred address
@@ -72,18 +66,18 @@ inline void hash_combine(size_t* seed, const T& value, Args... rest) {
 // look at the ALPN identifier to determine exactly what it
 // means. Connection (Session) and Crypto errors, on the other
 // hand, share the same meaning regardless of the ALPN.
-enum QuicErrorFamily {
+typedef enum QuicErrorFamily : int {
   QUIC_ERROR_SESSION,
   QUIC_ERROR_CRYPTO,
   QUIC_ERROR_APPLICATION
-};
+} QuicErrorFamily;
 
 struct QuicError {
   QuicErrorFamily family;
-  int code;
+  uint64_t code;
   inline QuicError(
       QuicErrorFamily family_ = QUIC_ERROR_SESSION,
-      int code_ = NGTCP2_NO_ERROR) :
+      uint64_t code_ = NGTCP2_NO_ERROR) :
       family(family_), code(code_) {}
 };
 
@@ -103,6 +97,18 @@ inline QuicError InitQuicError(
       error.code = code_;
   }
   return error;
+}
+
+inline uint64_t ExtractErrorCode(Environment* env, v8::Local<v8::Value> arg) {
+  uint64_t code = NGTCP2_APP_NOERROR;
+  if (arg->IsBigInt()) {
+    code = arg.As<v8::BigInt>()->Int64Value();
+  } else if (arg->IsNumber()) {
+    double num = 0;
+    USE(arg->NumberValue(env->context()).To(&num));
+    code = static_cast<uint64_t>(num);
+  }
+  return code;
 }
 
 class SocketAddress {
@@ -313,30 +319,37 @@ struct QuicPathStorage {
 
 class QuicCID {
  public:
-  explicit QuicCID(ngtcp2_cid* cid) : cid_(cid) {}
-  explicit QuicCID(const ngtcp2_cid* cid) : cid_(cid) {}
-  explicit QuicCID(const ngtcp2_cid& cid) : cid_(&cid) {}
+  explicit QuicCID(ngtcp2_cid* cid) : cid_(*cid) {}
+  explicit QuicCID(const ngtcp2_cid* cid) : cid_(*cid) {}
+  explicit QuicCID(const ngtcp2_cid& cid) : cid_(cid) {}
+  QuicCID(const uint8_t* cid, size_t len) {
+    ngtcp2_cid_init(&cid_, cid, len);
+  }
 
   std::string ToStr() {
-    return std::string(cid_->data, cid_->data + cid_->datalen);
+    return std::string(cid_.data, cid_.data + cid_.datalen);
   }
 
   std::string ToHex() {
     MaybeStackBuffer<char, 64> dest;
-    dest.AllocateSufficientStorage(cid_->datalen * 2);
-    dest.SetLengthAndZeroTerminate(cid_->datalen * 2);
+    dest.AllocateSufficientStorage(cid_.datalen * 2);
+    dest.SetLengthAndZeroTerminate(cid_.datalen * 2);
     size_t written = StringBytes::hex_encode(
-        reinterpret_cast<const char*>(cid_->data),
-        cid_->datalen,
+        reinterpret_cast<const char*>(cid_.data),
+        cid_.datalen,
         *dest,
         dest.length());
     return std::string(*dest, written);
   }
 
-  const ngtcp2_cid* operator*() const { return cid_; }
+  const ngtcp2_cid* operator*() const { return &cid_; }
+
+  uint8_t* data() { return cid_.data; }
+
+  size_t length() { return cid_.datalen; }
 
  private:
-  const ngtcp2_cid* cid_;
+  ngtcp2_cid cid_;
 };
 
 // https://stackoverflow.com/questions/33701430/template-function-to-access-struct-members

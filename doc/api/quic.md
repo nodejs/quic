@@ -651,6 +651,7 @@ added: REPLACEME
     passphrase: <string>]}`. The object form can only occur in an array.
     `object.passphrase` is optional. Encrypted keys will be decrypted with
     `object.passphrase` if provided, or `options.passphrase` if it is not.
+  * `activeConnectionIdLimit` {number}
   * `maxAckDelay` {number}
   * `maxCryptoBuffer` {number}
   * `maxData` {number}
@@ -808,6 +809,7 @@ added: REPLACEME
     passphrase: <string>]}`. The object form can only occur in an array.
     `object.passphrase` is optional. Encrypted keys will be decrypted with
     `object.passphrase` if provided, or `options.passphrase` if it is not.
+  * `activeConnectionIdLimit` {number}
   * `maxAckDelay` {number}
   * `maxCryptoBuffer` {number}
   * `maxData` {number}

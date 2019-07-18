@@ -20,12 +20,13 @@ namespace quic {
 
 inline void SetConfig(Environment* env, int idx, uint64_t* val) {
   AliasedFloat64Array& buffer = env->quic_state()->quicsessionconfig_buffer;
-  uint64_t flags = buffer[IDX_QUIC_SESSION_CONFIG_COUNT];
-  if (flags & (1 << idx))
-    *val = buffer[idx];
+  uint64_t flags = static_cast<uint64_t>(buffer[IDX_QUIC_SESSION_CONFIG_COUNT]);
+  if (flags & (1ULL << idx))
+    *val = static_cast<uint64_t>(buffer[idx]);
 }
 
 inline void QuicSessionConfig::ResetToDefaults() {
+  active_connection_id_limit_ = DEFAULT_ACTIVE_CONNECTION_ID_LIMIT;
   max_stream_data_bidi_local_ = 256 * 1024;
   max_stream_data_bidi_remote_ = 256 * 1024;
   max_stream_data_uni_ = 256 * 1024;
@@ -44,6 +45,8 @@ inline void QuicSessionConfig::Set(
     const sockaddr* preferred_addr) {
   ResetToDefaults();
 
+  SetConfig(env, IDX_QUIC_SESSION_ACTIVE_CONNECTION_ID_LIMIT,
+            &active_connection_id_limit_);
   SetConfig(env, IDX_QUIC_SESSION_MAX_STREAM_DATA_BIDI_LOCAL,
             &max_stream_data_bidi_local_);
   SetConfig(env, IDX_QUIC_SESSION_MAX_STREAM_DATA_BIDI_REMOTE,
@@ -90,6 +93,7 @@ inline void QuicSessionConfig::ToSettings(
     bool stateless_reset_token) {
   ngtcp2_settings_default(settings);
 
+  settings->active_connection_id_limit = active_connection_id_limit_;
   settings->max_stream_data_bidi_local = max_stream_data_bidi_local_;
   settings->max_stream_data_bidi_remote = max_stream_data_bidi_remote_;
   settings->max_stream_data_uni = max_stream_data_uni_;
@@ -209,7 +213,8 @@ inline int QuicSession::OnReceiveCryptoData(
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
   QuicSession::Ngtcp2CallbackScope callback_scope(session);
-  return session->ReceiveCryptoData(crypto_level, offset, data, datalen);
+  return static_cast<int>(
+    session->ReceiveCryptoData(crypto_level, offset, data, datalen));
 }
 
 // Called by ngtcp2 for a client connection when the server has
@@ -521,7 +526,7 @@ inline int QuicSession::OnSelectPreferredAddress(
 inline int QuicSession::OnStreamClose(
     ngtcp2_conn* conn,
     int64_t stream_id,
-    uint16_t app_error_code,
+    uint64_t app_error_code,
     void* user_data,
     void* stream_user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
@@ -534,7 +539,7 @@ inline int QuicSession::OnStreamReset(
     ngtcp2_conn* conn,
     int64_t stream_id,
     uint64_t final_size,
-    uint16_t app_error_code,
+    uint64_t app_error_code,
     void* user_data,
     void* stream_user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
@@ -628,8 +633,9 @@ inline void QuicSession::SetLastError(QuicError error) {
   last_error_ = error;
 }
 
-inline void QuicSession::SetLastError(QuicErrorFamily family, int code) {
-  SetLastError(InitQuicError(family, code));
+inline void QuicSession::SetLastError(QuicErrorFamily family, uint64_t code) {
+  last_error_.family = family;
+  last_error_.code = code;
 }
 
 inline bool QuicSession::IsInClosingPeriod() {

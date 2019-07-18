@@ -159,13 +159,13 @@ inline void QuicStream::SetInitialFlags() {
 // QuicStream::Close() is called by the QuicSession when ngtcp2 detects that
 // a stream has been closed. This, in turn, calls out to the JavaScript to
 // start the process of tearing down and destroying the QuicStream instance.
-void QuicStream::Close(uint16_t app_error_code) {
+void QuicStream::Close(uint64_t app_error_code) {
   SetReadClose();
   SetWriteClose();
   HandleScope scope(env()->isolate());
   Context::Scope context_context(env()->context());
   Local<Value> argv[] = {
-    Number::New(env()->isolate(), app_error_code)
+    Number::New(env()->isolate(), static_cast<double>(app_error_code))
   };
   MakeCallback(env()->quic_on_stream_close_function(), arraysize(argv), argv);
 }
@@ -179,12 +179,12 @@ void QuicStream::Close(uint16_t app_error_code) {
 // from a normal end-of-stream with the exception that the receivedReset
 // property will be set with the final size and application error code
 // specified.
-void QuicStream::Reset(uint64_t final_size, uint16_t app_error_code) {
+void QuicStream::Reset(uint64_t final_size, uint64_t app_error_code) {
   // Ignore the reset completely if fin has already been received.
   if (IsFin())
     return;
   Debug(this,
-        "Resetting stream %llu with app error code %d, and final size %llu",
+        "Resetting stream %llu with app error code %llu, and final size %llu",
         GetID(),
         app_error_code,
         final_size);
@@ -192,7 +192,7 @@ void QuicStream::Reset(uint64_t final_size, uint16_t app_error_code) {
   Context::Scope context_scope(env()->context());
   streambuf_.Cancel();
   Local<Value> argv[] = {
-    Number::New(env()->isolate(), app_error_code),
+    Number::New(env()->isolate(), static_cast<double>(app_error_code)),
     Number::New(env()->isolate(), static_cast<double>(final_size)),
   };
   MakeCallback(env()->quic_on_stream_reset_function(), arraysize(argv), argv);
@@ -462,14 +462,13 @@ void QuicStreamShutdown(const FunctionCallbackInfo<Value>& args) {
   QuicStream* stream;
   ASSIGN_OR_RETURN_UNWRAP(&stream, args.Holder());
 
-  uint32_t code = NGTCP2_APP_NOERROR;
   uint32_t family = QUIC_ERROR_APPLICATION;
-  USE(args[0]->Uint32Value(env->context()).To(&code));
+  uint64_t code = ExtractErrorCode(env, args[0]);
   USE(args[1]->Uint32Value(env->context()).To(&family));
 
   stream->Session()->ShutdownStream(
       stream->GetID(),
-      family == QUIC_ERROR_APPLICATION ? code : 0);
+      family == QUIC_ERROR_APPLICATION ? code : NGTCP2_NO_ERROR);
 }
 }  // namespace
 

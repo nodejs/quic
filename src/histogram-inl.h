@@ -43,7 +43,7 @@ inline double Histogram::Stddev() {
 inline double Histogram::Percentile(double percentile) {
   CHECK_GT(percentile, 0);
   CHECK_LE(percentile, 100);
-  return hdr_value_at_percentile(histogram_, percentile);
+  return static_cast<double>(hdr_value_at_percentile(histogram_, percentile));
 }
 
 inline void Histogram::Percentiles(std::function<void(double, double)> fn) {
@@ -51,7 +51,7 @@ inline void Histogram::Percentiles(std::function<void(double, double)> fn) {
   hdr_iter_percentile_init(&iter, histogram_, 1);
   while (hdr_iter_next(&iter)) {
     double key = iter.specifics.percentiles.percentile;
-    double value = iter.value;
+    double value = static_cast<double>(iter.value);
     fn(key, value);
   }
 }
