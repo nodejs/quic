@@ -284,7 +284,7 @@ class QuicBuffer : public MemoryRetainer {
   // read head_ can be advanced.
   inline size_t DrainInto(
       std::vector<uv_buf_t>* list,
-      uint64_t* length = nullptr) {
+      size_t* length = nullptr) {
     size_t len = 0;
     bool seen_head = false;
     quic_buffer_chunk* pos = head_;
@@ -305,7 +305,7 @@ class QuicBuffer : public MemoryRetainer {
 
   inline size_t DrainInto(
       std::vector<ngtcp2_vec>* list,
-      uint64_t* length = nullptr) {
+      size_t* length = nullptr) {
     size_t len = 0;
     bool seen_head = false;
     quic_buffer_chunk* pos = head_;
