@@ -88,6 +88,7 @@ QuicStream::QuicStream(
     session_(session),
     stream_id_(stream_id),
     max_offset_(0),
+    max_offset_ack_(0),
     flags_(QUICSTREAM_FLAG_INITIAL),
     available_outbound_length_(0),
     inbound_consumed_data_while_paused_(0),
@@ -99,8 +100,8 @@ QuicStream::QuicStream(
       sizeof(stream_stats_) / sizeof(uint64_t),
       reinterpret_cast<uint64_t*>(&stream_stats_)) {
   CHECK_NOT_NULL(session);
-  SetInitialFlags();
   session->AddStream(this);
+  Debug(this, "Created");
   StreamBase::AttachToObject(GetObject());
   PushStreamListener(&stream_listener_);
   stream_stats_.created_at = uv_hrtime();
@@ -115,10 +116,14 @@ QuicStream::QuicStream(
 QuicStream::~QuicStream() {
   // Check that Destroy() has been called
   CHECK_NULL(session_);
+
+  // Check that all pending stream data has been purged (either
+  // by acknowledgement or cancelation)
   CHECK_EQ(0, streambuf_.Length());
+
   uint64_t now = uv_hrtime();
   Debug(this,
-        "QuicStream %llu destroyed.\n"
+        "Destroyed.\n"
         "  Duration: %llu\n"
         "  Bytes Received: %llu\n"
         "  Bytes Sent: %llu",
@@ -128,38 +133,11 @@ QuicStream::~QuicStream() {
         stream_stats_.bytes_sent);
 }
 
-inline void QuicStream::SetInitialFlags() {
-  if (GetDirection() == QUIC_STREAM_UNIDIRECTIONAL) {
-    if (session_->IsServer()) {
-      switch (GetOrigin()) {
-        case QUIC_STREAM_SERVER:
-          SetReadClose();
-          break;
-        case QUIC_STREAM_CLIENT:
-          SetWriteClose();
-          break;
-        default:
-          UNREACHABLE();
-      }
-    } else {
-      switch (GetOrigin()) {
-        case QUIC_STREAM_SERVER:
-          SetWriteClose();
-          break;
-        case QUIC_STREAM_CLIENT:
-          SetReadClose();
-          break;
-        default:
-          UNREACHABLE();
-      }
-    }
-  }
-}
-
 // QuicStream::Close() is called by the QuicSession when ngtcp2 detects that
 // a stream has been closed. This, in turn, calls out to the JavaScript to
 // start the process of tearing down and destroying the QuicStream instance.
 void QuicStream::Close(uint64_t app_error_code) {
+  Debug(this, "Closed with code %llu", app_error_code);
   SetReadClose();
   SetWriteClose();
   HandleScope scope(env()->isolate());
@@ -168,6 +146,12 @@ void QuicStream::Close(uint64_t app_error_code) {
     Number::New(env()->isolate(), static_cast<double>(app_error_code))
   };
   MakeCallback(env()->quic_on_stream_close_function(), arraysize(argv), argv);
+}
+
+std::string QuicStream::diagnostic_name() const {
+  return std::string("QuicStream ") + std::to_string(GetID()) +
+         " (" + std::to_string(static_cast<int64_t>(get_async_id())) +
+         ", " + session_->diagnostic_name() + ")";
 }
 
 // Receiving a STREAM_RESET means that the peer will no longer be sending
@@ -181,11 +165,9 @@ void QuicStream::Close(uint64_t app_error_code) {
 // specified.
 void QuicStream::Reset(uint64_t final_size, uint64_t app_error_code) {
   // Ignore the reset completely if fin has already been received.
-  if (IsFin())
+  if (HasReceivedFin())
     return;
-  Debug(this,
-        "Resetting stream %llu with app error code %llu, and final size %llu",
-        GetID(),
+  Debug(this, "Reset with code %llu and final size %llu",
         app_error_code,
         final_size);
   HandleScope scope(env()->isolate());
@@ -199,9 +181,7 @@ void QuicStream::Reset(uint64_t final_size, uint64_t app_error_code) {
 }
 
 void QuicStream::Destroy() {
-  Debug(this, "Destroying QuicStream %llu on %s",
-        stream_id_,
-        session_->IsServer() ? "server" : "client");
+  Debug(this, "Destroying");
   SetReadClose();
   SetWriteClose();
   streambuf_.Cancel();
@@ -213,10 +193,12 @@ void QuicStream::Destroy() {
 }
 
 // Do shutdown is called when the JS stream writable side is closed.
-// We want to mark the writable side closed and send pending data.
+// If we're not within an ngtcp2 callback, this will trigger the
+// QuicSession to send any pending data. Any time after this is
+// called, a final stream frame will be sent for this QuicStream,
+// but it may not be sent right away.
 int QuicStream::DoShutdown(ShutdownWrap* req_wrap) {
-  Debug(this, "Shutdown QuicStream %llu writable side on Quic%sSession",
-        GetID(), session_->IsServer() ? "Server" : "Client");
+  Debug(this, "Shutdown writable side");
   if (IsDestroyed())
     return UV_EPIPE;
   // Do nothing if the stream was already shutdown. Specifically,
@@ -225,8 +207,13 @@ int QuicStream::DoShutdown(ShutdownWrap* req_wrap) {
     return 1;
   stream_stats_.closing_at = uv_hrtime();
   SetWriteClose();
+
+  // If we're not currently within an ngtcp2 callback, then we need to
+  // tell the QuicSession to initiate serialization and sending of any
+  // pending frames.
   if (!QuicSession::Ngtcp2CallbackScope::InNgtcp2CallbackScope(session_))
     session_->SendStreamData(this);
+
   return 1;
 }
 
@@ -238,24 +225,43 @@ int QuicStream::DoWrite(
   CHECK_NULL(send_handle);
 
   // A write should not have happened if we've been destroyed or
-  // the QuicStream is no longer writable.
+  // the QuicStream is no longer (or was never) writable.
   if (IsDestroyed() || !IsWritable()) {
     req_wrap->Done(UV_EOF);
     return 0;
   }
 
+  // The list of buffers will be appended onto streambuf_ without
+  // copying. Those will remain in that buffer until the serialized
+  // stream frames are acknowledged.
   uint64_t length =
       streambuf_.Push(
           bufs,
           nbufs,
           [&](int status, void* user_data) {
+            // This callback function will be invoked once this
+            // complete batch of buffers has been acknowledged
+            // by the peer. This will have the side effect of
+            // blocking additional pending writes from the
+            // javascript side, so writing data to the stream
+            // will be throttled by how quickly the peer is
+            // able to acknowledge stream packets. This is good
+            // in the sense of providing back-pressure, but
+            // also means that writes will be significantly
+            // less performant unless written in batches.
             WriteWrap* req_wrap = static_cast<WriteWrap*>(user_data);
             req_wrap->Done(status);
           },
           req_wrap,
           req_wrap->object());
+  Debug(this, "Queuing %llu bytes of data from %d buffers", length, nbufs);
   IncrementStat(length, &stream_stats_, &stream_stats::bytes_sent);
   stream_stats_.stream_sent_at = uv_hrtime();
+
+  // If we're not within an ngtcp2 callback, go ahead and send
+  // the pending stream data. Otherwise, the data will be flushed
+  // once the ngtcp2 callback scope exits and all streams with
+  // data pending are flushed.
   if (!QuicSession::Ngtcp2CallbackScope::InNgtcp2CallbackScope(session_))
     session_->SendStreamData(this);
 
@@ -263,23 +269,47 @@ int QuicStream::DoWrite(
   return 0;
 }
 
-void QuicStream::AckedDataOffset(uint64_t offset,  size_t datalen) {
+// AckedDataOffset is called when ngtcp2 has received an acknowledgement
+// for one or more stream frames for this QuicStream. This will cause
+// data stored in the streambuf_ outbound queue to be consumed and may
+// result in the JavaScript callback for the write to be invoked.
+void QuicStream::AckedDataOffset(uint64_t offset, size_t datalen) {
   if (IsDestroyed())
     return;
+
+  // ngtcp2 guarantees that offset must always be greater
+  // than the previously received offset, but let's just
+  // make sure that holds.
+  CHECK_GE(offset, max_offset_ack_);
+  max_offset_ack_ = offset;
+
+  Debug(this, "Acknowledging %d bytes", datalen);
+
+  // Consumes the given number of bytes in the buffer. This may
+  // have the side-effect of causing the onwrite callback to be
+  // invoked if a complete chunk of buffered data has been acknowledged.
+  streambuf_.Consume(datalen);
 
   uint64_t now = uv_hrtime();
   if (stream_stats_.stream_acked_at > 0)
     data_rx_ack_.Record(now - stream_stats_.stream_acked_at);
   stream_stats_.stream_acked_at = now;
+
+  if (IsWriteFinished()) {
+    // TODO(@jasnell): Call out to the JavaScript side to notify that
+    // writing this stream has completely finished? If the readable
+    // side is also closed, then the stream can be gracefully destroyed.
+  }
 }
 
-size_t QuicStream::DrainInto(
-    std::vector<ngtcp2_vec>* vec) {
-  return streambuf_.DrainInto(vec);
+void QuicStream::Commit(ssize_t amount) {
+  streambuf_.SeekHeadOffset(amount);
 }
 
-void QuicStream::Commit(uint64_t length) {
-  streambuf_.Consume(length);
+size_t QuicStream::DrainInto(std::vector<ngtcp2_vec>* vec) {
+  size_t length = 0;
+  streambuf_.DrainInto(vec, &length);
+  return length;
 }
 
 inline void QuicStream::IncrementAvailableOutboundLength(size_t amount) {
@@ -322,10 +352,12 @@ void QuicStream::ReceiveData(
     const uint8_t* data,
     size_t datalen,
     uint64_t offset) {
-  Debug(this, "Receiving %d bytes of data. Final? %s. Readable? %s",
-        datalen, fin ? "yes" : "no", IsReadable() ? "yes" : "no");
+  Debug(this, "Receiving %d bytes. Final? %s. Readable? %s",
+        datalen,
+        fin ? "yes" : "no",
+        IsReadable() ? "yes" : "no");
 
-  // If the QuicStream is not readable, just ignore the chunk
+  // If the QuicStream is not (or was never) readable, just ignore the chunk.
   if (!IsReadable())
     return;
 
@@ -380,21 +412,22 @@ void QuicStream::ReceiveData(
   }
 
   // When fin != 0, we've received that last chunk of data for this
-  // stream, indicating that the stream is no longer readable.
+  // stream, indicating that the stream will no longer be readable.
   if (fin) {
-    SetFin();
+    SetFinReceived();
     EmitRead(UV_EOF);
   }
 }
 
-inline void QuicStream::IncrementStats(uint64_t datalen) {
-  IncrementStat(datalen, &stream_stats_, &stream_stats::bytes_received);
+inline void QuicStream::IncrementStats(size_t datalen) {
+  uint64_t len = static_cast<uint64_t>(datalen);
+  IncrementStat(len, &stream_stats_, &stream_stats::bytes_received);
 
   uint64_t now = uv_hrtime();
   if (stream_stats_.stream_received_at > 0)
     data_rx_rate_.Record(stream_stats_.stream_received_at - now);
   stream_stats_.stream_received_at = now;
-  data_rx_size_.Record(datalen);
+  data_rx_size_.Record(len);
 }
 
 QuicStream* QuicStream::New(

@@ -39,6 +39,7 @@ struct quic_buffer_chunk : public MemoryRetainer {
   uv_buf_t buf;
   done_cb done = default_quic_buffer_chunk_done;
   size_t offset = 0;
+  size_t roffset = 0;
   void* user_data = nullptr;
   bool done_called = false;
   v8::Global<v8::Object> keep_alive;
@@ -183,10 +184,10 @@ class QuicBuffer : public MemoryRetainer {
     CHECK_EQ(length_, 0);
   }
 
-  inline uint64_t Copy(
+  inline size_t Copy(
       uv_buf_t* bufs,
       size_t nbufs) {
-    uint64_t total = 0;
+    size_t total = 0;
     for (size_t n = 0; n < nbufs; n++) {
       MallocedBuffer<uint8_t> data(bufs[n].len);
       memcpy(data.data, bufs[n].base, bufs[n].len);
@@ -203,13 +204,13 @@ class QuicBuffer : public MemoryRetainer {
   // the done_cb. The keep_alive allows a reference to a
   // JS object to be kept around until the final uv_buf_t
   // is consumed.
-  inline uint64_t Push(
+  inline size_t Push(
       uv_buf_t* bufs,
       size_t nbufs,
       done_cb done = default_quic_buffer_chunk_done,
       void* user_data = nullptr,
       v8::Local<v8::Object> keep_alive = v8::Local<v8::Object>()) {
-    uint64_t len = 0;
+    size_t len = 0;
     if (nbufs == 0 ||
         bufs == nullptr ||
         EMPTY_BUF(bufs[0])) {
@@ -238,7 +239,7 @@ class QuicBuffer : public MemoryRetainer {
   // is passed into the done_cb. The keep_alive allows a
   // reference to a JS object to be kept around until the
   // final uv_buf_t is consumed.
-  inline uint64_t Push(
+  inline size_t Push(
       MallocedBuffer<uint8_t>&& buffer,
       done_cb done = default_quic_buffer_chunk_done,
       void* user_data = nullptr,
@@ -258,14 +259,14 @@ class QuicBuffer : public MemoryRetainer {
   inline void Consume(ssize_t amount = -1) { Consume(0, amount); }
 
   // Cancels the remaining bytes within the buffer
-  inline uint64_t Cancel(int status = UV_ECANCELED) {
-    uint64_t remaining = Length();
+  inline size_t Cancel(int status = UV_ECANCELED) {
+    size_t remaining = Length();
     Consume(status, -1);
     return remaining;
   }
 
   // The total buffered bytes
-  inline uint64_t Length() {
+  inline size_t Length() {
     return length_;
   }
 
@@ -292,10 +293,10 @@ class QuicBuffer : public MemoryRetainer {
       return 0;
     if (length != nullptr) *length = 0;
     while (pos != nullptr) {
-      size_t datalen = pos->buf.len - pos->offset;
+      size_t datalen = pos->buf.len - pos->roffset;
       if (length != nullptr) *length += datalen;
       list->push_back(
-          uv_buf_init(pos->buf.base + pos->offset, datalen));
+          uv_buf_init(pos->buf.base + pos->roffset, datalen));
       if (pos == head_) seen_head = true;
       if (seen_head) len++;
       pos = pos->next.get();
@@ -313,10 +314,10 @@ class QuicBuffer : public MemoryRetainer {
       return 0;
     if (length != nullptr) *length = 0;
     while (pos != nullptr) {
-      size_t datalen = pos->buf.len - pos->offset;
+      size_t datalen = pos->buf.len - pos->roffset;
       if (length != nullptr) *length += datalen;
       list->push_back(ngtcp2_vec{
-          reinterpret_cast<uint8_t*>(pos->buf.base) + pos->offset,
+          reinterpret_cast<uint8_t*>(pos->buf.base) + pos->roffset,
           datalen});
       if (pos == head_) seen_head = true;
       if (seen_head) len++;
@@ -331,8 +332,8 @@ class QuicBuffer : public MemoryRetainer {
     if (!head_)
       return uv_buf_init(nullptr, 0);
     return uv_buf_init(
-        head_->buf.base + head_->offset,
-        head_->buf.len - head_->offset);
+        head_->buf.base + head_->roffset,
+        head_->buf.len - head_->roffset);
   }
 
   // Moves the current read head forward the given
@@ -349,6 +350,25 @@ class QuicBuffer : public MemoryRetainer {
       count_--;
     }
     return n;
+  }
+
+  inline void SeekHeadOffset(ssize_t amount) {
+    if (amount < 0)
+      return;
+    size_t amt = std::min(amount < 0 ? length_ : amount, length_);
+    while (head_ && amt > 0) {
+      size_t len = head_->buf.len - head_->roffset;
+      // If the remaining length in the head is greater than the
+      // amount we're seeking, just adjust the roffset
+      if (len > amt) {
+        head_->roffset += amt;
+        break;
+      }
+      // Otherwise, decrement the amt and advance the read head
+      // one space and iterate from there.
+      amt -= len;
+      head_ = head_->next.get();
+    }
   }
 
   void MemoryInfo(MemoryTracker* tracker) const override {
@@ -401,7 +421,7 @@ class QuicBuffer : public MemoryRetainer {
   }
 
   inline void Consume(int status, ssize_t amount) {
-    uint64_t amt = std::min(amount < 0 ? length_ : amount, length_);
+    size_t amt = std::min(amount < 0 ? length_ : amount, length_);
     while (root_ && amt > 0) {
       auto root = root_.get();
       // Never allow for partial consumption of head when using a
@@ -425,7 +445,7 @@ class QuicBuffer : public MemoryRetainer {
   quic_buffer_chunk* tail_;  // Current Write Position
   size_t size_;
   size_t count_;
-  uint64_t length_;
+  size_t length_;
 };
 
 }  // namespace quic

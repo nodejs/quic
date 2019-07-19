@@ -163,6 +163,8 @@ class QuicSession : public AsyncWrap,
       const std::string& alpn);
   ~QuicSession() override;
 
+  std::string diagnostic_name() const override;
+
   inline QuicError GetLastError();
 
   // Returns true if StartGracefulClose() has been called and the
@@ -472,6 +474,7 @@ class QuicSession : public AsyncWrap,
       ngtcp2_crypto_level crypto_level,
       const uint8_t* data,
       size_t datalen);
+  void UpdateRecoveryStats();
 
   virtual void DisassociateCID(const ngtcp2_cid* cid) {}
   virtual int ExtendMaxStreamsUni(uint64_t max_streams);
@@ -863,31 +866,6 @@ class QuicSession : public AsyncWrap,
    private:
     QuicSession* session_;
     bool* monitor_;
-  };
-
-  // SendScope will cause the session to flush it's
-  // current pending data queue to the underlying
-  // socket.
-  class SendScope {
-   public:
-    explicit SendScope(QuicSession* session) : session_(session) {}
-    ~SendScope() {
-      if (session_->IsDestroyed() || session_->IsInDrainingPeriod())
-        return;
-      session_->SendPendingData();
-      session_->idle_->Update(session_->idle_timeout_);
-
-      ngtcp2_rcvry_stat stat;
-      ngtcp2_conn_get_rcvry_stat(session_->connection(), &stat);
-      session_->recovery_stats_.min_rtt =
-          static_cast<double>(stat.min_rtt);
-      session_->recovery_stats_.latest_rtt =
-          static_cast<double>(stat.latest_rtt);
-      session_->recovery_stats_.smoothed_rtt =
-          static_cast<double>(stat.smoothed_rtt);
-    }
-   private:
-    QuicSession* session_;
   };
 
   friend class QuicServerSession;
