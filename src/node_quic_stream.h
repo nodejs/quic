@@ -120,7 +120,10 @@ class QuicStream : public AsyncWrap,
     QUICSTREAM_FLAG_FIN = 0x10,
 
     // QuicStream has sent a final stream frame (Writable side)
-    QUICSTREAM_FLAG_FIN_SENT = 0x20
+    QUICSTREAM_FLAG_FIN_SENT = 0x20,
+
+    // QuicStream has been destroyed
+    QUICSTREAM_FLAG_DESTROYED = 0x40
   } QuicStreamStates;
 
   typedef enum QuicStreamDirection {
@@ -148,8 +151,6 @@ class QuicStream : public AsyncWrap,
 
   static QuicStream* New(QuicSession* session, uint64_t stream_id);
 
-  ~QuicStream() override;
-
   std::string diagnostic_name() const override;
 
   inline QuicStreamDirection GetDirection() const {
@@ -167,7 +168,7 @@ class QuicStream : public AsyncWrap,
   uint64_t GetID() const { return stream_id_; }
 
   inline bool IsDestroyed() const {
-    return session_ == nullptr;
+    return flags_ & QUICSTREAM_FLAG_DESTROYED;
   }
 
   // The QUICSTREAM_FLAG_FIN flag will be set only when a final stream
@@ -267,8 +268,6 @@ class QuicStream : public AsyncWrap,
 
   virtual void AckedDataOffset(uint64_t offset, size_t datalen);
 
-  virtual void Close(uint64_t app_error_code = 0);
-
   virtual void Reset(uint64_t final_size, uint64_t app_error_code = 0);
 
   virtual void Destroy();
@@ -296,6 +295,8 @@ class QuicStream : public AsyncWrap,
 
   // Required for StreamBase
   int DoShutdown(ShutdownWrap* req_wrap) override;
+
+  void Shutdown(uint64_t app_error_code);
 
   void Commit(ssize_t amount);
 
@@ -352,6 +353,10 @@ class QuicStream : public AsyncWrap,
 
   inline void SetReadResume() {
     flags_ &= QUICSTREAM_FLAG_READ_PAUSED;
+  }
+
+  inline void SetDestroyed() {
+    flags_ |= QUICSTREAM_FLAG_DESTROYED;
   }
 
   inline void IncrementStats(size_t datalen);

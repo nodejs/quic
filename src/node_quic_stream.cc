@@ -53,31 +53,14 @@ void QuicStreamListener::OnStreamRead(ssize_t nread, const uv_buf_t& buf) {
   stream->CallJSOnreadMethod(nread, buffer.ToArrayBuffer());
 }
 
-// TODO(@jasnell): QUIC streams have an absolute maximum amount
-// of data that can be transmitted over the lifetime of the stream.
-// We need to be performing two checks in here:
-//
-// 1. On transmit, we should ensure that a QuicStream instance
-//    never attempts to send more than the maximum data limit.
-//    This can be done by implementing a countdown that causes
-//    the stream to emit an error if the threshold is exceeded.
-//
-// 2. On receive, we need to ensure that ngtcp2 catches the limit.
-//    When a stream reaches it's maximum, the stream will need to
-//    be destroyed. We should differentiate streams that end because
-//    there is no more data vs. streams that end because it has
-//    reached the transmit limit.
-//
-
-// TODO(@jasnell): Currently, streams max exist for the entire
-// lifespan of the QuicSession, which can be indefinite so long as
-// there is activity. It would make sense to implement an optional
-// maximum lifespan for individual stream instances, or to implement
-// a timeout that is independent of the session. This timeout would
-// best be implemented at the JavaScript side, but can be implemented
-// in the C++ code also. We should differentiate streams that end
-// because it reached the maximum time vs. streams that end because
-// it has no more data.
+// TODO(@jasnell): QUIC connections have an absolute maximum
+// number of packets that can be transmitted over the lifetime
+// of the stream. When the number of packets is exhausted, the
+// connection must be silently closed without sending any
+// additional frames to the peer. When that happens, all
+// existing streams need to be shutdown and special event
+// should be emitted so that we can pick up where things
+// left off.
 
 QuicStream::QuicStream(
     QuicSession* session,
@@ -113,41 +96,6 @@ QuicStream::QuicStream(
       PropertyAttribute::ReadOnly));
 }
 
-QuicStream::~QuicStream() {
-  // Check that Destroy() has been called
-  CHECK_NULL(session_);
-
-  // Check that all pending stream data has been purged (either
-  // by acknowledgement or cancelation)
-  CHECK_EQ(0, streambuf_.Length());
-
-  uint64_t now = uv_hrtime();
-  Debug(this,
-        "Destroyed.\n"
-        "  Duration: %llu\n"
-        "  Bytes Received: %llu\n"
-        "  Bytes Sent: %llu",
-        GetID(),
-        now - stream_stats_.created_at,
-        stream_stats_.bytes_received,
-        stream_stats_.bytes_sent);
-}
-
-// QuicStream::Close() is called by the QuicSession when ngtcp2 detects that
-// a stream has been closed. This, in turn, calls out to the JavaScript to
-// start the process of tearing down and destroying the QuicStream instance.
-void QuicStream::Close(uint64_t app_error_code) {
-  Debug(this, "Closed with code %llu", app_error_code);
-  SetReadClose();
-  SetWriteClose();
-  HandleScope scope(env()->isolate());
-  Context::Scope context_context(env()->context());
-  Local<Value> argv[] = {
-    Number::New(env()->isolate(), static_cast<double>(app_error_code))
-  };
-  MakeCallback(env()->quic_on_stream_close_function(), arraysize(argv), argv);
-}
-
 std::string QuicStream::diagnostic_name() const {
   return std::string("QuicStream ") + std::to_string(GetID()) +
          " (" + std::to_string(static_cast<int64_t>(get_async_id())) +
@@ -165,7 +113,7 @@ std::string QuicStream::diagnostic_name() const {
 // specified.
 void QuicStream::Reset(uint64_t final_size, uint64_t app_error_code) {
   // Ignore the reset completely if fin has already been received.
-  if (HasReceivedFin())
+  if (HasReceivedFin() || UNLIKELY(IsDestroyed()))
     return;
   Debug(this, "Reset with code %llu and final size %llu",
         app_error_code,
@@ -181,15 +129,35 @@ void QuicStream::Reset(uint64_t final_size, uint64_t app_error_code) {
 }
 
 void QuicStream::Destroy() {
-  Debug(this, "Destroying");
+  if (IsDestroyed())
+    return;
+  SetDestroyed();
   SetReadClose();
   SetWriteClose();
+
+  uint64_t now = uv_hrtime();
+  Debug(this,
+        "Destroying.\n"
+        "  Duration: %llu\n"
+        "  Bytes Received: %llu\n"
+        "  Bytes Sent: %llu",
+        now - stream_stats_.created_at,
+        stream_stats_.bytes_received,
+        stream_stats_.bytes_sent);
+
+  // If there is data currently buffered in the streambuf_,
+  // then cancel will call out to invoke an arbitrary
+  // JavaScript callback (the on write callback). Within
+  // that callback, however, the QuicStream will no longer
+  // be usable to send or receive data.
   streambuf_.Cancel();
+  CHECK_EQ(streambuf_.Length(), 0);
+
+  // The QuicSession maintains a map of std::unique_ptrs to
+  // QuicStream instances. Removing this here will cause
+  // this QuicStream object to be deconstructed, so the
+  // QuicStream object will no longer exist after this point.
   session_->RemoveStream(stream_id_);
-  session_ = nullptr;
-  // Explicitly delete the QuicStream. We won't be
-  // needing it any longer.
-  delete this;
 }
 
 // Do shutdown is called when the JS stream writable side is closed.
@@ -198,9 +166,9 @@ void QuicStream::Destroy() {
 // called, a final stream frame will be sent for this QuicStream,
 // but it may not be sent right away.
 int QuicStream::DoShutdown(ShutdownWrap* req_wrap) {
-  Debug(this, "Shutdown writable side");
   if (IsDestroyed())
     return UV_EPIPE;
+  Debug(this, "Shutdown writable side");
   // Do nothing if the stream was already shutdown. Specifically,
   // we should not attempt to send anything on the QuicSession
   if (!IsWritable())
@@ -303,10 +271,12 @@ void QuicStream::AckedDataOffset(uint64_t offset, size_t datalen) {
 }
 
 void QuicStream::Commit(ssize_t amount) {
+  CHECK(!IsDestroyed());
   streambuf_.SeekHeadOffset(amount);
 }
 
 size_t QuicStream::DrainInto(std::vector<ngtcp2_vec>* vec) {
+  CHECK(!IsDestroyed());
   size_t length = 0;
   streambuf_.DrainInto(vec, &length);
   return length;
@@ -344,14 +314,12 @@ int QuicStream::ReadStop() {
 // anything is listening. For flow-control, we only send window updates
 // to the sending peer if the stream is in flowing mode, so the sender
 // should not be sending too much data.
-// TODO(@jasnell): We may need to be more defensive here with regards to
-// flow control to keep the buffer from growing too much. ngtcp2 may give
-// us some protection but we need to verify.
 void QuicStream::ReceiveData(
     int fin,
     const uint8_t* data,
     size_t datalen,
     uint64_t offset) {
+  CHECK(!IsDestroyed());
   Debug(this, "Receiving %d bytes. Final? %s. Readable? %s",
         datalen,
         fin ? "yes" : "no",
@@ -393,12 +361,14 @@ void QuicStream::ReceiveData(
       // like we do with http2 streams, we can make this branch more
       // efficient by using the LIKELY optimization
       // if (LIKELY(buf.base == nullptr))
-      if (buf.base == nullptr)
+      if (UNLIKELY(buf.base == nullptr))
         buf.base = reinterpret_cast<char*>(const_cast<uint8_t*>(data));
       else
         memcpy(buf.base, data, avail);
       data += avail;
       datalen -= avail;
+      // Capture read_paused before EmitRead in case user code callbacks
+      // alter the state when EmitRead is called.
       bool read_paused = IsReadPaused();
       EmitRead(avail, buf);
       // Reading can be paused while we are processing. If that's
@@ -428,6 +398,18 @@ inline void QuicStream::IncrementStats(size_t datalen) {
     data_rx_rate_.Record(stream_stats_.stream_received_at - now);
   stream_stats_.stream_received_at = now;
   data_rx_size_.Record(len);
+}
+
+void QuicStream::Shutdown(uint64_t app_error_code) {
+  // On calling shutdown, the stream will no longer be
+  // readable or writable, all any pending data in the
+  // streambuf_ will be canceled, and all data pending
+  // to be acknowledged at the ngtcp2 level will be
+  // abandoned.
+  SetReadClose();
+  SetWriteClose();
+  streambuf_.Cancel();
+  session_->ShutdownStream(GetID(), app_error_code);
 }
 
 QuicStream* QuicStream::New(
@@ -499,9 +481,7 @@ void QuicStreamShutdown(const FunctionCallbackInfo<Value>& args) {
   uint64_t code = ExtractErrorCode(env, args[0]);
   USE(args[1]->Uint32Value(env->context()).To(&family));
 
-  stream->Session()->ShutdownStream(
-      stream->GetID(),
-      family == QUIC_ERROR_APPLICATION ? code : NGTCP2_NO_ERROR);
+  stream->Shutdown(family == QUIC_ERROR_APPLICATION ? code : NGTCP2_NO_ERROR);
 }
 }  // namespace
 

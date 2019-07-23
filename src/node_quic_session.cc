@@ -803,7 +803,17 @@ void QuicSession::RemoveFromSocket() {
 void QuicSession::RemoveStream(int64_t stream_id) {
   CHECK(!IsDestroyed());
   Debug(this, "Removing stream %llu", stream_id);
+
+  // This will have the side effect of destroying the QuicSession
+  // instance.
   streams_.erase(stream_id);
+  // Ensure that the stream state is closed and discarded by ngtcp2
+  // Be sure to call this after removing the stream from the map
+  // above so that when ngtcp2 closes the stream, the callback does
+  // not attempt to loop back around and destroy the already removed
+  // QuicStream instance. Typically, the stream is already going to
+  // be closed by this point.
+  ngtcp2_conn_shutdown_stream(connection(), stream_id, NGTCP2_NO_ERROR);
 }
 
 // Schedule the retransmission timer
@@ -983,8 +993,8 @@ ssize_t QuicSession::SendPendingData() {
       return err;
 
   // Try purging any pending stream data
-  for (auto stream : streams_) {
-    err = SendStreamData(stream.second);
+  for (const auto& stream : streams_) {
+    err = SendStreamData(stream.second.get());
     if (err < 0)
       return err;
   }
@@ -1026,6 +1036,13 @@ int QuicSession::ShutdownStream(int64_t stream_id, uint64_t code) {
           connection(),
           stream_id,
           code), 0);
+
+  // If ShutdownStream is called outside of an ngtcp2 callback,
+  // we need to trigger SendPendingData manually to cause the
+  // RESET_STREAM and STOP_SENDING frames to be transmitted.
+  if (!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this)) {
+    SendPendingData();
+  }
   return 0;
 }
 
@@ -1045,10 +1062,12 @@ void QuicSession::SilentClose() {
 void QuicSession::StreamClose(int64_t stream_id, uint64_t app_error_code) {
   if (IsDestroyed())
     return;
-  Debug(this, "Closing stream %llu with code %llu", stream_id, app_error_code);
 
-  if (FindStream(stream_id) == nullptr)
+  QuicStream* stream = FindStream(stream_id);
+  if (stream == nullptr)
     return;
+
+  Debug(stream, "Closing with code %llu", app_error_code);
 
   HandleScope scope(env()->isolate());
   Context::Scope context_scope(env()->context());

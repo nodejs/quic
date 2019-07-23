@@ -653,7 +653,7 @@ inline QuicStream* QuicSession::FindStream(int64_t id) {
   auto it = streams_.find(id);
   if (it == std::end(streams_))
     return nullptr;
-  return (*it).second;
+  return (*it).second.get();
 }
 
 inline QuicError QuicSession::GetLastError() { return last_error_; }

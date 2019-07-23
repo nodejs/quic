@@ -742,7 +742,7 @@ class QuicSession : public AsyncWrap,
   std::vector<uint8_t> peer_handshake_;
   size_t ncread_;
 
-  std::map<int64_t, QuicStream*> streams_;
+  std::map<int64_t, std::unique_ptr<QuicStream>> streams_;
 
   AliasedFloat64Array state_;
 
