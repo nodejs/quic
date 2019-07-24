@@ -102,37 +102,6 @@ std::string QuicStream::diagnostic_name() const {
          ", " + session_->diagnostic_name() + ")";
 }
 
-// Receiving a STREAM_RESET means that the peer will no longer be sending
-// new frames for the given stream, although retransmissions of prior
-// frames may still be received. Once the reset is received, the readable
-// side of the stream is closed without waiting for a STREAM frame with
-// the fin. If a fin has already been received, the reset is ignored.
-// From the JavaScript API point of view, a reset is largely indistinguishable
-// from a normal end-of-stream with the exception that the receivedReset
-// property will be set with the final size and application error code
-// specified.
-void QuicStream::Reset(uint64_t final_size, uint64_t app_error_code) {
-  // Ignore the reset completely if fin has already been received.
-
-  // Grab a reference to the shared pointer. If the stream is destroyed
-  // while the callback is being invoked, this will ensure that the
-  // reference will at least be held until the make callback returns,
-  // ensuring that the instance is not actually freed until after.
-  std::shared_ptr<QuicStream> this_(shared_from_this());
-  if (HasReceivedFin() || IsDestroyed())
-    return;
-  Debug(this, "Reset with code %llu and final size %llu",
-        app_error_code,
-        final_size);
-  HandleScope scope(env()->isolate());
-  Context::Scope context_scope(env()->context());
-  Local<Value> argv[] = {
-    Number::New(env()->isolate(), static_cast<double>(app_error_code)),
-    Number::New(env()->isolate(), static_cast<double>(final_size)),
-  };
-  MakeCallback(env()->quic_on_stream_reset_function(), arraysize(argv), argv);
-}
-
 void QuicStream::Destroy() {
   if (IsDestroyed())
     return;
@@ -400,7 +369,7 @@ inline void QuicStream::IncrementStats(size_t datalen) {
 
   uint64_t now = uv_hrtime();
   if (stream_stats_.stream_received_at > 0)
-    data_rx_rate_.Record(stream_stats_.stream_received_at - now);
+    data_rx_rate_.Record(now - stream_stats_.stream_received_at);
   stream_stats_.stream_received_at = now;
   data_rx_size_.Record(len);
 }
@@ -413,7 +382,6 @@ void QuicStream::Shutdown(uint64_t app_error_code) {
   // abandoned.
   SetReadClose();
   SetWriteClose();
-//  streambuf_.Cancel();
   session_->ShutdownStream(GetID(), app_error_code);
 }
 

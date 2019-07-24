@@ -7,6 +7,7 @@
 #include "async_wrap.h"
 #include "env.h"
 #include "handle_wrap.h"
+#include "histogram-inl.h"
 #include "node.h"
 #include "node_crypto.h"
 #include "node_mem.h"
@@ -771,6 +772,8 @@ class QuicSession : public AsyncWrap,
     uint64_t handshake_continue_at;
     // The timestamp at which handshake completed
     uint64_t handshake_completed_at;
+    // The timestamp at which the handshake was most recently acked
+    uint64_t handshake_acked_at;
     // The timestamp at which the most recently sent
     // non-handshake packets were sent
     uint64_t session_sent_at;
@@ -797,7 +800,20 @@ class QuicSession : public AsyncWrap,
     // The total number of retries received
     uint64_t retry_count;
   };
-  session_stats session_stats_{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+  session_stats session_stats_{
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+  };
+
+  // crypto_rx_ack_ measures the elapsed time between crypto acks
+  // for this stream. This data can be used to detect peers that are
+  // generally taking too long to acknowledge crypto data.
+  Histogram crypto_rx_ack_;
+
+  // crypto_handshake_rate_ measures the elapsed time between
+  // crypto continuation steps. This data can be used to detect
+  // peers that are generally taking too long to carry out the
+  // handshake
+  Histogram crypto_handshake_rate_;
 
   struct recovery_stats {
     double min_rtt;

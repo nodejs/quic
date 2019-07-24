@@ -77,6 +77,8 @@ QuicSession::QuicSession(
     client_hello_cb_running_(false),
     is_tls_callback_(false),
     is_ngtcp2_callback_(false),
+    crypto_rx_ack_(1, std::numeric_limits<int64_t>::max()),
+    crypto_handshake_rate_(1, std::numeric_limits<int64_t>::max()),
     stats_buffer_(
       socket->env()->isolate(),
       sizeof(session_stats_) / sizeof(uint64_t),
@@ -171,14 +173,15 @@ void QuicSession::AckedCryptoOffset(
   // is nothing to do but wait for further cleanup to happen.
   if (IsDestroyed())
     return;
-  Debug(this, "Received acknowledgement for %d bytes of crypto data.", datalen);
+  Debug(this, "Acknowledging %d crypto bytes", datalen);
+
+  // Consumes the given number of bytes in the handshake buffer.
   handshake_.Consume(datalen);
-  // TODO(@jasnell): Check session_stats_.handshake_send_at to see how long
-  // handshake ack has taken. We will want to guard against Slow Handshake
-  // as a DOS vector.
-  // Likewise, we need to guard against malicious acknowledgements that trickle
-  // in acknowledgements with small datalen values. These could cause the
-  // session to retain memory and/or send extraneous retransmissions.
+
+  uint64_t now = uv_hrtime();
+  if (session_stats_.handshake_acked_at > 0)
+    crypto_rx_ack_.Record(now - session_stats_.handshake_acked_at);
+  session_stats_.handshake_start_at = now;
 }
 
 void QuicSession::AckedStreamDataOffset(
@@ -662,6 +665,7 @@ int QuicSession::ReceiveCryptoData(
     size_t datalen) {
   CHECK(!IsDestroyed());
   Debug(this, "Receiving %d bytes of crypto data.", datalen);
+
   int err = WritePeerHandshake(crypto_level, data, datalen);
   if (err < 0)
     return err;
@@ -1124,7 +1128,7 @@ int QuicSession::StreamOpen(int64_t stream_id) {
 // with the fin set, then the RESET_STREAM causes the readable side of the
 // stream to be abruptly closed and any additional stream frames that may
 // be received will be discarded if their offset is greater than final_size.
-// On the JavaScript side, receiving a StreamReset is undistinguishable from
+// On the JavaScript side, receiving a C is undistinguishable from
 // a normal end-of-stream. No additional data events will be emitted, the
 // end event will be emitted, and the readable side of the duplex will be
 // closed.
@@ -1142,7 +1146,19 @@ void QuicSession::StreamReset(
   if (stream == nullptr)
     return;
 
-  stream->Reset(final_size, app_error_code);
+  Debug(stream, "Reset with code %llu and final size %llu",
+        app_error_code,
+        final_size);
+
+  HandleScope scope(env()->isolate());
+  Context::Scope context_scope(env()->context());
+
+  Local<Value> argv[] = {
+    Number::New(env()->isolate(), static_cast<double>(stream_id)),
+    Number::New(env()->isolate(), static_cast<double>(app_error_code)),
+    Number::New(env()->isolate(), static_cast<double>(final_size))
+  };
+  MakeCallback(env()->quic_on_stream_reset_function(), arraysize(argv), argv);
 }
 
 // Incrementally performs the TLS handshake. This function is called
@@ -1156,8 +1172,12 @@ int QuicSession::TLSHandshake() {
   if (initial_) {
     session_stats_.handshake_start_at = now;
   } else {
-    // TODO(@jasnell): Check handshake_continue_at to guard against slow
-    // handshake attack
+    uint64_t ts =
+        session_stats_.handshake_continue_at > 0 ?
+            session_stats_.handshake_continue_at :
+            session_stats_.handshake_start_at;
+    crypto_handshake_rate_.Record(now - session_stats_.handshake_start_at);
+    // TODO(@jasnell): Monitor the rate to detect slow handshake
   }
   session_stats_.handshake_continue_at = now;
   ClearTLSError();
