@@ -48,7 +48,7 @@ server.on('session', common.mustCall((session) => {
 
   session.on('secure', common.mustCall((servername, alpn, cipher) => {
     const uni = session.openStream({ halfOpen: true });
-    uni.write('hi');
+    uni.write('hi', common.mustCall());
     uni.close(3);
 
     uni.on('abort', common.mustCall((code, finalSize) => {
@@ -65,7 +65,7 @@ server.on('session', common.mustCall((session) => {
 
   session.on('stream', common.mustCall((stream) => {
     debug('Bidirectional, Client-initiated stream %d received', stream.id);
-    stream.write('hello there');
+    stream.write('hello there', common.mustCall());
     stream.on('end', common.mustCall());
     stream.on('finish', common.mustNotCall());
     stream.on('close', common.mustCall());
@@ -97,7 +97,7 @@ server.on('ready', common.mustCall(() => {
 
     const stream = req.openStream();
 
-    stream.write('hello');
+    stream.write('hello', common.mustCall());
     stream.close(1);
 
     // The abort event should emit because the stream closed abruptly
