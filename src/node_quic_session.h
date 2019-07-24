@@ -1049,7 +1049,8 @@ class QuicClientSession : public QuicSession {
       int select_preferred_address_policy =
           QUIC_PREFERRED_ADDRESS_IGNORE,
       const std::string& alpn = NGTCP2_ALPN_H3,
-      bool request_ocsp = false);
+      bool request_ocsp = false,
+      bool verify_hostname_identity = true);
 
   QuicClientSession(
       QuicSocket* socket,
@@ -1064,7 +1065,8 @@ class QuicClientSession : public QuicSession {
       v8::Local<v8::Value> dcid,
       int select_preferred_address_policy,
       const std::string& alpn,
-      bool request_ocsp);
+      bool request_ocsp,
+      bool verify_hostname_identity);
 
   void AddToSocket(QuicSocket* socket) override;
   void MaybeTimeout() override;
@@ -1140,6 +1142,7 @@ class QuicClientSession : public QuicSession {
   MaybeStackBuffer<char> transportParams_;
   int select_preferred_address_policy_;
   bool request_ocsp_;
+  bool verify_hostname_identity_;
 
   const ngtcp2_conn_callbacks callbacks_ = {
     OnClientInitial,

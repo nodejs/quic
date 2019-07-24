@@ -2037,7 +2037,8 @@ QuicClientSession::QuicClientSession(
     Local<Value> dcid,
     int select_preferred_address_policy,
     const std::string& alpn,
-    bool request_ocsp) :
+    bool request_ocsp,
+    bool verify_hostname_identity) :
     QuicSession(
         socket,
         wrap,
@@ -2048,7 +2049,8 @@ QuicClientSession::QuicClientSession(
     resumption_(false),
     hostname_(hostname),
     select_preferred_address_policy_(select_preferred_address_policy),
-    request_ocsp_(request_ocsp) {
+    request_ocsp_(request_ocsp),
+    verify_hostname_identity_(verify_hostname_identity) {
   CHECK_EQ(
     Init(addr, version, early_transport_params, session_ticket, dcid), 0);
 }
@@ -2065,7 +2067,8 @@ std::shared_ptr<QuicSession> QuicClientSession::New(
     Local<Value> dcid,
     int select_preferred_address_policy,
     const std::string& alpn,
-    bool request_ocsp) {
+    bool request_ocsp,
+    bool verify_hostname_identity) {
   std::shared_ptr<QuicSession> session;
   Local<Object> obj;
   if (!socket->env()
@@ -2088,7 +2091,8 @@ std::shared_ptr<QuicSession> QuicClientSession::New(
           dcid,
           select_preferred_address_policy,
           alpn,
-          request_ocsp);
+          request_ocsp,
+          verify_hostname_identity);
 
   session->AddToSocket(socket);
   int err = session->TLSHandshake();
@@ -2663,12 +2667,15 @@ int QuicClientSession::VerifyPeerIdentity(const char* hostname) {
     return err;
 
   // Second, check that the hostname matches the cert subject/altnames
-  // TODO(@jasnell): This check is a QUIC requirement. However, for
-  // debugging purposes, we should allow it to be turned off via config.
-  // When turned off, a process warning should be emitted.
-  return VerifyHostnameIdentity(
-      ssl(),
-      hostname != nullptr ? hostname : hostname_.c_str());
+  // This check is a QUIC requirement. However, for debugging purposes,
+  // we allow it to be turned off via config. When turned off, a process
+  // warning should be emitted.
+  if (verify_hostname_identity_) {
+    return VerifyHostnameIdentity(
+        ssl(),
+        hostname != nullptr ? hostname : hostname_.c_str());
+  }
+  return 0;
 }
 
 // JavaScript API
@@ -2919,7 +2926,8 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
           args[9],
           select_preferred_address_policy,
           alpn,
-          args[12]->IsTrue());    // request_oscp
+          args[12]->IsTrue(),
+          args[13]->IsTrue());    // request_oscp
 
   session->SendPendingData();
 
