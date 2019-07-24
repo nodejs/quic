@@ -101,6 +101,24 @@ assert.throws(() => socket.setDiagnosticPacketLoss({ tx: 1.1 }), {
   code: 'ERR_OUT_OF_RANGE'
 });
 
+[1, 1n, false, [], {}, null].forEach((alpn) => {
+  assert.throws(() => socket.listen({ alpn }), {
+    code: 'ERR_INVALID_ARG_TYPE'
+  });
+});
+
+[1, 1n, false, [], {}, null].forEach((ciphers) => {
+  assert.throws(() => socket.listen({ ciphers }), {
+    code: 'ERR_INVALID_ARG_TYPE'
+  });
+});
+
+[1, 1n, false, [], {}, null].forEach((groups) => {
+  assert.throws(() => socket.listen({ groups }), {
+    code: 'ERR_INVALID_ARG_TYPE'
+  });
+});
+
 socket.listen();
 assert(socket.pending);
 
