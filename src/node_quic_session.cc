@@ -1903,10 +1903,6 @@ int QuicServerSession::Receive(
   // It's possible for the remote address to change from one
   // packet to the next so we have to look at the addr on
   // every packet.
-  // TODO(@jasnell): Currently, this requires us to memcopy on
-  // every packet, which is expensive. It would be ideal to have
-  // a cheap/easy way of detecting if there is a change and only
-  // copy when necessary.
   remote_address_.Copy(addr);
   QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
 
@@ -2496,10 +2492,6 @@ int QuicClientSession::Receive(
   // It's possible for the remote address to change from one
   // packet to the next so we have to look at the addr on
   // every packet.
-  // TODO(@jasnell): Currently, this requires us to memcopy on
-  // every packet, which is expensive. It would be ideal to have
-  // a cheap/easy way of detecting if there is a change and only
-  // copy when necessary.
   remote_address_.Copy(addr);
   QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
 
