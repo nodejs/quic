@@ -124,6 +124,12 @@ assert(socket.pending);
 
 socket.on('ready', common.mustCall(() => {
   assert(socket.bound);
+
+  // QuicSocket is already listening.
+  assert.throws(() => socket.listen(), {
+    code: 'ERR_QUICSOCKET_LISTENING'
+  });
+
   assert.strictEqual(typeof socket.address.address, 'string');
   assert.strictEqual(typeof socket.address.port, 'number');
   assert.strictEqual(typeof socket.address.family, 'string');

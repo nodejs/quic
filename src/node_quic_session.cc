@@ -482,9 +482,6 @@ uint32_t QuicSession::GetNegotiatedVersion() {
 // Generates and associates a new connection ID for this QuicSession.
 // ngtcp2 will call this multiple times at the start of a new connection
 // in order to build a pool of available CIDs.
-// TODO(@jasnell): It's possible that we could improve performance by
-// generating a large pool of random data to use for CIDs when the
-// session is created, then simply creating slices off that here.
 int QuicSession::GetNewConnectionID(
     ngtcp2_cid* cid,
     uint8_t* token,

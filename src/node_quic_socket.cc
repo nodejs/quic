@@ -230,8 +230,6 @@ void QuicSocket::Listen(
     const std::string& alpn,
     bool reject_unauthorized,
     bool request_cert) {
-  // TODO(@jasnell): Should we allow calling listen multiple times?
-  // For now, we guard against it, but we may want to allow it later.
   CHECK_NOT_NULL(sc);
   CHECK_NULL(server_secure_context_);
   CHECK(!server_listening_);
@@ -326,10 +324,10 @@ void QuicSocket::Receive(
   }
 
   if (pdcidlen > NGTCP2_MAX_CIDLEN || pscidlen > NGTCP2_MAX_CIDLEN) {
-    // TODO(@jasnell): QUIC currently requires CID lengths of max
-    // NGTCP2_MAX_CIDLEN. The ngtcp2 API allows non-standard lengths,
-    // and we may want to allow non-standard lengths later. But for now,
-    // we're going to ignore any packet with a non-standard CID length.
+    // QUIC currently requires CID lengths of max NGTCP2_MAX_CIDLEN. The
+    // ngtcp2 API allows non-standard lengths, and we may want to allow
+    // non-standard lengths later. But for now, we're going to ignore any
+    // packet with a non-standard CID length.
     IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
     return;
   }
@@ -536,9 +534,10 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
     return session;
   }
   if (GetCurrentSocketAddressCounter(addr) >= max_connections_per_host_) {
-    // TODO(@jasnell): The maximum number of connections for this client has
-    // been exceeded. We should decide exactly how we want to handle this case,
-    // for now, we're going to ignore the packet.
+    // The maximum number of connections for this client has been exceeded.
+    // For now, we handle this by just ignoring the packet to keep a malicious
+    // client from causing us to commit resources. However, later on we may
+    // want to revisit to see if there's some other way of handling.
     IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
     return session;
   }

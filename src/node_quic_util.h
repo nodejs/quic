@@ -256,11 +256,13 @@ class SocketAddress {
   }
 
   void Copy(SocketAddress* addr) {
-    memcpy(&address_, **addr, addr->Size());
+    if (memcmp(&address_, **addr, addr->Size()) != 0)
+      memcpy(&address_, **addr, addr->Size());
   }
 
   void Copy(const sockaddr* source) {
-    memcpy(&address_, source, GetAddressLen(source));
+    if (memcmp(&address_, source, GetAddressLen(source)) != 0)
+      memcpy(&address_, source, GetAddressLen(source));
   }
 
   void Set(uv_udp_t* handle) {
@@ -272,7 +274,8 @@ class SocketAddress {
   }
 
   void Update(const ngtcp2_addr* addr) {
-    memcpy(&address_, addr->addr, addr->addrlen);
+    if (memcmp(&address_, addr->addr, addr->addrlen) != 0)
+      memcpy(&address_, addr->addr, addr->addrlen);
   }
 
   const sockaddr* operator*() {
