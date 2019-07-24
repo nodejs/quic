@@ -908,7 +908,7 @@ ssize_t QuicSession::SendStreamData(QuicStream* stream) {
           Debug(stream, "Early data rejected");
           return 0;
         case NGTCP2_ERR_STREAM_SHUT_WR:
-          Debug(stream, "Stream writable side shut");
+          Debug(stream, "Stream writable side is closed");
           return 0;
         case NGTCP2_ERR_STREAM_NOT_FOUND:
           Debug(stream, "Stream does not exist");

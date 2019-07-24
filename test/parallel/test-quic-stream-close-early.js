@@ -13,11 +13,15 @@ const cert = fixtures.readKey('agent1-cert.pem', 'binary');
 const ca = fixtures.readKey('ca1-cert.pem', 'binary');
 const { debuglog } = require('util');
 const debug = debuglog('test');
+const fs = require('fs');
 
 const { createSocket } = require('quic');
 
+const kServerPort = process.env.NODE_DEBUG_KEYLOG ? 5678 : 0;
+const kClientPort = process.env.NODE_DEBUG_KEYLOG ? 5679 : 0;
+
 let client;
-const server = createSocket({ port: 0 });
+const server = createSocket({ port: kServerPort });
 
 const kServerName = 'agent1';
 const kALPN = 'zzz';
@@ -37,6 +41,11 @@ server.listen({
 server.on('session', common.mustCall((session) => {
   debug('QuicServerSession Created');
 
+  if (process.env.NODE_DEBUG_KEYLOG) {
+    const kl = fs.createWriteStream(process.env.NODE_DEBUG_KEYLOG);
+    session.on('keylog', kl.write.bind(kl));
+  }
+
   session.on('secure', common.mustCall((servername, alpn, cipher) => {
     const uni = session.openStream({ halfOpen: true });
     uni.write('hi');
@@ -49,7 +58,6 @@ server.on('session', common.mustCall((session) => {
 
     uni.on('data', common.mustNotCall());
     uni.on('end', common.mustCall());
-    uni.on('finish', common.mustCall());
     uni.on('close', common.mustCall());
 
     debug('Unidirectional, Server-initiated stream %d opened', uni.id);
@@ -58,7 +66,7 @@ server.on('session', common.mustCall((session) => {
   session.on('stream', common.mustCall((stream) => {
     debug('Bidirectional, Client-initiated stream %d received', stream.id);
     stream.write('hello there');
-    stream.on('end', common.mustNotCall());
+    stream.on('end', common.mustCall());
     stream.on('finish', common.mustNotCall());
     stream.on('close', common.mustCall());
   }));
@@ -69,7 +77,7 @@ server.on('session', common.mustCall((session) => {
 server.on('ready', common.mustCall(() => {
   debug('Server is listening on port %d', server.address.port);
   client = createSocket({
-    port: 0,
+    port: kClientPort,
     client: {
       key,
       cert,
@@ -100,7 +108,6 @@ server.on('ready', common.mustCall(() => {
       assert.strict(finalSize, 11); // The server sent 'hello there'
     }));
 
-    stream.on('finish', common.mustCall());
     stream.on('end', common.mustCall());
 
     stream.on('close', common.mustCall(() => {

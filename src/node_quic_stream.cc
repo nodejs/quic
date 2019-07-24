@@ -113,14 +113,19 @@ std::string QuicStream::diagnostic_name() const {
 // specified.
 void QuicStream::Reset(uint64_t final_size, uint64_t app_error_code) {
   // Ignore the reset completely if fin has already been received.
-  if (HasReceivedFin() || UNLIKELY(IsDestroyed()))
+
+  // Grab a reference to the shared pointer. If the stream is destroyed
+  // while the callback is being invoked, this will ensure that the
+  // reference will at least be held until the make callback returns,
+  // ensuring that the instance is not actually freed until after.
+  std::shared_ptr<QuicStream> this_(shared_from_this());
+  if (HasReceivedFin() || IsDestroyed())
     return;
   Debug(this, "Reset with code %llu and final size %llu",
         app_error_code,
         final_size);
   HandleScope scope(env()->isolate());
   Context::Scope context_scope(env()->context());
-  streambuf_.Cancel();
   Local<Value> argv[] = {
     Number::New(env()->isolate(), static_cast<double>(app_error_code)),
     Number::New(env()->isolate(), static_cast<double>(final_size)),
@@ -408,7 +413,7 @@ void QuicStream::Shutdown(uint64_t app_error_code) {
   // abandoned.
   SetReadClose();
   SetWriteClose();
-  streambuf_.Cancel();
+//  streambuf_.Cancel();
   session_->ShutdownStream(GetID(), app_error_code);
 }
 

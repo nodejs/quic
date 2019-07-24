@@ -92,7 +92,8 @@ class QuicStreamListener : public StreamListener {
 // abandoned, and causes the QuicStream to be immediately closed at the
 // ngtcp2 level.
 class QuicStream : public AsyncWrap,
-                   public StreamBase {
+                   public StreamBase,
+                   public std::enable_shared_from_this<QuicStream> {
  public:
   typedef enum QuicStreamStates {
     // QuicStream is fully open. Readable and Writable
