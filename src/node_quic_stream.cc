@@ -31,9 +31,6 @@ using v8::Value;
 namespace quic {
 
 uv_buf_t QuicStreamListener::OnStreamAlloc(size_t size) {
-  // TODO(@jasnell): For now, allocate space to copy the data into.
-  // Check later to see if we can get away with not copying like
-  // we do with http2
   Environment* env = static_cast<QuicStream*>(stream_)->env();
   return env->AllocateManaged(size).release();
 }
@@ -236,12 +233,6 @@ void QuicStream::AckedDataOffset(uint64_t offset, size_t datalen) {
   if (stream_stats_.stream_acked_at > 0)
     data_rx_ack_.Record(now - stream_stats_.stream_acked_at);
   stream_stats_.stream_acked_at = now;
-
-  if (IsWriteFinished()) {
-    // TODO(@jasnell): Call out to the JavaScript side to notify that
-    // writing this stream has completely finished? If the readable
-    // side is also closed, then the stream can be gracefully destroyed.
-  }
 }
 
 void QuicStream::Commit(ssize_t amount) {
@@ -313,28 +304,28 @@ void QuicStream::ReceiveData(
   max_offset_ = offset;
 
   if (datalen > 0) {
+    // IncrementStats will update the data_rx_rate_ and data_rx_size_
+    // histograms. These will provide data necessary to detect and
+    // prevent Slow Send DOS attacks specifically by allowing us to
+    // see if a connection is sending very small chunks of data at very
+    // slow speeds. It is important to emphasize, however, that slow send
+    // rates may be perfectly legitimate so we cannot simply take blanket
+    // action when slow rates are detected. Nor can we reliably define what
+    // a slow rate even is! Will will need to determine some reasonable
+    // default and allow user code to change the default as well as determine
+    // what action to take. The current strategy will be to trigger an event
+    // on the stream when data transfer rates are likely to be considered too
+    // slow.
     IncrementStats(datalen);
-    // TODO(@jasnell): IncrementStats will update the data_rx_rate_ and
-    // data_rx_size_ histograms. These will provide data necessary to
-    // detect and prevent Slow Send DOS attacks specifically by allowing
-    // us to see if a connection is sending very small chunks of data
-    // at very slow speeds. It is important to emphasize, however, that
-    // slow send rates may be perfectly legitimate so we cannot simply take
-    // blanket action when slow rates are detected. Nor can we reliably
-    // define what a slow rate even is! Will will need to determine some
-    // reasonable default and allow user code to change the default as well
-    // as determine what action to take. The current strategy will be to
-    // trigger an event on the stream when data transfer rates are likely
-    // to be considered too slow.
     while (datalen > 0) {
       uv_buf_t buf = EmitAlloc(datalen);
       size_t avail = std::min(static_cast<size_t>(buf.len), datalen);
 
-      // TODO(@jasnell): For now, we're allocating and copying. Once
-      // we determine if we can safely switch to a non-allocated mode
-      // like we do with http2 streams, we can make this branch more
-      // efficient by using the LIKELY optimization
-      // if (LIKELY(buf.base == nullptr))
+      // For now, we're allocating and copying. Once we determine if we can
+      // safely switch to a non-allocated mode like we do with http2 streams,
+      // we can make this branch more efficient by using the LIKELY
+      // optimization. The way ngtcp2 currently works, however, we have
+      // to memcpy here.
       if (UNLIKELY(buf.base == nullptr))
         buf.base = reinterpret_cast<char*>(const_cast<uint8_t*>(data));
       else

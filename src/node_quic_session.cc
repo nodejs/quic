@@ -2049,8 +2049,8 @@ QuicClientSession::QuicClientSession(
     hostname_(hostname),
     select_preferred_address_policy_(select_preferred_address_policy),
     request_ocsp_(request_ocsp) {
-  // TODO(@jasnell): Init may fail. Need to handle the error conditions
-  Init(addr, version, early_transport_params, session_ticket, dcid);
+  CHECK_EQ(
+    Init(addr, version, early_transport_params, session_ticket, dcid), 0);
 }
 
 std::shared_ptr<QuicSession> QuicClientSession::New(

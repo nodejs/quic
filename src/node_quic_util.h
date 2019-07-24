@@ -44,7 +44,7 @@ enum SelectPreferredAddressPolicy {
   QUIC_PREFERRED_ADDRESS_ACCEPT
 };
 
-// TODO(@jasnell): Fun hash combine trick based on a variadic template that
+// Fun hash combine trick based on a variadic template that
 // I came across a while back but can't remember where. Will add an attribution
 // if I can find the source.
 inline void hash_combine(size_t* seed) { }
@@ -115,7 +115,6 @@ class SocketAddress {
  public:
   // std::hash specialization for sockaddr instances (ipv4 or ipv6) used
   // for tracking the number of connections per client.
-  // TODO(@jasnell): Verify that this is producing an adequately unique hash
   struct Hash {
     size_t operator()(const sockaddr* addr) const {
       size_t hash = 0;
