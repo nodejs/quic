@@ -20,6 +20,7 @@ namespace node {
 using crypto::EntropySource;
 using crypto::SecureContext;
 
+using v8::Boolean;
 using v8::Context;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
@@ -73,6 +74,7 @@ QuicSocket::QuicSocket(
     pending_close_(false),
     server_listening_(false),
     validate_addr_(validate_address),
+    server_busy_(false),
     max_connections_per_host_(max_connections_per_host),
     server_secure_context_(nullptr),
     server_alpn_(NGTCP2_ALPN_H3),
@@ -82,6 +84,7 @@ QuicSocket::QuicSocket(
     retry_token_expiration_(retry_token_expiration),
     rx_loss_(0.0),
     tx_loss_(0.0),
+    current_ngtcp2_memory_(0),
     stats_buffer_(
       env->isolate(),
       sizeof(socket_stats_) / sizeof(uint64_t),
@@ -357,6 +360,15 @@ void QuicSocket::Receive(
         IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
         return;
       }
+      if (server_busy_) {
+        // While the server is busy, respond to all new connections with
+        // a SERVER_BUSY error code.
+        return SendInitialConnectionClose(
+            pversion,
+            NGTCP2_SERVER_BUSY,
+            &dcid,
+            addr);
+      }
       session = ServerReceive(
         pversion,
         &dcid,
@@ -421,11 +433,70 @@ void QuicSocket::ReportSendError(int error) {
   return;
 }
 
+void QuicSocket::SendInitialConnectionClose(
+    uint32_t version,
+    uint64_t error_code,
+    QuicCID* dcid,
+    const sockaddr* addr) {
+
+  // ngtcp2 currently does not provide a convenient API for serializing
+  // CONNECTION_CLOSE packets on an initial frame that does not have
+  // a ngtcp2_conn initialized, so we have to create one with a simple
+  // default configuration and use it to serialize the frame.
+
+  ngtcp2_cid scid;
+  EntropySource(scid.data, NGTCP2_SV_SCIDLEN);
+  scid.datalen = NGTCP2_SV_SCIDLEN;
+
+  SocketAddress remote_address;
+  remote_address.Copy(addr);
+  QuicPath path(GetLocalAddress(), &remote_address);
+
+  ngtcp2_conn_callbacks callbacks;
+
+  ngtcp2_settings settings;
+  ngtcp2_settings_default(&settings);
+
+  mem::Allocator<ngtcp2_mem> allocator(this);
+
+  ngtcp2_conn* conn;
+  ngtcp2_conn_server_new(
+    &conn,
+    **dcid,
+    &scid,
+    *path,
+    version,
+    &callbacks,
+    &settings,
+    *allocator,
+    nullptr);
+
+  SendWrapStack* req = new SendWrapStack(this, addr, NGTCP2_MAX_PKTLEN_IPV6);
+
+  ssize_t nwrite =
+      ngtcp2_conn_write_connection_close(
+          conn,
+          *path,
+          req->buffer(),
+          NGTCP2_MAX_PKTLEN_IPV6,
+          error_code,
+          uv_hrtime());
+
+  // Be sure the delete the connection pointer once the connection frame
+  // is serialized. We won't be using this one any longer.
+  ngtcp2_conn_del(conn);
+
+  if (nwrite > 0) {
+    req->SetLength(nwrite);
+    req->Send();
+  }
+}
+
 void QuicSocket::SendVersionNegotiation(
       uint32_t version,
       QuicCID* dcid,
       QuicCID* scid,
-    const sockaddr* addr) {
+      const sockaddr* addr) {
   SendWrapStack* req = new SendWrapStack(this, addr, NGTCP2_MAX_PKTLEN_IPV6);
 
   std::array<uint32_t, 2> sv;
@@ -603,6 +674,16 @@ size_t QuicSocket::GetCurrentSocketAddressCounter(const sockaddr* addr) {
   if (it == std::end(addr_counts_))
     return 0;
   return (*it).second;
+}
+
+void QuicSocket::SetServerBusy(bool on) {
+  Debug(this, "Turning Server Busy Response %s", on ? "on" : "off");
+  server_busy_ = on;
+
+  HandleScope handle_scope(env()->isolate());
+  Context::Scope context_scope(env()->context());
+  Local<Value> arg = Boolean::New(env()->isolate(), on);
+  MakeCallback(env()->quic_on_socket_server_busy_function(), 1, &arg);
 }
 
 int QuicSocket::SetTTL(int ttl) {
@@ -785,6 +866,19 @@ void QuicSocket::SetDiagnosticPacketLoss(double rx, double tx) {
   rx_loss_ = rx;
   tx_loss_ = tx;
 }
+
+inline void QuicSocket::CheckAllocatedSize(size_t previous_size) {
+  CHECK_GE(current_ngtcp2_memory_, previous_size);
+}
+
+inline void QuicSocket::IncrementAllocatedSize(size_t size) {
+  current_ngtcp2_memory_ += size;
+}
+
+inline void QuicSocket::DecrementAllocatedSize(size_t size) {
+  current_ngtcp2_memory_ -= size;
+}
+
 
 // JavaScript API
 namespace {
@@ -971,6 +1065,13 @@ void QuicSocketSetMulticastLoopback(const FunctionCallbackInfo<Value>& args) {
   args.GetReturnValue().Set(socket->SetMulticastLoopback(args[0]->IsTrue()));
 }
 
+void QuicSocketSetServerBusy(const FunctionCallbackInfo<Value>& args) {
+  QuicSocket* socket;
+  ASSIGN_OR_RETURN_UNWRAP(&socket, args.Holder());
+  CHECK_EQ(args.Length(), 1);
+  socket->SetServerBusy(args[0]->IsTrue());
+}
+
 void QuicSocketSetMulticastTTL(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   QuicSocket* socket;
@@ -1048,6 +1149,9 @@ void QuicSocket::Initialize(
   env->SetProtoMethod(socket,
                       "setMulticastLoopback",
                       QuicSocketSetMulticastLoopback);
+  env->SetProtoMethod(socket,
+                      "setServerBusy",
+                      QuicSocketSetServerBusy);
   socket->Inherit(HandleWrap::GetConstructorTemplate(env));
   target->Set(context, class_name,
               socket->GetFunction(env->context()).ToLocalChecked()).FromJust();

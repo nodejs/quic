@@ -64,6 +64,7 @@ void QuicSetCallbacks(const FunctionCallbackInfo<Value>& args) {
   SETFUNCTION("onStreamClose", stream_close);
   SETFUNCTION("onStreamError", stream_error);
   SETFUNCTION("onStreamReset", stream_reset);
+  SETFUNCTION("onSocketServerBusy", socket_server_busy);
 
 #undef SETFUNCTION
 }

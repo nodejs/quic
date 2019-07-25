@@ -28,7 +28,8 @@ using v8::Value;
 
 namespace quic {
 
-class QuicSocket : public HandleWrap {
+class QuicSocket : public HandleWrap,
+                   public mem::Tracker {
  public:
   static void Initialize(
       Environment* env,
@@ -96,6 +97,7 @@ class QuicSocket : public HandleWrap {
       const sockaddr* dest,
       QuicBuffer* buf,
       std::shared_ptr<QuicSession> session);
+  void SetServerBusy(bool on);
   void SetServerSessionSettings(
       ngtcp2_cid* pscid,
       ngtcp2_settings* settings,
@@ -111,6 +113,11 @@ class QuicSocket : public HandleWrap {
   void MemoryInfo(MemoryTracker* tracker) const override;
   SET_MEMORY_INFO_NAME(QuicSocket)
   SET_SELF_SIZE(QuicSocket)
+
+  // Implementation for mem::Tracker
+  inline void CheckAllocatedSize(size_t previous_size) override;
+  inline void IncrementAllocatedSize(size_t size) override;
+  inline void DecrementAllocatedSize(size_t size) override;
 
  private:
   static void OnAlloc(
@@ -130,6 +137,12 @@ class QuicSocket : public HandleWrap {
       const uv_buf_t* buf,
       const struct sockaddr* addr,
       unsigned int flags);
+
+  void SendInitialConnectionClose(
+      uint32_t version,
+      uint64_t error_code,
+      QuicCID* dcid,
+      const sockaddr* addr);
 
   void SendVersionNegotiation(
       uint32_t version,
@@ -176,6 +189,7 @@ class QuicSocket : public HandleWrap {
   SocketAddress local_address_;
   bool server_listening_;
   bool validate_addr_;
+  bool server_busy_;
   size_t max_connections_per_host_;
   QuicSessionConfig server_session_config_;
   crypto::SecureContext* server_secure_context_;
@@ -191,6 +205,9 @@ class QuicSocket : public HandleWrap {
   // Used to specify diagnostic packet loss probabilities
   double rx_loss_;
   double tx_loss_;
+
+  // The amount of memory allocated by ngtcp2 internals
+  uint64_t current_ngtcp2_memory_;
 
   // Counts the number of active connections per remote
   // address. A custom std::hash specialization for
