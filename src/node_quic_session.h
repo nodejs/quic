@@ -463,7 +463,7 @@ class QuicSession : public AsyncWrap,
   void SetHandshakeCompleted();
   void SetLocalAddress(const ngtcp2_addr* addr);
   void StreamClose(int64_t stream_id, uint64_t app_error_code);
-  int StreamOpen(int64_t stream_id);
+  void StreamOpen(int64_t stream_id);
   void StreamReset(
       int64_t stream_id,
       uint64_t final_size,

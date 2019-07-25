@@ -1091,29 +1091,20 @@ void QuicSession::StopRetransmitTimer() {
   retransmit_->Stop();
 }
 
-// Called by ngtcp2 when a stream has been opened. If the stream has already
-// been created, return an error.
-// TODO(@jasnell): Currently, this will cause the stream object to be
-// created, but we might want to wait to create the stream object until
-// we receive the first packet of data for the stream... doing so ensures
-// that we are not committing resources until we actually need to.
-int QuicSession::StreamOpen(int64_t stream_id) {
+// Called by ngtcp2 when a stream has been opened. All we do is log
+// the activity here. We do not want to actually commit any resources
+// until data is received for the stream. This allows us to prevent
+// a stream commitment attack. The only exception is shutting the
+// stream down explicitly if we are in a graceful close period.
+void QuicSession::StreamOpen(int64_t stream_id) {
   CHECK(!IsDestroyed());
   if (IsGracefullyClosing()) {
-    return ngtcp2_conn_shutdown_stream(
+    ngtcp2_conn_shutdown_stream(
         connection(),
         stream_id,
         NGTCP2_ERR_CLOSING);
   }
-  HandleScope scope(env()->isolate());
-  Local<Context> context = env()->context();
-  Context::Scope context_scope(context);
-  QuicStream* stream = FindStream(stream_id);
-  if (stream != nullptr)
-    return NGTCP2_STREAM_STATE_ERROR;
-  CreateStream(stream_id);
-  UpdateIdleTimer(idle_timeout_);
-  return 0;
+  Debug(this, "Stream %llu opened but not yet created.");
 }
 
 // Called when the QuicSession has received a RESET_STREAM frame from the

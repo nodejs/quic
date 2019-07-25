@@ -467,9 +467,7 @@ inline int QuicSession::OnStreamOpen(
     int64_t stream_id,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
-  RETURN_IF_FAIL(
-      session->StreamOpen(stream_id), 0,
-      NGTCP2_ERR_CALLBACK_FAILURE);
+  session->StreamOpen(stream_id);
   return 0;
 }
 
