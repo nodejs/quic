@@ -333,6 +333,15 @@ added: REPLACEME
 
 The `QuicSocket` the `QuicSession` is associated with.
 
+### quicsession.updateKey()
+<!-- YAML
+added: REPLACEME
+-->
+
+* Returns: {boolean} `true` if the key update operation is successfully initiated.
+
+Initiates QuicSession key update.
+
 ## Class: QuicClientSession extends QuicSession
 <!-- YAML
 added: REPLACEME

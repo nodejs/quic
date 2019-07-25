@@ -138,6 +138,11 @@ server.on('session', common.mustCall((session) => {
   }
 
   session.on('secure', common.mustCall((servername, alpn, cipher) => {
+
+    // Should not error and should return true... also shouldn't
+    // cause anything else to fail.
+    assert(session.updateKey());
+
     debug('QuicServerSession TLS Handshake Complete');
     debug('  Server name: %s', servername);
     debug('  ALPN: %s', alpn);

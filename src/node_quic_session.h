@@ -207,6 +207,7 @@ class QuicSession : public AsyncWrap,
   void ExtendStreamOffset(QuicStream* stream, size_t amount);
   void GetLocalTransportParams(ngtcp2_transport_params* params);
   uint32_t GetNegotiatedVersion();
+  bool InitiateUpdateKey();
   bool IsHandshakeCompleted();
   void OnIdleTimeout();
   int OpenBidirectionalStream(int64_t* stream_id);
@@ -708,6 +709,7 @@ class QuicSession : public AsyncWrap,
   bool closing_;
   bool destroyed_;
   bool initial_;
+  bool updating_key_;
   crypto::SSLPointer ssl_;
   ConnectionPointer connection_;
   SocketAddress remote_address_;

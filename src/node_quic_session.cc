@@ -62,6 +62,7 @@ QuicSession::QuicSession(
     closing_(false),
     destroyed_(false),
     initial_(true),
+    updating_key_(false),
     max_pktlen_(0),
     idle_timeout_(10 * 1000),
     socket_(socket),
@@ -545,6 +546,13 @@ void QuicSession::HandshakeCompleted() {
   MakeCallback(env()->quic_on_session_handshake_function(),
                arraysize(argv),
                argv);
+}
+
+bool QuicSession::InitiateUpdateKey() {
+  CHECK(!updating_key_);
+  if (!UpdateKey())
+    return false;
+  return ngtcp2_conn_initiate_key_update(connection()) == 0;
 }
 
 // Initialize the TLS context for this QuicSession. This
@@ -1285,6 +1293,12 @@ int QuicSession::WritePeerHandshake(
 // happen multiple times through the lifetime of the QuicSession.
 bool QuicSession::UpdateKey() {
   CHECK(!IsDestroyed());
+
+  // There's generally no user code that should be able to
+  // run while UpdateKey is running, but we need to gate on
+  // it just to be safe.
+  OnScopeLeave leave([&]() { updating_key_ = false; });
+  updating_key_ = true;
   Debug(this, "Updating keys.");
 
   std::array<uint8_t, 64> secret;
@@ -2857,6 +2871,12 @@ void QuicSessionGetCertificate(
   args.GetReturnValue().Set(result);
 }
 
+void QuicSessionUpdateKey(const FunctionCallbackInfo<Value>& args) {
+  QuicSession* session;
+  ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
+  args.GetReturnValue().Set(session->InitiateUpdateKey());
+}
+
 void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   CHECK(args[0]->IsObject());
@@ -2928,6 +2948,7 @@ void AddMethods(Environment* env, Local<FunctionTemplate> session) {
                       "getPeerCertificate",
                       QuicSessionGetPeerCertificate);
   env->SetProtoMethod(session, "gracefulClose", QuicSessionGracefulClose);
+  env->SetProtoMethod(session, "updateKey", QuicSessionUpdateKey);
 }
 }  // namespace
 
