@@ -226,10 +226,7 @@ inline int QuicSession::OnReceiveRetry(
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
   QuicSession::Ngtcp2CallbackScope callback_scope(session);
-  RETURN_IF_FAIL(
-      session->ReceiveRetry(), 0,
-      NGTCP2_ERR_CALLBACK_FAILURE);
-  return 0;
+  return session->ReceiveRetry() ? 0 : NGTCP2_ERR_CALLBACK_FAILURE;
 }
 
 // Called by ngtcp2 for both client and server connections
@@ -514,10 +511,8 @@ inline int QuicSession::OnSelectPreferredAddress(
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
   QuicSession::Ngtcp2CallbackScope callback_scope(session);
-  RETURN_IF_FAIL(
-      session->SelectPreferredAddress(dest, paddr), 0,
-      NGTCP2_ERR_CALLBACK_FAILURE);
-  return 0;
+  return session->SelectPreferredAddress(dest, paddr) ?
+      0 : NGTCP2_ERR_CALLBACK_FAILURE;
 }
 
 // Called by ngtcp2 when a stream has been closed for any reason.
@@ -643,6 +638,16 @@ inline void QuicSession::SetLastError(QuicError error) {
 inline void QuicSession::SetLastError(QuicErrorFamily family, uint64_t code) {
   last_error_.family = family;
   last_error_.code = code;
+}
+
+inline void QuicSession::SetLastError(QuicErrorFamily family, ssize_t code) {
+  SetLastError(
+      family,
+      ngtcp2_err_infer_quic_transport_error_code(static_cast<int>(code)));
+}
+
+inline void QuicSession::SetLastError(QuicErrorFamily family, int code) {
+  SetLastError(family, ngtcp2_err_infer_quic_transport_error_code(code));
 }
 
 inline bool QuicSession::IsInClosingPeriod() {

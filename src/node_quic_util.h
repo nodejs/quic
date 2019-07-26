@@ -156,7 +156,7 @@ class SocketAddress {
         NGTCP2_MAX_PKTLEN_IPV4;
   }
 
-  static int ResolvePreferredAddress(
+  static bool ResolvePreferredAddress(
       Environment* env,
       int local_address_family,
       const ngtcp2_preferred_addr* paddr,
@@ -180,12 +180,12 @@ class SocketAddress {
       binaddr = paddr->ipv6_addr;
       port = paddr->ipv6_port;
     } else {
-      return -1;
+      return false;
     }
 
     char host[NI_MAXHOST];
     if (uv_inet_ntop(af, binaddr, host, sizeof(host)) == 0)
-      return -1;
+      return false;
 
     addrinfo hints{};
     hints.ai_flags = AI_NUMERICHOST | AI_NUMERICSERV;
@@ -199,7 +199,7 @@ class SocketAddress {
             nullptr,
             host,
             std::to_string(port).c_str(),
-            &hints);
+            &hints) == 0;
   }
 
   static int ToSockAddr(
