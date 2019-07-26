@@ -251,6 +251,7 @@ class QuicSession : public AsyncWrap,
   uint32_t GetNegotiatedVersion();
   bool InitiateUpdateKey();
   bool IsHandshakeCompleted();
+  void MaybeTimeout();
   void OnIdleTimeout();
   int OpenBidirectionalStream(int64_t* stream_id);
   int OpenUnidirectionalStream(int64_t* stream_id);
@@ -319,7 +320,6 @@ class QuicSession : public AsyncWrap,
   // These must be implemented by QuicSession types
   virtual void AddToSocket(QuicSocket* socket) = 0;
   virtual int HandleError() = 0;
-  virtual void MaybeTimeout() = 0;
   virtual int OnKey(
       int name,
       const uint8_t* secret,
@@ -1033,7 +1033,6 @@ class QuicServerSession : public QuicSession {
   int OnClientHello() override;
   void OnClientHelloDone() override;
   int OnTLSStatus() override;
-  void MaybeTimeout() override;
 
   // Serializes and sends a CONNECTION_CLOSE frame as appropriate.
   bool SendConnectionClose() override;
@@ -1177,7 +1176,6 @@ class QuicClientSession : public QuicSession {
       uint32_t options);
 
   void AddToSocket(QuicSocket* socket) override;
-  void MaybeTimeout() override;
   int OnTLSStatus() override;
 
   int SetEarlyTransportParams(v8::Local<v8::Value> buffer);

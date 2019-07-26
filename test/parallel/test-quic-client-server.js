@@ -42,7 +42,7 @@ const server = createSocket({ port: kServerPort, validateAddress: true });
 // intent is to simulate loss to gather performance data or
 // debug issues. The values for rx and tx must be between
 // 0.0 and 1.0 (inclusive)
-server.setDiagnosticPacketLoss({ rx: 0.0, tx: 0.00 });
+server.setDiagnosticPacketLoss({ rx: 0.00, tx: 0.00 });
 
 const unidata = ['I wonder if it worked.', 'test'];
 const kServerName = 'agent2';  // Intentionally the wrong servername

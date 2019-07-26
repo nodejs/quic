@@ -600,6 +600,28 @@ void QuicSession::OnIdleTimeout() {
   return SilentClose();
 }
 
+void QuicSession::MaybeTimeout() {
+  CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
+  ssize_t err;
+  uint64_t now = uv_hrtime();
+  if (ngtcp2_conn_loss_detection_expiry(Connection()) <= now) {
+    CHECK_EQ(ngtcp2_conn_on_loss_detection_timer(Connection(), now), 0);
+    Debug(this, "Retransmitting due to loss detection");
+    err = SendPendingData();
+    if (err != 0) {
+      SetLastError(QUIC_ERROR_SESSION, static_cast<uint64_t>(err));
+      HandleError();
+    }
+  } else if (ngtcp2_conn_ack_delay_expiry(Connection()) <= now) {
+    Debug(this, "Transmitting due to ack delay");
+    err = SendPendingData();
+    if (err != 0) {
+      SetLastError(QUIC_ERROR_SESSION, static_cast<uint64_t>(err));
+      HandleError();
+    }
+  }
+}
+
 int QuicSession::OpenBidirectionalStream(int64_t* stream_id) {
   CHECK(!IsDestroyed());
   CHECK(!IsGracefullyClosing());
@@ -1551,26 +1573,6 @@ void QuicServerSession::InitTLS_Post() {
   }
 }
 
-void QuicServerSession::MaybeTimeout() {
-  CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
-  uint64_t now = uv_hrtime();
-  uint64_t loss_detection =
-      ngtcp2_conn_loss_detection_expiry(Connection());
-  Debug(this, "Checking loss detection. loss <= now? %s",
-        loss_detection <= now ? "Yes" : "No");
-  if (loss_detection <= now) {
-    Debug(this, "Updating the loss detection timer. Retransmitting.");
-    CHECK_EQ(
-        ngtcp2_conn_on_loss_detection_timer(
-            Connection(), uv_hrtime()), 0);
-    SendPendingData();
-  } else if (ngtcp2_conn_ack_delay_expiry(Connection()) <= now) {
-    Debug(this, "Ack delay expired. Retransmitting.");
-    ngtcp2_conn_cancel_expired_ack_delay_timer(Connection(), now);
-    SendPendingData();
-  }
-}
-
 namespace {
 void OnServerClientHelloCB(const FunctionCallbackInfo<Value>& args) {
   QuicSession* session;
@@ -2381,28 +2383,6 @@ void QuicClientSession::InitTLS_Post() {
   if (IsOptionSet(QUICCLIENTSESSION_OPTION_REQUEST_OCSP)) {
     Debug(this, "Request OCSP status from the server.");
     SSL_set_tlsext_status_type(ssl(), TLSEXT_STATUSTYPE_ocsp);
-  }
-}
-
-void QuicClientSession::MaybeTimeout() {
-  CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
-  ssize_t err;
-  uint64_t now = uv_hrtime();
-  if (ngtcp2_conn_loss_detection_expiry(Connection()) <= now) {
-    CHECK_EQ(ngtcp2_conn_on_loss_detection_timer(Connection(), now), 0);
-    Debug(this, "Retransmitting due to loss detection");
-    err = SendPendingData();
-    if (err != 0) {
-      SetLastError(QUIC_ERROR_SESSION, static_cast<uint64_t>(err));
-      HandleError();
-    }
-  } else if (ngtcp2_conn_ack_delay_expiry(Connection()) <= now) {
-    Debug(this, "Transmitting due to ack delay");
-    err = SendPendingData();
-    if (err != 0) {
-      SetLastError(QUIC_ERROR_SESSION, static_cast<uint64_t>(err));
-      HandleError();
-    }
   }
 }
 
