@@ -338,7 +338,8 @@ The `QuicSocket` the `QuicSession` is associated with.
 added: REPLACEME
 -->
 
-* Returns: {boolean} `true` if the key update operation is successfully initiated.
+* Returns: {boolean} `true` if the key update operation is successfully
+  initiated.
 
 Initiates QuicSession key update.
 

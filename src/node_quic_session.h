@@ -250,8 +250,8 @@ class QuicSession : public AsyncWrap,
   bool IsHandshakeCompleted();
   void MaybeTimeout();
   void OnIdleTimeout();
-  int OpenBidirectionalStream(int64_t* stream_id);
-  int OpenUnidirectionalStream(int64_t* stream_id);
+  bool OpenBidirectionalStream(int64_t* stream_id);
+  bool OpenUnidirectionalStream(int64_t* stream_id);
   size_t ReadPeerHandshake(uint8_t* buf, size_t buflen);
   void ReceiveStreamData(
       int64_t stream_id,

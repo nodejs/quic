@@ -105,16 +105,16 @@ QuicSocket::~QuicSocket() {
   uint64_t now = uv_hrtime();
   Debug(this,
         "QuicSocket destroyed.\n"
-        "  Duration: %llu\n"
-        "  Bound Duration: %llu\n"
-        "  Listen Duration: %llu\n"
-        "  Bytes Received: %llu\n"
-        "  Bytes Sent: %llu\n"
-        "  Packets Received: %llu\n"
-        "  Packets Sent: %llu\n"
-        "  Packets Ignored: %llu\n"
-        "  Server Sessions: %llu\n"
-        "  Client Sessions: %llu\n",
+        "  Duration: %" PRIu64 "\n"
+        "  Bound Duration: %" PRIu64 "\n"
+        "  Listen Duration: %" PRIu64 "\n"
+        "  Bytes Received: %" PRIu64 "\n"
+        "  Bytes Sent: %" PRIu64 "\n"
+        "  Packets Received: %" PRIu64 "\n"
+        "  Packets Sent: %" PRIu64 "\n"
+        "  Packets Ignored: %" PRIu64 "\n"
+        "  Server Sessions: %" PRIu64 "\n"
+        "  Client Sessions: %" PRIu64 "\n",
         now - socket_stats_.created_at,
         socket_stats_.bound_at > 0 ? now - socket_stats_.bound_at : 0,
         socket_stats_.listen_at > 0 ? now - socket_stats_.listen_at : 0,
@@ -797,7 +797,7 @@ QuicSocket::SendWrapStack::SendWrapStack(
 int QuicSocket::SendWrapStack::Send() {
   if (buf_.length() == 0)
     return 0;
-  Debug(Socket(), "Sending %llu bytes", buf_.length());
+  Debug(Socket(), "Sending %" PRIu64 " bytes", buf_.length());
   if (UNLIKELY(IsDiagnosticPacketLoss()))
     return 0;
   uv_buf_t buf =
@@ -847,7 +847,7 @@ int QuicSocket::SendWrap::Send() {
   std::vector<uv_buf_t> vec;
   size_t len = buffer_->DrainInto(&vec, &length_);
   if (len == 0) return 0;
-  Debug(Socket(), "Sending %llu bytes (%d buffers of %d remaining)",
+  Debug(Socket(), "Sending %" PRIu64 " bytes (%d buffers of %d remaining)",
         length_, len, buffer_->ReadRemaining());
   if (UNLIKELY(IsDiagnosticPacketLoss()))
     return 0;

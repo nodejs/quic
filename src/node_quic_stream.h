@@ -150,7 +150,7 @@ class QuicStream : public AsyncWrap,
       v8::Local<v8::Object> target,
       v8::Local<v8::Context> context);
 
-  static QuicStream* New(QuicSession* session, uint64_t stream_id);
+  static QuicStream* New(QuicSession* session, int64_t stream_id);
 
   std::string diagnostic_name() const override;
 
@@ -166,7 +166,7 @@ class QuicStream : public AsyncWrap,
         QUIC_STREAM_CLIENT;
   }
 
-  uint64_t GetID() const { return stream_id_; }
+  int64_t GetID() const { return stream_id_; }
 
   inline bool IsDestroyed() const {
     return flags_ & QUICSTREAM_FLAG_DESTROYED;
@@ -318,7 +318,7 @@ class QuicStream : public AsyncWrap,
   QuicStream(
       QuicSession* session,
       v8::Local<v8::Object> target,
-      uint64_t stream_id);
+      int64_t stream_id);
 
   // Called only when a final stream frame has been received from
   // the peer. This has the side effect of marking the readable
@@ -362,7 +362,7 @@ class QuicStream : public AsyncWrap,
 
   QuicStreamListener stream_listener_;
   QuicSession* session_;
-  uint64_t stream_id_;
+  int64_t stream_id_;
   uint64_t max_offset_;
   uint64_t max_offset_ack_;
   uint32_t flags_;

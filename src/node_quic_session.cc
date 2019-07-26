@@ -128,18 +128,18 @@ QuicSession::~QuicSession() {
   uint64_t now = uv_hrtime();
   Debug(this,
         "Destroyed.\n"
-        "  Duration: %llu\n"
-        "  Handshake Started: %llu\n"
-        "  Handshake Completed: %llu\n"
-        "  Bytes Received: %llu\n"
-        "  Bytes Sent: %llu\n"
-        "  Bidi Stream Count: %llu\n"
-        "  Uni Stream Count: %llu\n"
-        "  Streams In Count: %llu\n"
-        "  Streams Out Count: %llu\n"
-        "  Remaining sendbuf_: %llu\n"
-        "  Remaining handshake_: %llu\n"
-        "  Remaining txbuf_: %llu\n",
+        "  Duration: %" PRIu64 "\n"
+        "  Handshake Started: %" PRIu64 "\n"
+        "  Handshake Completed: %" PRIu64 "\n"
+        "  Bytes Received: %" PRIu64 "\n"
+        "  Bytes Sent: %" PRIu64 "\n"
+        "  Bidi Stream Count: %" PRIu64 "\n"
+        "  Uni Stream Count: %" PRIu64 "\n"
+        "  Streams In Count: %" PRIu64 "\n"
+        "  Streams Out Count: %" PRIu64 "\n"
+        "  Remaining sendbuf_: %" PRIu64 "\n"
+        "  Remaining handshake_: %" PRIu64 "\n"
+        "  Remaining txbuf_: %" PRIu64 "\n",
         now - session_stats_.created_at,
         session_stats_.handshake_start_at,
         session_stats_.handshake_completed_at,
@@ -183,7 +183,9 @@ void QuicSession::AckedStreamDataOffset(
   // is nothing to do but wait for further cleanup to happen.
   if (IsDestroyed())
     return;
-  Debug(this, "Received acknowledgement for %d bytes of stream %llu data",
+  Debug(this,
+        "Received acknowledgement for %" PRIu64
+        " bytes of stream %" PRId64 " data",
         datalen, stream_id);
   QuicStream* stream = FindStream(stream_id);
   // It is possible that the QuicStream has already been destroyed and
@@ -198,7 +200,7 @@ void QuicSession::AckedStreamDataOffset(
 void QuicSession::AddStream(QuicStream* stream) {
   CHECK(!IsDestroyed());
   CHECK(!IsGracefullyClosing());
-  Debug(this, "Adding stream %llu to session.", stream->GetID());
+  Debug(this, "Adding stream %" PRId64 " to session.", stream->GetID());
   streams_.emplace(stream->GetID(), stream);
 
   switch (stream->GetOrigin()) {
@@ -415,7 +417,9 @@ ssize_t QuicSession::DoInHPMask(
 }
 
 void QuicSession::ExtendMaxStreamData(int64_t stream_id, uint64_t max_data) {
-  Debug(this, "Extending max stream %llu data to %llu", stream_id, max_data);
+  Debug(this,
+        "Extending max stream %" PRId64 " data to %" PRIu64,
+        stream_id, max_data);
 }
 
 std::string QuicSession::diagnostic_name() const {
@@ -623,18 +627,19 @@ void QuicSession::MaybeTimeout() {
     SendPendingData();
 }
 
-int QuicSession::OpenBidirectionalStream(int64_t* stream_id) {
+bool QuicSession::OpenBidirectionalStream(int64_t* stream_id) {
   CHECK(!IsDestroyed());
   CHECK(!IsGracefullyClosing());
-  return ngtcp2_conn_open_bidi_stream(Connection(), stream_id, nullptr);
+  return ngtcp2_conn_open_bidi_stream(Connection(), stream_id, nullptr) == 0;
 }
 
-int QuicSession::OpenUnidirectionalStream(int64_t* stream_id) {
+bool QuicSession::OpenUnidirectionalStream(int64_t* stream_id) {
   CHECK(!IsDestroyed());
   CHECK(!IsGracefullyClosing());
-  int err = ngtcp2_conn_open_uni_stream(Connection(), stream_id, nullptr);
+  if (ngtcp2_conn_open_uni_stream(Connection(), stream_id, nullptr))
+    return false;
   ngtcp2_conn_shutdown_stream_read(Connection(), *stream_id, 0);
-  return err;
+  return true;
 }
 
 int QuicSession::PathValidation(
@@ -823,7 +828,7 @@ void QuicSession::RemoveFromSocket() {
 // be removed before the QuicSession is destroyed.
 void QuicSession::RemoveStream(int64_t stream_id) {
   CHECK(!IsDestroyed());
-  Debug(this, "Removing stream %llu", stream_id);
+  Debug(this, "Removing stream %" PRId64, stream_id);
 
   // This will have the side effect of destroying the QuicSession
   // instance.
@@ -842,7 +847,7 @@ void QuicSession::ScheduleRetransmit() {
   uint64_t now = uv_hrtime();
   uint64_t expiry = ngtcp2_conn_get_expiry(Connection());
   uint64_t interval = (expiry < now) ? 1 : (expiry - now);
-  Debug(this, "Scheduling the retransmit timer for %llu", interval);
+  Debug(this, "Scheduling the retransmit timer for %" PRIu64, interval);
   UpdateRetransmitTimer(interval);
 }
 
@@ -949,7 +954,7 @@ bool QuicSession::SendStreamData(QuicStream* stream) {
           Debug(stream, "Stream does not exist");
           return true;
         default:
-          Debug(stream, "Error writing packet. Code %llu", nwrite);
+          Debug(stream, "Error writing packet. Code %" PRIu64, nwrite);
           SetLastError(QUIC_ERROR_SESSION, nwrite);
           return false;
       }
@@ -957,14 +962,15 @@ bool QuicSession::SendStreamData(QuicStream* stream) {
 
     if (ndatalen > 0) {
       remaining -= ndatalen;
-      Debug(stream, "%llu stream bytes serialized into packet. %d remaining",
+      Debug(stream,
+            "%" PRIu64 " stream bytes serialized into packet. %d remaining",
             ndatalen,
             remaining);
       Consume(&v, &c, ndatalen);
       stream->Commit(ndatalen);
     }
 
-    Debug(stream, "Sending %llu bytes in serialized packet", nwrite);
+    Debug(stream, "Sending %" PRIu64 " bytes in serialized packet", nwrite);
     dest.Realloc(nwrite);
     sendbuf_.Push(std::move(dest));
     remote_address_.Update(&path.path.remote);
@@ -1001,7 +1007,7 @@ bool QuicSession::SendPacket() {
   // There's nothing to send, so let's not try
   if (txbuf_.Length() == 0)
     return true;
-  Debug(this, "There are %llu bytes in txbuf_ to send", txbuf_.Length());
+  Debug(this, "There are %" PRIu64 " bytes in txbuf_ to send", txbuf_.Length());
   session_stats_.session_sent_at = uv_hrtime();
   ScheduleRetransmit();
   int err = Socket()->SendPacket(
@@ -1112,7 +1118,7 @@ void QuicSession::StreamClose(int64_t stream_id, uint64_t app_error_code) {
   if (stream == nullptr)
     return;
 
-  Debug(stream, "Closing with code %llu", app_error_code);
+  Debug(stream, "Closing with code %" PRIu64, app_error_code);
 
   HandleScope scope(env()->isolate());
   Context::Scope context_scope(env()->context());
@@ -1148,7 +1154,7 @@ void QuicSession::StreamOpen(int64_t stream_id) {
         stream_id,
         NGTCP2_ERR_CLOSING);
   }
-  Debug(this, "Stream %llu opened but not yet created.");
+  Debug(this, "Stream %" PRId64 " opened but not yet created.", stream_id);
 }
 
 // Called when the QuicSession has received a RESET_STREAM frame from the
@@ -1178,7 +1184,7 @@ void QuicSession::StreamReset(
   if (stream == nullptr)
     return;
 
-  Debug(stream, "Reset with code %llu and final size %llu",
+  Debug(stream, "Reset with code %" PRIu64 " and final size %" PRIu64,
         app_error_code,
         final_size);
 

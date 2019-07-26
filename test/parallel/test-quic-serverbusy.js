@@ -57,7 +57,7 @@ server.on('ready', common.mustCall(() => {
     client: { key, cert, ca, alpn: kALPN }
   });
 
-  const req = client.connect({
+  client.connect({
     address: 'localhost',
     port: server.address.port,
   });

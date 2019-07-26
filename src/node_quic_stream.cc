@@ -62,7 +62,7 @@ void QuicStreamListener::OnStreamRead(ssize_t nread, const uv_buf_t& buf) {
 QuicStream::QuicStream(
     QuicSession* session,
     Local<Object> wrap,
-    uint64_t stream_id) :
+    int64_t stream_id) :
     AsyncWrap(session->env(), wrap, AsyncWrap::PROVIDER_QUICSTREAM),
     StreamBase(session->env()),
     session_(session),
@@ -109,9 +109,9 @@ void QuicStream::Destroy() {
   uint64_t now = uv_hrtime();
   Debug(this,
         "Destroying.\n"
-        "  Duration: %llu\n"
-        "  Bytes Received: %llu\n"
-        "  Bytes Sent: %llu",
+        "  Duration: %" PRIu64 "\n"
+        "  Bytes Received: %" PRIu64 "\n"
+        "  Bytes Sent: " PRIu64,
         now - stream_stats_.created_at,
         stream_stats_.bytes_received,
         stream_stats_.bytes_sent);
@@ -193,7 +193,8 @@ int QuicStream::DoWrite(
           },
           req_wrap,
           req_wrap->object());
-  Debug(this, "Queuing %llu bytes of data from %d buffers", length, nbufs);
+  Debug(this, "Queuing %" PRIu64 " bytes of data from %d buffers",
+        length, nbufs);
   IncrementStat(length, &stream_stats_, &stream_stats::bytes_sent);
   stream_stats_.stream_sent_at = uv_hrtime();
 
@@ -376,9 +377,7 @@ void QuicStream::Shutdown(uint64_t app_error_code) {
   session_->ShutdownStream(GetID(), app_error_code);
 }
 
-QuicStream* QuicStream::New(
-    QuicSession* session,
-    uint64_t stream_id) {
+QuicStream* QuicStream::New(QuicSession* session, int64_t stream_id) {
   Local<Object> obj;
   if (!session->env()
               ->quicserverstream_constructor_template()
@@ -403,11 +402,8 @@ void OpenUnidirectionalStream(const FunctionCallbackInfo<Value>& args) {
   ASSIGN_OR_RETURN_UNWRAP(&session, args[0].As<Object>());
 
   int64_t stream_id;
-  int err = session->OpenUnidirectionalStream(&stream_id);
-  if (err != 0) {
-    args.GetReturnValue().Set(err);
+  if (!session->OpenUnidirectionalStream(&stream_id))
     return;
-  }
 
   QuicStream* stream = QuicStream::New(session, stream_id);
   args.GetReturnValue().Set(stream->object());
@@ -420,11 +416,8 @@ void OpenBidirectionalStream(const FunctionCallbackInfo<Value>& args) {
   ASSIGN_OR_RETURN_UNWRAP(&session, args[0].As<Object>());
 
   int64_t stream_id;
-  int err = session->OpenBidirectionalStream(&stream_id);
-  if (err != 0) {
-    args.GetReturnValue().Set(err);
+  if (!session->OpenBidirectionalStream(&stream_id))
     return;
-  }
 
   QuicStream* stream = QuicStream::New(session, stream_id);
   args.GetReturnValue().Set(stream->object());
