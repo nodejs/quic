@@ -66,6 +66,8 @@ QuicSession::QuicSession(
     ncread_(0),
     max_crypto_buffer_(DEFAULT_MAX_CRYPTO_BUFFER),
     current_ngtcp2_memory_(0),
+    connection_close_attempts_(0),
+    connection_close_limit_(1),
     idle_timeout_(10 * 1000),
     idle_(new Timer(socket->env(), OnIdleTimeoutCB, this)),
     retransmit_(new Timer(socket->env(), OnRetransmitTimeoutCB, this)),
@@ -1897,13 +1899,10 @@ int QuicServerSession::Receive(
   // of shutting down the connection and a CONNECTION_CLOSE has
   // already been sent. The only thing we can do at this point is
   // either ignore the packet or send another CONNECTION_CLOSE.
-  //
-  // TODO(@jasnell): Currently, send a CONNECTION_CLOSE on every
-  // packet received. To be a bit nicer, however, we could
-  // use an exponential backoff.
   if (IsInClosingPeriod()) {
-    SetLastError(QUIC_ERROR_SESSION, NGTCP2_ERR_CLOSING);
-    return HandleError();
+    IncrementConnectionCloseAttempts();
+    return ShouldAttemptConnectionClose() ?
+        SendConnectionClose() : 0;
   }
 
   // When IsInDrainingPeriod is true, ngtcp2 has received a

@@ -32,6 +32,8 @@ class QuicServerSession;
 class QuicSocket;
 class QuicStream;
 
+constexpr size_t kMaxSizeT = std::numeric_limits<size_t>::max();
+
 constexpr int ERR_INVALID_REMOTE_TRANSPORT_PARAMS = -1;
 constexpr int ERR_INVALID_TLS_SESSION_TICKET = -2;
 
@@ -787,6 +789,22 @@ class QuicSession : public AsyncWrap,
     return options_ & option;
   }
 
+  void IncrementConnectionCloseAttempts() {
+    if (connection_close_attempts_ < kMaxSizeT)
+      connection_close_attempts_++;
+  }
+
+  bool ShouldAttemptConnectionClose() {
+    if (connection_close_attempts_ == connection_close_limit_) {
+      if (connection_close_limit_ * 2 <= kMaxSizeT)
+        connection_close_limit_ *= 2;
+      else
+        connection_close_limit_ = kMaxSizeT;
+      return true;
+    }
+    return false;
+  }
+
   typedef ssize_t(*ngtcp2_close_fn)(
     ngtcp2_conn* conn,
     ngtcp2_path* path,
@@ -815,6 +833,8 @@ class QuicSession : public AsyncWrap,
   size_t ncread_;
   size_t max_crypto_buffer_;
   size_t current_ngtcp2_memory_;
+  size_t connection_close_attempts_;
+  size_t connection_close_limit_;
   uint64_t idle_timeout_;
 
   Timer* idle_;
