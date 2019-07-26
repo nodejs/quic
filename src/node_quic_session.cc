@@ -972,6 +972,7 @@ ssize_t QuicSession::SendStreamData(QuicStream* stream) {
 // Transmits the current contents of the internal sendbuf_ to the peer.
 int QuicSession::SendPacket() {
   CHECK(!IsDestroyed());
+  CHECK(!IsInDrainingPeriod());
   // Move the contents of sendbuf_ to the tail of txbuf_ and reset sendbuf_
   if (sendbuf_.Length() > 0) {
     IncrementStat(
@@ -994,15 +995,17 @@ int QuicSession::SendPacket() {
 
 // Sends any pending handshake or session packet data.
 ssize_t QuicSession::SendPendingData() {
-  // If we are in a callback or the session is destroyed, do nothing
-  // because we're not allowed to call the serialize packet functions.
-  if (Ngtcp2CallbackScope::InNgtcp2CallbackScope(this) || IsDestroyed())
+  // Do not proceed if:
+  //  * We are in the ngtcp2 callback scope
+  //  * The QuicSession has been destroyed
+  //  * The QuicSession is in the draining period
+  //  * The QuicSession is a server in the closing period
+  if (Ngtcp2CallbackScope::InNgtcp2CallbackScope(this) ||
+      IsDestroyed() ||
+      IsInDrainingPeriod() ||
+      (IsServer() && IsInClosingPeriod())) {
     return 0;
-
-  // If the server is in the process of closing or draining
-  // the connection, we cannot send any packets to the peer.
-  if (IsServer() && (IsInClosingPeriod() || IsInDrainingPeriod()))
-    return 0;
+  }
 
   // If there's anything currently in the sendbuf_, send it before
   // serializing anything else.
@@ -1011,10 +1014,18 @@ ssize_t QuicSession::SendPendingData() {
       return err;
 
   // Try purging any pending stream data
+  // TODO(@jasnell): Right now this iterates through the streams
+  // in the order they were created. Later, we'll want to implement
+  // a prioritization scheme to allow higher priority streams to
+  // be serialized first.
   for (const auto& stream : streams_) {
     err = SendStreamData(stream.second.get());
     if (err < 0)
       return err;
+    // Check to make sure QuicSession state did not change in this
+    // iteration
+    if (IsInDrainingPeriod() || IsInClosingPeriod() || IsDestroyed())
+      return 0;
   }
 
   // Otherwise, serialize and send any packets waiting in the queue.
@@ -1958,6 +1969,10 @@ bool QuicServerSession::SendConnectionClose() {
   CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
   CHECK(!IsDestroyed());
 
+  // Do not send any frames at all if we're in the draining period.
+  if (IsInDrainingPeriod())
+    return true;
+
   RETURN_IF_FAIL(WritePackets(), 0, false);
 
   RETURN_IF_FAIL(StartClosingPeriod(), 0, false);
@@ -1965,7 +1980,8 @@ bool QuicServerSession::SendConnectionClose() {
   CHECK_GT(conn_closebuf_.size, 0);
   sendbuf_.Cancel();
   // We don't use std::move here because we do not want
-  // to reset conn_closebuf_.
+  // to reset conn_closebuf_. Instead, we keep it around
+  // so we can send it again if we have to.
   uv_buf_t buf =
       uv_buf_init(
           reinterpret_cast<char*>(conn_closebuf_.data),
@@ -2533,6 +2549,11 @@ int QuicClientSession::ReceiveRetry() {
 bool QuicClientSession::SendConnectionClose() {
   CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
   CHECK(!IsDestroyed());
+
+  // Do not send any frames if we are in the draining period
+  if (IsInDrainingPeriod())
+    return true;
+
   UpdateIdleTimer(idle_timeout_);
   MallocedBuffer<uint8_t> data(max_pktlen_);
   sendbuf_.Cancel();

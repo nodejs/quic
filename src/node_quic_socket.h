@@ -32,7 +32,6 @@ typedef enum QuicSocketOptions : uint32_t {
   QUICSOCKET_OPTIONS_VALIDATE_ADDRESS = 0x1
 } QuicSocketOptions;
 
-
 class QuicSocket : public HandleWrap,
                    public mem::Tracker {
  public:
