@@ -63,14 +63,16 @@ QuicSession::QuicSession(
     flags_(0),
     options_(options),
     max_pktlen_(0),
+    ncread_(0),
+    max_crypto_buffer_(DEFAULT_MAX_CRYPTO_BUFFER),
+    current_ngtcp2_memory_(0),
     idle_timeout_(10 * 1000),
+    idle_(new Timer(socket->env(), OnIdleTimeoutCB, this)),
+    retransmit_(new Timer(socket->env(), OnRetransmitTimeoutCB, this)),
     socket_(socket),
     hs_crypto_ctx_{},
     crypto_ctx_{},
-    ncread_(0),
     state_(env()->isolate(), IDX_QUIC_SESSION_STATE_COUNT),
-    current_ngtcp2_memory_(0),
-    max_crypto_buffer_(DEFAULT_MAX_CRYPTO_BUFFER),
     alpn_(alpn),
     allocator_(this),
     crypto_rx_ack_(1, std::numeric_limits<int64_t>::max()),
@@ -86,16 +88,6 @@ QuicSession::QuicSession(
   ssl_.reset(SSL_new(ctx->ctx_.get()));
   SSL_CTX_set_keylog_callback(ctx->ctx_.get(), OnKeylog);
   CHECK(ssl_);
-
-  idle_ = new Timer(env(), [](void* data) {
-    QuicSession* session = static_cast<QuicSession*>(data);
-    session->OnIdleTimeout();
-  }, this);
-
-  retransmit_ = new Timer(env(), [](void* data) {
-    QuicSession* session = static_cast<QuicSession*>(data);
-    session->MaybeTimeout();
-  }, this);
 
   session_stats_.created_at = uv_hrtime();
 
@@ -113,7 +105,7 @@ QuicSession::QuicSession(
 
   USE(wrap->DefineOwnProperty(
       env()->context(),
-      FIXED_ONE_BYTE_STRING(env()->isolate(), "recoveryStats"),
+      env()->recovery_stats_string(),
       recovery_stats_buffer_.GetJSArray(),
       PropertyAttribute::ReadOnly));
 
@@ -457,7 +449,7 @@ int QuicSession::ExtendMaxStreamsBidi(uint64_t max_streams) {
 
 void QuicSession::ExtendStreamOffset(QuicStream* stream, size_t amount) {
   ngtcp2_conn_extend_max_stream_offset(
-      connection(),
+      Connection(),
       stream->GetID(),
       amount);
 }
@@ -466,13 +458,13 @@ void QuicSession::ExtendStreamOffset(QuicStream* stream, size_t amount) {
 // for serialization.
 void QuicSession::GetLocalTransportParams(ngtcp2_transport_params* params) {
   CHECK(!IsDestroyed());
-  ngtcp2_conn_get_local_transport_params(connection(), params);
+  ngtcp2_conn_get_local_transport_params(Connection(), params);
 }
 
 // Gets the QUIC version negotiated for this QuicSession
 uint32_t QuicSession::GetNegotiatedVersion() {
   CHECK(!IsDestroyed());
-  return ngtcp2_conn_get_negotiated_version(connection());
+  return ngtcp2_conn_get_negotiated_version(Connection());
 }
 
 // Generates and associates a new connection ID for this QuicSession.
@@ -547,7 +539,7 @@ bool QuicSession::InitiateUpdateKey() {
   CHECK(!IsFlagSet(QUICSESSION_FLAG_KEYUPDATE));
   if (!UpdateKey())
     return false;
-  return ngtcp2_conn_initiate_key_update(connection()) == 0;
+  return ngtcp2_conn_initiate_key_update(Connection()) == 0;
 }
 
 // Initialize the TLS context for this QuicSession. This
@@ -575,7 +567,7 @@ void QuicSession::InitTLS() {
 
 bool QuicSession::IsHandshakeCompleted() {
   CHECK(!IsDestroyed());
-  return ngtcp2_conn_get_handshake_completed(connection());
+  return ngtcp2_conn_get_handshake_completed(Connection());
 }
 
 // TLS Keylogging is enabled per-QuicSession by attaching an handler to the
@@ -609,14 +601,14 @@ void QuicSession::OnIdleTimeout() {
 int QuicSession::OpenBidirectionalStream(int64_t* stream_id) {
   CHECK(!IsDestroyed());
   CHECK(!IsGracefullyClosing());
-  return ngtcp2_conn_open_bidi_stream(connection(), stream_id, nullptr);
+  return ngtcp2_conn_open_bidi_stream(Connection(), stream_id, nullptr);
 }
 
 int QuicSession::OpenUnidirectionalStream(int64_t* stream_id) {
   CHECK(!IsDestroyed());
   CHECK(!IsGracefullyClosing());
-  int err = ngtcp2_conn_open_uni_stream(connection(), stream_id, nullptr);
-  ngtcp2_conn_shutdown_stream_read(connection(), *stream_id, 0);
+  int err = ngtcp2_conn_open_uni_stream(Connection(), stream_id, nullptr);
+  ngtcp2_conn_shutdown_stream_read(Connection(), *stream_id, 0);
   return err;
 }
 
@@ -700,10 +692,10 @@ int QuicSession::ReceiveClientInitial(const ngtcp2_cid* dcid) {
   SetupTokenContext(&hs_crypto_ctx_);
 
   RETURN_IF_FAIL(SetupServerSecret(&params, &hs_crypto_ctx_), 0, -1);
-  InstallKeys<ngtcp2_conn_install_initial_tx_keys>(connection(), params);
+  InstallKeys<ngtcp2_conn_install_initial_tx_keys>(Connection(), params);
 
   RETURN_IF_FAIL(SetupClientSecret(&params, &hs_crypto_ctx_), 0, -1);
-  InstallKeys<ngtcp2_conn_install_initial_rx_keys>(connection(), params);
+  InstallKeys<ngtcp2_conn_install_initial_rx_keys>(Connection(), params);
 
   return 0;
 }
@@ -716,7 +708,7 @@ int QuicSession::ReceivePacket(
   uint64_t now = uv_hrtime();
   session_stats_.session_received_at = now;
   return ngtcp2_conn_read_pkt(
-      connection(),
+      Connection(),
       **path,
       data, nread,
       now);
@@ -748,7 +740,7 @@ void QuicSession::ReceiveStreamData(
     // Shutdown the stream explicitly if the session is being closed.
     if (IsGracefullyClosing()) {
       ngtcp2_conn_shutdown_stream(
-          connection(),
+          Connection(),
           stream_id,
           NGTCP2_ERR_CLOSING);
       return;
@@ -769,7 +761,7 @@ void QuicSession::ReceiveStreamData(
   // This extends the flow control window for the entire session
   // but not for the individual Stream. Stream flow control is
   // only expanded as data is read on the JavaScript side.
-  ngtcp2_conn_extend_max_offset(connection(), datalen);
+  ngtcp2_conn_extend_max_offset(Connection(), datalen);
 }
 
 // Removes the given connection id from the QuicSession.
@@ -788,8 +780,8 @@ void QuicSession::RemoveConnectionID(const ngtcp2_cid* cid) {
 // If the session is removed and there are no other references held,
 // the session object will be destroyed automatically.
 void QuicSession::RemoveFromSocket() {
-  std::vector<ngtcp2_cid> cids(ngtcp2_conn_get_num_scid(connection()));
-  ngtcp2_conn_get_scid(connection(), cids.data());
+  std::vector<ngtcp2_cid> cids(ngtcp2_conn_get_num_scid(Connection()));
+  ngtcp2_conn_get_scid(Connection(), cids.data());
 
   for (auto &cid : cids) {
     QuicCID id(&cid);
@@ -817,13 +809,13 @@ void QuicSession::RemoveStream(int64_t stream_id) {
   // not attempt to loop back around and destroy the already removed
   // QuicStream instance. Typically, the stream is already going to
   // be closed by this point.
-  ngtcp2_conn_shutdown_stream(connection(), stream_id, NGTCP2_NO_ERROR);
+  ngtcp2_conn_shutdown_stream(Connection(), stream_id, NGTCP2_NO_ERROR);
 }
 
 // Schedule the retransmission timer
 void QuicSession::ScheduleRetransmit() {
   uint64_t now = uv_hrtime();
-  uint64_t expiry = ngtcp2_conn_get_expiry(connection());
+  uint64_t expiry = ngtcp2_conn_get_expiry(Connection());
   uint64_t interval = (expiry < now) ? 1 : (expiry - now);
   Debug(this, "Scheduling the retransmit timer for %llu", interval);
   UpdateRetransmitTimer(interval);
@@ -866,7 +858,7 @@ ssize_t QuicSession::SendStreamData(QuicStream* stream) {
       stream->HasSentFin() ||
       IsInDrainingPeriod() ||
       IsInClosingPeriod() ||
-      ngtcp2_conn_get_max_data_left(connection()) == 0) {
+      ngtcp2_conn_get_max_data_left(Connection()) == 0) {
     return 0;
   }
 
@@ -899,7 +891,7 @@ ssize_t QuicSession::SendStreamData(QuicStream* stream) {
     MallocedBuffer<uint8_t> dest(max_pktlen_);
     ssize_t nwrite =
         ngtcp2_conn_writev_stream(
-            connection(),
+            Connection(),
             &path.path,
             dest.data,
             max_pktlen_,
@@ -1041,18 +1033,18 @@ ssize_t QuicSession::SendPendingData() {
 // Notifies the ngtcp2_conn that the TLS handshake is completed.
 void QuicSession::SetHandshakeCompleted() {
   CHECK(!IsDestroyed());
-  ngtcp2_conn_handshake_completed(connection());
+  ngtcp2_conn_handshake_completed(Connection());
 }
 
 void QuicSession::SetLocalAddress(const ngtcp2_addr* addr) {
-  ngtcp2_conn_set_local_addr(connection(), addr);
+  ngtcp2_conn_set_local_addr(Connection(), addr);
 }
 
 // Set the transport parameters received from the remote peer
 int QuicSession::SetRemoteTransportParams(ngtcp2_transport_params* params) {
   CHECK(!IsDestroyed());
   StoreRemoteTransportParams(params);
-  return ngtcp2_conn_set_remote_transport_params(connection(), params);
+  return ngtcp2_conn_set_remote_transport_params(Connection(), params);
 }
 
 int QuicSession::ShutdownStream(int64_t stream_id, uint64_t code) {
@@ -1062,7 +1054,7 @@ int QuicSession::ShutdownStream(int64_t stream_id, uint64_t code) {
   // appropriate.
   CHECK_EQ(
       ngtcp2_conn_shutdown_stream(
-          connection(),
+          Connection(),
           stream_id,
           code), 0);
 
@@ -1128,7 +1120,7 @@ void QuicSession::StreamOpen(int64_t stream_id) {
   CHECK(!IsDestroyed());
   if (IsGracefullyClosing()) {
     ngtcp2_conn_shutdown_stream(
-        connection(),
+        Connection(),
         stream_id,
         NGTCP2_ERR_CLOSING);
   }
@@ -1240,7 +1232,7 @@ void QuicSession::WriteHandshake(const uint8_t* data, size_t datalen) {
   memcpy(buffer.data, data, datalen);
   CHECK_EQ(
       ngtcp2_conn_submit_crypto_data(
-          connection(),
+          Connection(),
           tx_crypto_level_,
           buffer.data, datalen), 0);
   handshake_.Push(std::move(buffer));
@@ -1277,7 +1269,7 @@ ssize_t QuicSession::WritePackets() {
     MallocedBuffer<uint8_t> data(max_pktlen_);
     ssize_t nwrite =
         ngtcp2_conn_write_pkt(
-            connection(),
+            Connection(),
             &path.path,
             data.data,
             max_pktlen_,
@@ -1362,7 +1354,7 @@ bool QuicSession::UpdateKey() {
 
   RETURN_IF_FAIL(
       ngtcp2_conn_update_tx_key(
-          connection(),
+          Connection(),
           params.key.data(),
           params.keylen,
           params.iv.data(),
@@ -1404,7 +1396,7 @@ bool QuicSession::UpdateKey() {
 
   RETURN_IF_FAIL(
       ngtcp2_conn_update_rx_key(
-          connection(),
+          Connection(),
           params.key.data(),
           params.keylen,
           params.iv.data(),
@@ -1561,18 +1553,18 @@ void QuicServerSession::MaybeTimeout() {
   CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
   uint64_t now = uv_hrtime();
   uint64_t loss_detection =
-      ngtcp2_conn_loss_detection_expiry(connection());
+      ngtcp2_conn_loss_detection_expiry(Connection());
   Debug(this, "Checking loss detection. loss <= now? %s",
         loss_detection <= now ? "Yes" : "No");
   if (loss_detection <= now) {
     Debug(this, "Updating the loss detection timer. Retransmitting.");
     CHECK_EQ(
         ngtcp2_conn_on_loss_detection_timer(
-            connection(), uv_hrtime()), 0);
+            Connection(), uv_hrtime()), 0);
     SendPendingData();
-  } else if (ngtcp2_conn_ack_delay_expiry(connection()) <= now) {
+  } else if (ngtcp2_conn_ack_delay_expiry(Connection()) <= now) {
     Debug(this, "Ack delay expired. Retransmitting.");
-    ngtcp2_conn_cancel_expired_ack_delay_timer(connection(), now);
+    ngtcp2_conn_cancel_expired_ack_delay_timer(Connection(), now);
     SendPendingData();
   }
 }
@@ -1812,35 +1804,35 @@ int QuicServerSession::OnKey(
   RETURN_IF_FAIL(SetupKeys(secret, secretlen, &params, &crypto_ctx_), 0, -1);
 
   ngtcp2_conn_set_aead_overhead(
-      connection(),
+      Connection(),
       aead_tag_length(&crypto_ctx_));
 
   switch (name) {
     case SSL_KEY_CLIENT_EARLY_TRAFFIC:
       InstallKeys<ngtcp2_conn_install_early_keys>(
-          connection(),
+          Connection(),
           params);
       break;
     case SSL_KEY_CLIENT_HANDSHAKE_TRAFFIC:
       InstallKeys<ngtcp2_conn_install_handshake_rx_keys>(
-          connection(),
+          Connection(),
           params);
       SetClientCryptoLevel(NGTCP2_CRYPTO_LEVEL_HANDSHAKE);
       break;
     case SSL_KEY_CLIENT_APPLICATION_TRAFFIC:
       InstallKeys<ngtcp2_conn_install_rx_keys>(
-          connection(),
+          Connection(),
           params);
       break;
     case SSL_KEY_SERVER_HANDSHAKE_TRAFFIC:
       InstallKeys<ngtcp2_conn_install_handshake_tx_keys>(
-          connection(),
+          Connection(),
           params);
       SetServerCryptoLevel(NGTCP2_CRYPTO_LEVEL_HANDSHAKE);
       break;
     case SSL_KEY_SERVER_APPLICATION_TRAFFIC:
       InstallKeys<ngtcp2_conn_install_tx_keys>(
-          connection(),
+          Connection(),
           params);
       SetServerCryptoLevel(NGTCP2_CRYPTO_LEVEL_APP);
     break;
@@ -1882,7 +1874,7 @@ int QuicServerSession::OnTLSStatus() {
 
 void QuicSession::UpdateRecoveryStats() {
   ngtcp2_rcvry_stat stat;
-  ngtcp2_conn_get_rcvry_stat(connection(), &stat);
+  ngtcp2_conn_get_rcvry_stat(Connection(), &stat);
   recovery_stats_.min_rtt = static_cast<double>(stat.min_rtt);
   recovery_stats_.latest_rtt = static_cast<double>(stat.latest_rtt);
   recovery_stats_.smoothed_rtt = static_cast<double>(stat.smoothed_rtt);
@@ -2008,7 +2000,7 @@ int QuicServerSession::StartClosingPeriod() {
   conn_closebuf_ = MallocedBuffer<uint8_t>(max_pktlen_);
   ssize_t nwrite =
       SelectCloseFn(error.family)(
-          connection(),
+          Connection(),
           nullptr,
           conn_closebuf_.data,
           max_pktlen_,
@@ -2067,9 +2059,9 @@ QuicClientSession::QuicClientSession(
         alpn,
         options),
     version_(version),
-    resumption_(false),
-    hostname_(hostname),
-    select_preferred_address_policy_(select_preferred_address_policy) {
+    port_(port),
+    select_preferred_address_policy_(select_preferred_address_policy),
+    hostname_(hostname) {
   CHECK_EQ(
     Init(addr, version, early_transport_params, session_ticket, dcid), 0);
 }
@@ -2120,8 +2112,8 @@ void QuicClientSession::AddToSocket(QuicSocket* socket) {
   QuicCID scid(scid_);
   socket->AddSession(&scid, shared_from_this());
 
-  std::vector<ngtcp2_cid> cids(ngtcp2_conn_get_num_scid(connection()));
-  ngtcp2_conn_get_scid(connection(), cids.data());
+  std::vector<ngtcp2_cid> cids(ngtcp2_conn_get_num_scid(Connection()));
+  ngtcp2_conn_get_scid(Connection(), cids.data());
   for (const ngtcp2_cid& cid : cids) {
     QuicCID id(&cid);
     socket->AssociateCID(&id, &scid);
@@ -2239,13 +2231,16 @@ int QuicClientSession::Init(
     err = SetEarlyTransportParams(early_transport_params);
     if (err < 0)
       return err;
+    SetOption(QUICCLIENTSESSION_OPTION_RESUME);
   }
 
   // Session Ticket
-  if (session_ticket->IsArrayBufferView())
+  if (session_ticket->IsArrayBufferView()) {
     err = SetSession(session_ticket);
     if (err < 0)
       return err;
+    SetOption(QUICCLIENTSESSION_OPTION_RESUME);
+  }
 
   UpdateIdleTimer(settings.idle_timeout);
   return 0;
@@ -2345,11 +2340,11 @@ ssize_t QuicClientSession::SetSocket(
   SocketAddress* local_address = socket->GetLocalAddress();
   if (nat_rebinding) {
     ngtcp2_addr addr = local_address->ToAddr();
-    ngtcp2_conn_set_local_addr(connection(), &addr);
+    ngtcp2_conn_set_local_addr(Connection(), &addr);
   } else {
     QuicPath path(local_address, &remote_address_);
     RETURN_IF_FAIL(
-       ngtcp2_conn_initiate_migration(connection(), *path, uv_hrtime()),
+       ngtcp2_conn_initiate_migration(Connection(), *path, uv_hrtime()),
        0, -1);
   }
 
@@ -2394,15 +2389,15 @@ void QuicClientSession::MaybeTimeout() {
   CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
   ssize_t err;
   uint64_t now = uv_hrtime();
-  if (ngtcp2_conn_loss_detection_expiry(connection()) <= now) {
-    CHECK_EQ(ngtcp2_conn_on_loss_detection_timer(connection(), now), 0);
+  if (ngtcp2_conn_loss_detection_expiry(Connection()) <= now) {
+    CHECK_EQ(ngtcp2_conn_on_loss_detection_timer(Connection(), now), 0);
     Debug(this, "Retransmitting due to loss detection");
     err = SendPendingData();
     if (err != 0) {
       SetLastError(QUIC_ERROR_SESSION, static_cast<uint64_t>(err));
       HandleError();
     }
-  } else if (ngtcp2_conn_ack_delay_expiry(connection()) <= now) {
+  } else if (ngtcp2_conn_ack_delay_expiry(Connection()) <= now) {
     Debug(this, "Transmitting due to ack delay");
     err = SendPendingData();
     if (err != 0) {
@@ -2442,35 +2437,35 @@ int QuicClientSession::OnKey(
   RETURN_IF_FAIL(SetupKeys(secret, secretlen, &params, &crypto_ctx_), 0, -1);
 
   ngtcp2_conn_set_aead_overhead(
-      connection(),
+      Connection(),
       aead_tag_length(&crypto_ctx_));
 
   switch (name) {
     case SSL_KEY_CLIENT_EARLY_TRAFFIC:
       InstallKeys<ngtcp2_conn_install_early_keys>(
-          connection(),
+          Connection(),
           params);
       break;
     case SSL_KEY_CLIENT_HANDSHAKE_TRAFFIC:
       InstallKeys<ngtcp2_conn_install_handshake_tx_keys>(
-          connection(),
+          Connection(),
           params);
       SetClientCryptoLevel(NGTCP2_CRYPTO_LEVEL_HANDSHAKE);
       break;
     case SSL_KEY_CLIENT_APPLICATION_TRAFFIC:
       InstallKeys<ngtcp2_conn_install_tx_keys>(
-          connection(),
+          Connection(),
           params);
       break;
     case SSL_KEY_SERVER_HANDSHAKE_TRAFFIC:
       InstallKeys<ngtcp2_conn_install_handshake_rx_keys>(
-          connection(),
+          Connection(),
           params);
       SetServerCryptoLevel(NGTCP2_CRYPTO_LEVEL_HANDSHAKE);
       break;
     case SSL_KEY_SERVER_APPLICATION_TRAFFIC:
       InstallKeys<ngtcp2_conn_install_rx_keys>(
-          connection(),
+          Connection(),
           params);
       SetServerCryptoLevel(NGTCP2_CRYPTO_LEVEL_APP);
     break;
@@ -2569,7 +2564,7 @@ bool QuicClientSession::SendConnectionClose() {
 
   ssize_t nwrite =
       SelectCloseFn(error.family)(
-        connection(),
+        Connection(),
         nullptr,
         data.data,
         max_pktlen_,
@@ -2593,7 +2588,7 @@ int QuicClientSession::SetEarlyTransportParams(Local<Value> buffer) {
   if (sbuf.length() != sizeof(ngtcp2_transport_params))
     return ERR_INVALID_REMOTE_TRANSPORT_PARAMS;
   memcpy(&params, sbuf.data(), sizeof(ngtcp2_transport_params));
-  ngtcp2_conn_set_early_remote_transport_params(connection(), &params);
+  ngtcp2_conn_set_early_remote_transport_params(Connection(), &params);
   return 0;
 }
 
@@ -2617,7 +2612,7 @@ int QuicClientSession::SetupInitialCryptoContext() {
   Debug(this, "Setting up initial crypto context");
 
   CryptoInitialParams params;
-  const ngtcp2_cid* dcid = ngtcp2_conn_get_dcid(connection());
+  const ngtcp2_cid* dcid = ngtcp2_conn_get_dcid(Connection());
 
   SetupTokenContext(&hs_crypto_ctx_);
 
@@ -2630,22 +2625,22 @@ int QuicClientSession::SetupInitialCryptoContext() {
 
   RETURN_IF_FAIL(SetupClientSecret(&params, &hs_crypto_ctx_), 0, -1);
   InstallKeys<ngtcp2_conn_install_initial_tx_keys>(
-      connection(),
+      Connection(),
       params);
 
   RETURN_IF_FAIL(SetupServerSecret(&params, &hs_crypto_ctx_), 0, -1);
   InstallKeys<ngtcp2_conn_install_initial_rx_keys>(
-      connection(),
+      Connection(),
       params);
 
   return 0;
 }
 
 int QuicClientSession::TLSHandshake_Complete() {
-  if (resumption_ &&
+  if (IsOptionSet(QUICCLIENTSESSION_OPTION_RESUME) &&
       SSL_get_early_data_status(ssl()) != SSL_EARLY_DATA_ACCEPTED) {
     Debug(this, "Early data was rejected.");
-    int err = ngtcp2_conn_early_data_rejected(connection());
+    int err = ngtcp2_conn_early_data_rejected(Connection());
     if (err != 0) {
       Debug(this,
             "Failure notifying ngtcp2 about early data rejection. Error %d",
@@ -2657,7 +2652,8 @@ int QuicClientSession::TLSHandshake_Complete() {
 }
 
 int QuicClientSession::TLSHandshake_Initial() {
-  if (resumption_ && SSL_SESSION_get_max_early_data(SSL_get_session(ssl()))) {
+  if (IsOptionSet(QUICCLIENTSESSION_OPTION_RESUME) &&
+      SSL_SESSION_get_max_early_data(SSL_get_session(ssl()))) {
     size_t nwrite;
     int err = SSL_write_early_data(ssl(), "", 0, &nwrite);
     if (err == 0) {

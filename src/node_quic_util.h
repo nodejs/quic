@@ -277,7 +277,7 @@ class SocketAddress {
       memcpy(&address_, addr->addr, addr->addrlen);
   }
 
-  const sockaddr* operator*() {
+  const sockaddr* operator*() const {
     return reinterpret_cast<const sockaddr*>(&address_);
   }
 

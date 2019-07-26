@@ -182,7 +182,7 @@ class QuicStream : public AsyncWrap,
   // stream frame has been transmitted to the peer. Once sent, no
   // additional data may be transmitted to the peer. If HasSentFin
   // is set, IsWritable() can be assumed to be false.
-  inline bool HasSentFin() {
+  inline bool HasSentFin() const {
     return flags_ & QUICSTREAM_FLAG_FIN_SENT;
   }
 

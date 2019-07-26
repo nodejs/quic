@@ -87,14 +87,37 @@ class QuicSessionConfig {
   SocketAddress preferred_address_;
 };
 
+// Options to alter the behavior of various functions on the
+// QuicServerSession. These are set on the QuicSocket when
+// the listen() function is called and are passed to the
+// constructor of the QuicServerSession.
 typedef enum QuicServerSessionOptions : uint32_t {
+  // When set, instructs the QuicServerSession to reject
+  // client authentication certs that cannot be verified.
   QUICSERVERSESSION_OPTION_REJECT_UNAUTHORIZED = 0x1,
+
+  // When set, instructs the QuicServerSession to request
+  // a client authentication cert
   QUICSERVERSESSION_OPTION_REQUEST_CERT = 0x2
 } QuicServerSessionOptions;
 
+// Options to alter the behavior of various functions on the
+// QuicClientSession. These are set on the QuicClientSession
+// constructor.
 typedef enum QuicClientSessionOptions : uint32_t {
+  // When set, instructs the QuicClientSession to include an
+  // OCSP request in the initial TLS handshake
   QUICCLIENTSESSION_OPTION_REQUEST_OCSP = 0x1,
-  QUICCLIENTSESSION_OPTION_VERIFY_HOSTNAME_IDENTITY = 0x2
+
+  // When set, instructs the QuicClientSession to verify the
+  // hostname identity. This is required by QUIC and enabled
+  // by default. We allow disabling it only for debugging
+  // purposes.
+  QUICCLIENTSESSION_OPTION_VERIFY_HOSTNAME_IDENTITY = 0x2,
+
+  // When set, instructs the QuicClientSession to perform
+  // additional checks on TLS session resumption.
+  QUICCLIENTSESSION_OPTION_RESUME = 0x4
 } QuicClientSessionOptions;
 
 
@@ -171,7 +194,8 @@ class QuicSession : public AsyncWrap,
       // QUIC is generally just a transport. The ALPN identifier
       // is used to specify the application protocol that is
       // layered on top. If not specified, this will default
-      // to the HTTP/3 identifier.
+      // to the HTTP/3 identifier. For QUIC, the alpn identifier
+      // is always required.
       const std::string& alpn,
       uint32_t options = 0);
   ~QuicSession() override;
@@ -179,6 +203,7 @@ class QuicSession : public AsyncWrap,
   std::string diagnostic_name() const override;
 
   inline QuicError GetLastError();
+  inline void SetTLSAlert(int err);
 
   // Returns true if StartGracefulClose() has been called and the
   // QuicSession is currently in the process of a graceful close.
@@ -196,19 +221,22 @@ class QuicSession : public AsyncWrap,
   // in a graceful closing state. A CONNECTION_CLOSE will be sent only
   // once ImmediateClose() is called.
   inline void StartGracefulClose();
-  inline void SetTLSAlert(int err);
 
-  const std::string& GetALPN() { return alpn_; }
+  const std::string& GetALPN() const { return alpn_; }
 
   // Returns the associated peer's address. Note that this
   // value can change over the lifetime of the QuicSession.
   // The fact that the session is not tied intrinsically to
   // a single address is one of the benefits of QUIC.
-  SocketAddress* GetRemoteAddress() { return &remote_address_; }
+  const SocketAddress* GetRemoteAddress() const { return &remote_address_; }
+
   const ngtcp2_cid* scid() const { return &scid_; }
+
   QuicSocket* Socket() { return socket_; }
+
   SSL* ssl() { return ssl_.get(); }
-  ngtcp2_conn* connection() { return connection_.get(); }
+
+  ngtcp2_conn* Connection() { return connection_.get(); }
 
   void AddStream(QuicStream* stream);
 
@@ -702,6 +730,9 @@ class QuicSession : public AsyncWrap,
       const ngtcp2_pkt_stateless_reset* sr,
       void* user_data);
 
+  static inline void OnIdleTimeoutCB(void* data);
+  static inline void OnRetransmitTimeoutCB(void* data);
+
   void UpdateIdleTimer(uint64_t timeout);
   void UpdateRetransmitTimer(uint64_t timeout);
   void StopRetransmitTimer();
@@ -774,13 +805,16 @@ class QuicSession : public AsyncWrap,
   ngtcp2_crypto_level tx_crypto_level_;
   QuicError last_error_;
 
-  uint32_t flags_;
-  uint32_t options_;
-
   crypto::SSLPointer ssl_;
   ConnectionPointer connection_;
   SocketAddress remote_address_;
+
+  uint32_t flags_;
+  uint32_t options_;
   size_t max_pktlen_;
+  size_t ncread_;
+  size_t max_crypto_buffer_;
+  size_t current_ngtcp2_memory_;
   uint64_t idle_timeout_;
 
   Timer* idle_;
@@ -810,15 +844,10 @@ class QuicSession : public AsyncWrap,
 
   // Temporary holding for inbound TLS handshake data.
   std::vector<uint8_t> peer_handshake_;
-  size_t ncread_;
 
   std::map<int64_t, std::shared_ptr<QuicStream>> streams_;
 
   AliasedFloat64Array state_;
-
-  // The amount of memory allocated by ngtcp2 internals
-  uint64_t current_ngtcp2_memory_;
-  uint64_t max_crypto_buffer_;
 
   std::string alpn_;
 
@@ -1193,12 +1222,12 @@ class QuicClientSession : public QuicSession {
   }
 
   uint32_t version_;
-  bool resumption_;
-  std::string hostname_;
   uint32_t port_;
+  SelectPreferredAddressPolicy select_preferred_address_policy_;
+  std::string hostname_;
 
   MaybeStackBuffer<char> transportParams_;
-  SelectPreferredAddressPolicy select_preferred_address_policy_;
+
 
   const ngtcp2_conn_callbacks callbacks_ = {
     OnClientInitial,

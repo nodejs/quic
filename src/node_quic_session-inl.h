@@ -647,12 +647,12 @@ inline void QuicSession::SetLastError(QuicErrorFamily family, uint64_t code) {
 
 inline bool QuicSession::IsInClosingPeriod() {
   CHECK(!IsDestroyed());
-  return ngtcp2_conn_is_in_closing_period(connection());
+  return ngtcp2_conn_is_in_closing_period(Connection());
 }
 
 inline bool QuicSession::IsInDrainingPeriod() {
   CHECK(!IsDestroyed());
-  return ngtcp2_conn_is_in_draining_period(connection());
+  return ngtcp2_conn_is_in_draining_period(Connection());
 }
 
 // Locate the QuicStream with the given id or return nullptr
@@ -699,6 +699,16 @@ inline int Empty(const ngtcp2_vec* vec, size_t cnt) {
   size_t i;
   for (i = 0; i < cnt && vec[i].len == 0; ++i) {}
   return i == cnt;
+}
+
+inline void QuicSession::OnIdleTimeoutCB(void* data) {
+  QuicSession* session = static_cast<QuicSession*>(data);
+  session->OnIdleTimeout();
+}
+
+inline void QuicSession::OnRetransmitTimeoutCB(void* data) {
+  QuicSession* session = static_cast<QuicSession*>(data);
+  session->MaybeTimeout();
 }
 
 }  // namespace quic

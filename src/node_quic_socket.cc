@@ -74,13 +74,13 @@ QuicSocket::QuicSocket(
     options_(options),
     pending_callbacks_(0),
     max_connections_per_host_(max_connections_per_host),
-    server_secure_context_(nullptr),
-    server_alpn_(NGTCP2_ALPN_H3),
-    token_crypto_ctx_{},
+    current_ngtcp2_memory_(0),
     retry_token_expiration_(retry_token_expiration),
     rx_loss_(0.0),
     tx_loss_(0.0),
-    current_ngtcp2_memory_(0),
+    server_secure_context_(nullptr),
+    server_alpn_(NGTCP2_ALPN_H3),
+    token_crypto_ctx_{},
     stats_buffer_(
       env->isolate(),
       sizeof(socket_stats_) / sizeof(uint64_t),
@@ -211,7 +211,7 @@ void QuicSocket::Close(Local<Value> close_callback) {
 void QuicSocket::MaybeClose() {
   if (!IsInitialized() ||
       !IsFlagSet(QUICSOCKET_FLAGS_PENDING_CLOSE) ||
-      pending_callbacks_ > 0)
+      HasPendingCallbacks())
     return;
 
   CHECK_EQ(false, persistent().IsEmpty());

@@ -173,6 +173,7 @@ class QuicSocket : public HandleWrap,
 
   void IncrementPendingCallbacks() { pending_callbacks_++; }
   void DecrementPendingCallbacks() { pending_callbacks_--; }
+  bool HasPendingCallbacks() { return pending_callbacks_ > 0; }
 
   template <typename T,
             int (*F)(const typename T::HandleType*, sockaddr*, int*)>
@@ -218,26 +219,26 @@ class QuicSocket : public HandleWrap,
   uv_udp_t handle_;
   uint32_t flags_;
   uint32_t options_;
+  uint32_t server_options_;
 
   size_t pending_callbacks_;
-  SocketAddress local_address_;
   size_t max_connections_per_host_;
-  QuicSessionConfig server_session_config_;
-  crypto::SecureContext* server_secure_context_;
-  std::string server_alpn_;
-  uint32_t server_options_;
-  std::unordered_map<std::string, std::shared_ptr<QuicSession>> sessions_;
-  std::unordered_map<std::string, std::string> dcid_to_scid_;
-  CryptoContext token_crypto_ctx_;
-  std::array<uint8_t, TOKEN_SECRETLEN> token_secret_;
+  size_t current_ngtcp2_memory_;
+
   uint64_t retry_token_expiration_;
 
   // Used to specify diagnostic packet loss probabilities
   double rx_loss_;
   double tx_loss_;
 
-  // The amount of memory allocated by ngtcp2 internals
-  uint64_t current_ngtcp2_memory_;
+  SocketAddress local_address_;
+  QuicSessionConfig server_session_config_;
+  crypto::SecureContext* server_secure_context_;
+  std::string server_alpn_;
+  std::unordered_map<std::string, std::shared_ptr<QuicSession>> sessions_;
+  std::unordered_map<std::string, std::string> dcid_to_scid_;
+  CryptoContext token_crypto_ctx_;
+  std::array<uint8_t, TOKEN_SECRETLEN> token_secret_;
 
   // Counts the number of active connections per remote
   // address. A custom std::hash specialization for
