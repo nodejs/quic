@@ -463,6 +463,7 @@ class QuicSession : public AsyncWrap,
   int SendPacket();
   void SetHandshakeCompleted();
   void SetLocalAddress(const ngtcp2_addr* addr);
+  void StatelessReset(const ngtcp2_pkt_stateless_reset* sr);
   void StreamClose(int64_t stream_id, uint64_t app_error_code);
   void StreamOpen(int64_t stream_id);
   void StreamReset(
@@ -683,6 +684,10 @@ class QuicSession : public AsyncWrap,
       size_t nsv,
       void* user_data);
   static inline void OnKeylog(const SSL* ssl, const char* line);
+  static inline int OnStatelessReset(
+      ngtcp2_conn* conn,
+      const ngtcp2_pkt_stateless_reset* sr,
+      void* user_data);
 
   void UpdateIdleTimer(uint64_t timeout);
   void UpdateRetransmitTimer(uint64_t timeout);
@@ -1012,7 +1017,7 @@ class QuicServerSession : public QuicSession {
     OnAckedStreamDataOffset,
     OnStreamOpen,
     OnStreamClose,
-    nullptr,  // recv_stateless_reset
+    OnStatelessReset,
     nullptr,  // recv_retry
     nullptr,  // extend_max_streams_bidi
     nullptr,  // extend_max_streams_uni
@@ -1163,7 +1168,7 @@ class QuicClientSession : public QuicSession {
     OnAckedStreamDataOffset,
     OnStreamOpen,
     OnStreamClose,
-    nullptr,
+    OnStatelessReset,
     OnReceiveRetry,
     OnExtendMaxStreamsBidi,
     OnExtendMaxStreamsUni,

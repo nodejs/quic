@@ -834,6 +834,20 @@ void QuicSession::ScheduleRetransmit() {
   UpdateRetransmitTimer(interval);
 }
 
+// When a valid stateless reset is received, the connection is
+// immediately and unrecoverably closed at the ngtcp2 level.
+// Specifically, it will be put into the draining_period so
+// absolutely no frames can be sent. What we need to do is
+// notify the JavaScript side and destroy the connection with
+// a flag set that indicates stateless reset.
+void QuicSession::StatelessReset(const ngtcp2_pkt_stateless_reset* sr) {
+  // Grab a pointer to the QuicSession so that it's not actually
+  // destroyed until after the MakeCallback returns.
+  std::shared_ptr<QuicSession> this_(shared_from_this());
+  Context::Scope context_scope(env()->context());
+  MakeCallback(env()->quic_on_session_stateless_reset_function(), 0, nullptr);
+}
+
 void QuicSession::UpdateRetransmitTimer(uint64_t timeout) {
   CHECK_NOT_NULL(retransmit_);
   retransmit_->Update(timeout);

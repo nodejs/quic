@@ -355,6 +355,19 @@ void QuicSocket::Receive(
     auto scid_it = dcid_to_scid_.find(dcid_str);
     if (scid_it == std::end(dcid_to_scid_)) {
       Debug(this, "There is no existing session for dcid %s", dcid_hex.c_str());
+
+      // TODO(@jasnell): If the DCID was previously known, and there is a
+      // known stateless reset token, then we should we ought to be able
+      // to send a stateless reset at this point. It's likely that the
+      // endpoint crashed and the peer is still trying to send data.
+      // Currently, however, we don't keep track of previously used CID's
+      // and their reset tokens so we can't implement this yet. A proper
+      // implementation will track CIDs and reset tokens but only across
+      // a single restart. These will be associated with the local address
+      // (that is, a QuicSocket bound to one local port should never use
+      // the CIDs and reset tokens from a QuicSocket bound to another).
+      // It's not entirely clear how this should be implemented.
+
       if (!server_listening_) {
         Debug(this, "Ignoring packet because socket is not listening.");
         IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);

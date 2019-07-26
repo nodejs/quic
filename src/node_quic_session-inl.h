@@ -623,6 +623,15 @@ inline void QuicSession::OnKeylog(const SSL* ssl, const char* line) {
   session->Keylog(line);
 }
 
+inline int QuicSession::OnStatelessReset(
+    ngtcp2_conn* conn,
+    const ngtcp2_pkt_stateless_reset* sr,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  session->StatelessReset(sr);
+  return 0;
+}
+
 inline void QuicSession::SetTLSAlert(int err) {
   SetLastError(InitQuicError(QUIC_ERROR_CRYPTO, err));
 }
