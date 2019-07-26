@@ -7,7 +7,7 @@
 
 namespace node {
 
-enum QuicSessionConfigIndex {
+typedef enum QuicSessionConfigIndex : int {
   IDX_QUIC_SESSION_ACTIVE_CONNECTION_ID_LIMIT,
   IDX_QUIC_SESSION_MAX_STREAM_DATA_BIDI_LOCAL,
   IDX_QUIC_SESSION_MAX_STREAM_DATA_BIDI_REMOTE,
@@ -22,7 +22,7 @@ enum QuicSessionConfigIndex {
   IDX_QUIC_SESSION_MAX_ACK_DELAY,
   IDX_QUIC_SESSION_MAX_CRYPTO_BUFFER,
   IDX_QUIC_SESSION_CONFIG_COUNT
-};
+} QuicSessionConfigIndex;
 
 class QuicState {
  public:

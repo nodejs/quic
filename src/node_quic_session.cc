@@ -54,15 +54,14 @@ QuicSession::QuicSession(
     Local<Object> wrap,
     SecureContext* ctx,
     AsyncWrap::ProviderType type,
-    const std::string& alpn) :
+    const std::string& alpn,
+    uint32_t options) :
     AsyncWrap(socket->env(), wrap, type),
     rx_crypto_level_(NGTCP2_CRYPTO_LEVEL_INITIAL),
     tx_crypto_level_(NGTCP2_CRYPTO_LEVEL_INITIAL),
     last_error_(QUIC_ERROR_SESSION, NGTCP2_NO_ERROR),
-    closing_(false),
-    destroyed_(false),
-    initial_(true),
-    updating_key_(false),
+    flags_(0),
+    options_(options),
     max_pktlen_(0),
     idle_timeout_(10 * 1000),
     socket_(socket),
@@ -74,10 +73,6 @@ QuicSession::QuicSession(
     max_crypto_buffer_(DEFAULT_MAX_CRYPTO_BUFFER),
     alpn_(alpn),
     allocator_(this),
-    cert_cb_running_(false),
-    client_hello_cb_running_(false),
-    is_tls_callback_(false),
-    is_ngtcp2_callback_(false),
     crypto_rx_ack_(1, std::numeric_limits<int64_t>::max()),
     crypto_handshake_rate_(1, std::numeric_limits<int64_t>::max()),
     stats_buffer_(
@@ -127,7 +122,7 @@ QuicSession::QuicSession(
 }
 
 QuicSession::~QuicSession() {
-  CHECK(destroyed_);
+  CHECK(IsFlagSet(QUICSESSION_FLAG_DESTROYED));
 
   uint64_t sendbuf_length = sendbuf_.Cancel();
   uint64_t handshake_length = handshake_.Cancel();
@@ -293,8 +288,8 @@ void QuicSession::Destroy() {
   CHECK(streams_.empty());
 
   // Mark the session destroyed.
-  destroyed_ = true;
-  closing_ = false;
+  SetFlag(QUICSESSION_FLAG_DESTROYED, true);
+  SetFlag(QUICSESSION_FLAG_CLOSING, false);
 
   // Stop the idle and retransmission timers if they are active.
   StopIdleTimer();
@@ -549,7 +544,7 @@ void QuicSession::HandshakeCompleted() {
 }
 
 bool QuicSession::InitiateUpdateKey() {
-  CHECK(!updating_key_);
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_KEYUPDATE));
   if (!UpdateKey())
     return false;
   return ngtcp2_conn_initiate_key_update(connection()) == 0;
@@ -1176,12 +1171,19 @@ void QuicSession::StreamReset(
 // between the peers.
 int QuicSession::TLSHandshake() {
   CHECK(!IsDestroyed());
-  Debug(this, "TLS handshake %s", initial_ ? "starting" : "continuing");
 
+  ClearTLSError();
+
+  int err;
   uint64_t now = uv_hrtime();
-  if (initial_) {
+  if (!IsFlagSet(QUICSESSION_FLAG_INITIAL)) {
+    Debug(this, "TLS handshake starting");
     session_stats_.handshake_start_at = now;
+    err = TLSHandshake_Initial();
+    if (err != 0)
+      return err;
   } else {
+    Debug(this, "TLS handshake continuing");
     uint64_t ts =
         session_stats_.handshake_continue_at > 0 ?
             session_stats_.handshake_continue_at :
@@ -1190,14 +1192,6 @@ int QuicSession::TLSHandshake() {
     // TODO(@jasnell): Monitor the rate to detect slow handshake
   }
   session_stats_.handshake_continue_at = now;
-  ClearTLSError();
-
-  int err;
-  if (initial_) {
-    err = TLSHandshake_Initial();
-    if (err != 0)
-      return err;
-  }
 
   // If DoTLSHandshake returns 0 or negative, the handshake
   // is not yet complete.
@@ -1311,8 +1305,8 @@ bool QuicSession::UpdateKey() {
   // There's generally no user code that should be able to
   // run while UpdateKey is running, but we need to gate on
   // it just to be safe.
-  OnScopeLeave leave([&]() { updating_key_ = false; });
-  updating_key_ = true;
+  OnScopeLeave leave([&]() { SetFlag(QUICSESSION_FLAG_KEYUPDATE, false); });
+  SetFlag(QUICSESSION_FLAG_KEYUPDATE);
   Debug(this, "Updating keys.");
 
   std::array<uint8_t, 64> secret;
@@ -1425,18 +1419,16 @@ QuicServerSession::QuicServerSession(
     const ngtcp2_cid* ocid,
     uint32_t version,
     const std::string& alpn,
-    bool reject_unauthorized,
-    bool request_cert) :
+    uint32_t options) :
     QuicSession(
         socket,
         wrap,
         socket->GetServerSecureContext(),
         AsyncWrap::PROVIDER_QUICSERVERSESSION,
-        alpn),
+        alpn,
+        options),
     pscid_{},
-    rcid_(*rcid),
-    reject_unauthorized_(reject_unauthorized),
-    request_cert_(request_cert) {
+    rcid_(*rcid) {
   Init(addr, dcid, ocid, version);
 }
 
@@ -1448,8 +1440,7 @@ std::shared_ptr<QuicSession> QuicServerSession::New(
     const ngtcp2_cid* ocid,
     uint32_t version,
     const std::string& alpn,
-    bool reject_unauthorized,
-    bool request_cert) {
+    uint32_t options) {
   std::shared_ptr<QuicSession> session;
   Local<Object> obj;
   if (!socket->env()
@@ -1467,8 +1458,7 @@ std::shared_ptr<QuicSession> QuicServerSession::New(
           ocid,
           version,
           alpn,
-          reject_unauthorized,
-          request_cert));
+          options));
 
   session->AddToSocket(socket);
   return session;
@@ -1548,9 +1538,9 @@ void QuicServerSession::Init(
 void QuicServerSession::InitTLS_Post() {
   SSL_set_accept_state(ssl());
 
-  if (request_cert_) {
+  if (IsOptionSet(QUICSERVERSESSION_OPTION_REQUEST_CERT)) {
     int verify_mode = SSL_VERIFY_PEER;
-    if (reject_unauthorized_)
+    if (IsOptionSet(QUICSERVERSESSION_OPTION_REJECT_UNAUTHORIZED))
       verify_mode |= SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
     SSL_set_verify(ssl(), verify_mode, crypto::VerifyCallback);
   }
@@ -1587,7 +1577,7 @@ void OnServerClientHelloCB(const FunctionCallbackInfo<Value>& args) {
 void QuicServerSession::OnClientHelloDone() {
   // Continue the TLS handshake when this function exits
   // otherwise it will stall and fail.
-  TLSHandshakeScope handshake_scope(this, &client_hello_cb_running_);
+  TLSHandshakeScope handshake(this, QUICSESSION_FLAG_CLIENT_HELLO_CB_RUNNING);
   // Disable the callback at this point so we don't loop continuously
   state_[IDX_QUIC_SESSION_STATE_CLIENT_HELLO_ENABLED] = 0;
 }
@@ -1616,16 +1606,16 @@ int QuicServerSession::OnClientHello() {
 
   // Not an error but does suspend the handshake until we're ready to go.
   // A callback function is passed to the JavaScript function below that
-  // must be called in order to set client_hello_cb_running_ to false.
-  // Once that callback is invoked, the TLS Handshake will resume.
+  // must be called in order to turn QUICSESSION_FLAG_CLIENT_HELLO_CB_RUNNING
+  // off. Once that callback is invoked, the TLS Handshake will resume.
   // It is recommended that the user not take a long time to invoke the
   // callback in order to avoid stalling out the QUIC connection.
-  if (client_hello_cb_running_)
+  if (IsFlagSet(QUICSESSION_FLAG_CLIENT_HELLO_CB_RUNNING))
     return -1;
 
   HandleScope scope(env()->isolate());
   Context::Scope context_scope(env()->context());
-  client_hello_cb_running_ = true;
+  SetFlag(QUICSESSION_FLAG_CLIENT_HELLO_CB_RUNNING);
 
   const char* server_name = nullptr;
   const char* alpn = nullptr;
@@ -1673,7 +1663,7 @@ int QuicServerSession::OnClientHello() {
       arraysize(argv), argv);
 
   OPENSSL_free(exts);
-  return client_hello_cb_running_ ? -1 : 0;
+  return IsFlagSet(QUICSESSION_FLAG_CLIENT_HELLO_CB_RUNNING) ? -1 : 0;
 }
 
 namespace {
@@ -1705,7 +1695,7 @@ void QuicServerSession::OnCertDone(
         ocsp_response->IsArrayBufferView() ? "Yes" : "No");
   // Continue the TLS handshake when this function exits
   // otherwise it will stall and fail.
-  TLSHandshakeScope handshake_scope(this, &cert_cb_running_);
+  TLSHandshakeScope handshake_scope(this, QUICSESSION_FLAG_CERT_CB_RUNNING);
   // Disable the callback at this point so we don't loop continuously
   state_[IDX_QUIC_SESSION_STATE_CERT_ENABLED] = 0;
 
@@ -1741,7 +1731,7 @@ int QuicServerSession::OnCert() {
 
   // As in node_crypto.cc, this is not an error, but does suspend the
   // handshake to continue when OnCerb is complete.
-  if (cert_cb_running_)
+  if (IsFlagSet(QUICSESSION_FLAG_CERT_CB_RUNNING))
     return -1;
 
   HandleScope handle_scope(env()->isolate());
@@ -1760,7 +1750,7 @@ int QuicServerSession::OnCert() {
 
   const char* servername = SSL_get_servername(ssl(), TLSEXT_NAMETYPE_host_name);
 
-  cert_cb_running_ = true;
+  SetFlag(QUICSESSION_FLAG_CERT_CB_RUNNING);
   Local<Value> argv[] = {
     servername == nullptr ?
         String::Empty(env()->isolate()) :
@@ -1778,7 +1768,7 @@ int QuicServerSession::OnCert() {
 
   MakeCallback(env()->quic_on_session_cert_function(), arraysize(argv), argv);
 
-  return cert_cb_running_ ? -1 : 1;
+  return IsFlagSet(QUICSESSION_FLAG_CERT_CB_RUNNING) ? -1 : 1;
 }
 
 int QuicServerSession::OnKey(
@@ -2021,7 +2011,7 @@ void QuicServerSession::StartDrainingPeriod() {
 }
 
 int QuicServerSession::TLSHandshake_Initial() {
-  initial_ = false;
+  SetFlag(QUICSESSION_FLAG_INITIAL);
   return DoTLSReadEarlyData(ssl());
 }
 
@@ -2050,22 +2040,20 @@ QuicClientSession::QuicClientSession(
     Local<Value> early_transport_params,
     Local<Value> session_ticket,
     Local<Value> dcid,
-    int select_preferred_address_policy,
+    SelectPreferredAddressPolicy select_preferred_address_policy,
     const std::string& alpn,
-    bool request_ocsp,
-    bool verify_hostname_identity) :
+    uint32_t options) :
     QuicSession(
         socket,
         wrap,
         context,
         AsyncWrap::PROVIDER_QUICCLIENTSESSION,
-        alpn),
+        alpn,
+        options),
     version_(version),
     resumption_(false),
     hostname_(hostname),
-    select_preferred_address_policy_(select_preferred_address_policy),
-    request_ocsp_(request_ocsp),
-    verify_hostname_identity_(verify_hostname_identity) {
+    select_preferred_address_policy_(select_preferred_address_policy) {
   CHECK_EQ(
     Init(addr, version, early_transport_params, session_ticket, dcid), 0);
 }
@@ -2080,10 +2068,9 @@ std::shared_ptr<QuicSession> QuicClientSession::New(
     Local<Value> early_transport_params,
     Local<Value> session_ticket,
     Local<Value> dcid,
-    int select_preferred_address_policy,
+    SelectPreferredAddressPolicy select_preferred_address_policy,
     const std::string& alpn,
-    bool request_ocsp,
-    bool verify_hostname_identity) {
+    uint32_t options) {
   std::shared_ptr<QuicSession> session;
   Local<Object> obj;
   if (!socket->env()
@@ -2106,8 +2093,7 @@ std::shared_ptr<QuicSession> QuicClientSession::New(
           dcid,
           select_preferred_address_policy,
           alpn,
-          request_ocsp,
-          verify_hostname_identity);
+          options);
 
   session->AddToSocket(socket);
   int err = session->TLSHandshake();
@@ -2382,7 +2368,7 @@ void QuicClientSession::InitTLS_Post() {
   }
 
   // Are we going to request OCSP status?
-  if (request_ocsp_) {
+  if (IsOptionSet(QUICCLIENTSESSION_OPTION_REQUEST_OCSP)) {
     Debug(this, "Request OCSP status from the server.");
     SSL_set_tlsext_status_type(ssl(), TLSEXT_STATUSTYPE_ocsp);
   }
@@ -2666,7 +2652,7 @@ int QuicClientSession::TLSHandshake_Initial() {
       return -1;
     }
   }
-  initial_ = false;
+  SetFlag(QUICSESSION_FLAG_INITIAL);
   return 0;
 }
 
@@ -2681,7 +2667,7 @@ int QuicClientSession::VerifyPeerIdentity(const char* hostname) {
   // This check is a QUIC requirement. However, for debugging purposes,
   // we allow it to be turned off via config. When turned off, a process
   // warning should be emitted.
-  if (verify_hostname_identity_) {
+  if (LIKELY(IsOptionSet(QUICCLIENTSESSION_OPTION_VERIFY_HOSTNAME_IDENTITY))) {
     return VerifyHostnameIdentity(
         ssl(),
         hostname != nullptr ? hostname : hostname_.c_str());
@@ -2929,6 +2915,9 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
     alpn += *val;
   }
 
+  uint32_t options = QUICCLIENTSESSION_OPTION_VERIFY_HOSTNAME_IDENTITY;
+  USE(args[12]->Uint32Value(env->context()).To(&options));
+
   socket->ReceiveStart();
 
   std::shared_ptr<QuicSession> session =
@@ -2941,10 +2930,10 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
           args[7],
           args[8],
           args[9],
-          select_preferred_address_policy,
+          static_cast<SelectPreferredAddressPolicy>
+              (select_preferred_address_policy),
           alpn,
-          args[12]->IsTrue(),
-          args[13]->IsTrue());    // request_oscp
+          options);
 
   session->SendPendingData();
 

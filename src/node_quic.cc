@@ -259,6 +259,22 @@ void Initialize(Local<Object> target,
 
   NODE_DEFINE_CONSTANT(constants, MINIMUM_MAX_CRYPTO_BUFFER);
 
+  NODE_DEFINE_CONSTANT(
+      constants,
+      QUICSERVERSESSION_OPTION_REJECT_UNAUTHORIZED);
+  NODE_DEFINE_CONSTANT(
+      constants,
+      QUICSERVERSESSION_OPTION_REQUEST_CERT);
+  NODE_DEFINE_CONSTANT(
+      constants,
+      QUICCLIENTSESSION_OPTION_REQUEST_OCSP);
+  NODE_DEFINE_CONSTANT(
+      constants,
+      QUICCLIENTSESSION_OPTION_VERIFY_HOSTNAME_IDENTITY);
+  NODE_DEFINE_CONSTANT(
+      constants,
+      QUICSOCKET_OPTIONS_VALIDATE_ADDRESS);
+
   target->Set(context,
               env->constants_string(),
               constants).FromJust();

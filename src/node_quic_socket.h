@@ -28,6 +28,11 @@ using v8::Value;
 
 namespace quic {
 
+typedef enum QuicSocketOptions : uint32_t {
+  QUICSOCKET_OPTIONS_VALIDATE_ADDRESS = 0x1
+} QuicSocketOptions;
+
+
 class QuicSocket : public HandleWrap,
                    public mem::Tracker {
  public:
@@ -39,9 +44,9 @@ class QuicSocket : public HandleWrap,
   QuicSocket(
       Environment* env,
       Local<Object> wrap,
-      bool verify_address,
       uint64_t retry_token_expiration,
-      size_t max_connections_per_host);
+      size_t max_connections_per_host,
+      uint32_t options = 0);
   ~QuicSocket() override;
 
   SocketAddress* GetLocalAddress() { return &local_address_; }
@@ -74,8 +79,7 @@ class QuicSocket : public HandleWrap,
       crypto::SecureContext* context,
       const sockaddr* preferred_address = nullptr,
       const std::string& alpn = NGTCP2_ALPN_H3,
-      bool reject_unauthorized = true,
-      bool request_cert = false);
+      uint32_t options = 0);
   int ReceiveStart();
   int ReceiveStop();
   void RemoveSession(
@@ -183,19 +187,46 @@ class QuicSocket : public HandleWrap,
   // Fields and TypeDefs
   typedef uv_udp_t HandleType;
 
+  typedef enum QuicSocketFlags : uint32_t {
+    QUICSOCKET_FLAGS_NONE = 0x0,
+    QUICSOCKET_FLAGS_PENDING_CLOSE = 0x1,
+    QUICSOCKET_FLAGS_SERVER_LISTENING = 0x2,
+    QUICSOCKET_FLAGS_SERVER_BUSY = 0x4
+  } QuicSocketFlags;
+
+  void SetFlag(QuicSocketFlags flag, bool on = true) {
+    if (on)
+      flags_ |= flag;
+    else
+      flags_ &= ~flag;
+  }
+
+  bool IsFlagSet(QuicSocketFlags flag) {
+    return flags_ & flag;
+  }
+
+  void SetOption(QuicSocketOptions option, bool on = true) {
+    if (on)
+      options_ |= option;
+    else
+      options_ &= ~option;
+  }
+
+  bool IsOptionSet(QuicSocketOptions option) {
+    return options_ & option;
+  }
+
   uv_udp_t handle_;
+  uint32_t flags_;
+  uint32_t options_;
+
   size_t pending_callbacks_;
-  bool pending_close_;
   SocketAddress local_address_;
-  bool server_listening_;
-  bool validate_addr_;
-  bool server_busy_;
   size_t max_connections_per_host_;
   QuicSessionConfig server_session_config_;
   crypto::SecureContext* server_secure_context_;
   std::string server_alpn_;
-  bool reject_unauthorized_;
-  bool request_cert_;
+  uint32_t server_options_;
   std::unordered_map<std::string, std::shared_ptr<QuicSession>> sessions_;
   std::unordered_map<std::string, std::string> dcid_to_scid_;
   CryptoContext token_crypto_ctx_;

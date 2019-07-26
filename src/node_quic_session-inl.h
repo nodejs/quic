@@ -665,12 +665,16 @@ inline QuicStream* QuicSession::FindStream(int64_t id) {
 
 inline QuicError QuicSession::GetLastError() { return last_error_; }
 
-inline bool QuicSession::IsGracefullyClosing() { return closing_; }
+inline bool QuicSession::IsGracefullyClosing() {
+  return IsFlagSet(QUICSESSION_FLAG_CLOSING);
+}
 
-inline bool QuicSession::IsDestroyed() { return destroyed_; }
+inline bool QuicSession::IsDestroyed() {
+  return IsFlagSet(QUICSESSION_FLAG_DESTROYED);
+}
 
 inline void QuicSession::StartGracefulClose() {
-  closing_ = true;
+  SetFlag(QUICSESSION_FLAG_CLOSING);
   session_stats_.closing_at = uv_hrtime();
 }
 

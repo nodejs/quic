@@ -37,12 +37,12 @@ constexpr uint64_t DEFAULT_RETRYTOKEN_EXPIRATION = 10ULL;
 
 #define RETURN_IF_FAIL_OPENSSL(test) RETURN_IF_FAIL(test, 1, -1)
 
-enum SelectPreferredAddressPolicy {
+typedef enum SelectPreferredAddressPolicy : int {
   // Ignore the server-provided preferred address
   QUIC_PREFERRED_ADDRESS_IGNORE,
   // Accept the server-provided preferred address
   QUIC_PREFERRED_ADDRESS_ACCEPT
-};
+} SelectPreferredAddressPolicy;
 
 // Fun hash combine trick based on a variadic template that
 // I came across a while back but can't remember where. Will add an attribution

@@ -95,7 +95,7 @@ class QuicStream : public AsyncWrap,
                    public StreamBase,
                    public std::enable_shared_from_this<QuicStream> {
  public:
-  typedef enum QuicStreamStates {
+  typedef enum QuicStreamStates : uint32_t {
     // QuicStream is fully open. Readable and Writable
     QUICSTREAM_FLAG_INITIAL = 0x0,
 

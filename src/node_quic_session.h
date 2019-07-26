@@ -87,11 +87,22 @@ class QuicSessionConfig {
   SocketAddress preferred_address_;
 };
 
+typedef enum QuicServerSessionOptions : uint32_t {
+  QUICSERVERSESSION_OPTION_REJECT_UNAUTHORIZED = 0x1,
+  QUICSERVERSESSION_OPTION_REQUEST_CERT = 0x2
+} QuicServerSessionOptions;
+
+typedef enum QuicClientSessionOptions : uint32_t {
+  QUICCLIENTSESSION_OPTION_REQUEST_OCSP = 0x1,
+  QUICCLIENTSESSION_OPTION_VERIFY_HOSTNAME_IDENTITY = 0x2
+} QuicClientSessionOptions;
+
+
 // The QuicSessionState enums are used with the QuicSession's
 // private state_ array. This is exposed to JavaScript via an
 // aliased buffer and is used to communicate various types of
 // state efficiently across the native/JS boundary.
-enum QuicSessionState {
+typedef enum QuicSessionState : int {
   // Communicates the number of available connection ID's that
   // have been created and associated with the session. This
   // is used, for instance, to enable migration of a QuicSession
@@ -123,7 +134,7 @@ enum QuicSessionState {
   // Just the number of session state enums for use when
   // creating the AliasedBuffer.
   IDX_QUIC_SESSION_STATE_COUNT
-};
+} QuicSessionState;
 
 // The QuicSession class is an virtual class that serves as
 // the basis for both QuicServerSession and QuicClientSession.
@@ -161,7 +172,8 @@ class QuicSession : public AsyncWrap,
       // is used to specify the application protocol that is
       // layered on top. If not specified, this will default
       // to the HTTP/3 identifier.
-      const std::string& alpn);
+      const std::string& alpn,
+      uint32_t options = 0);
   ~QuicSession() override;
 
   std::string diagnostic_name() const override;
@@ -302,16 +314,16 @@ class QuicSession : public AsyncWrap,
   class Ngtcp2CallbackScope {
    public:
     explicit Ngtcp2CallbackScope(QuicSession* session) : session_(session) {
-      CHECK(!session_->is_ngtcp2_callback_);
-      session_->is_ngtcp2_callback_ = true;
+      CHECK(!InNgtcp2CallbackScope(session));
+      session_->SetFlag(QUICSESSION_FLAG_NGTCP2_CALLBACK);
     }
 
     ~Ngtcp2CallbackScope() {
-      session_->is_ngtcp2_callback_ = false;
+      session_->SetFlag(QUICSESSION_FLAG_NGTCP2_CALLBACK, false);
     }
 
     static bool InNgtcp2CallbackScope(QuicSession* session) {
-      return session->is_ngtcp2_callback_;
+      return session->IsFlagSet(QUICSESSION_FLAG_NGTCP2_CALLBACK);
     }
 
    private:
@@ -338,7 +350,8 @@ class QuicSession : public AsyncWrap,
   inline QuicStream* FindStream(int64_t id);
 
   bool IsHandshakeSuspended() {
-    return client_hello_cb_running_ || cert_cb_running_;
+    return IsFlagSet(QUICSESSION_FLAG_CERT_CB_RUNNING) ||
+           IsFlagSet(QUICSESSION_FLAG_CLIENT_HELLO_CB_RUNNING);
   }
 
   void AckedCryptoOffset(
@@ -694,6 +707,55 @@ class QuicSession : public AsyncWrap,
   void StopRetransmitTimer();
   void StopIdleTimer();
 
+  typedef enum QuicSessionFlags : uint32_t {
+    // Initial state when a QuicSession is created but nothing yet done.
+    QUICSESSION_FLAG_INITIAL = 0x1,
+
+    // Set while the QuicSession is in the process of closing.
+    QUICSESSION_FLAG_CLOSING = 0x2,
+
+    // Set when the QuicSession has been destroyed (but not
+    // yet freed)
+    QUICSESSION_FLAG_DESTROYED = 0x4,
+
+    // Set while the QuicSession is in a KeyUpdate (to prevent reentrance)
+    QUICSESSION_FLAG_KEYUPDATE = 0x8,
+
+    // Set while the QuicSession is in the cert callback
+    QUICSESSION_FLAG_CERT_CB_RUNNING = 0x10,
+
+    // Set while the QuicSession is in the client hello callback
+    QUICSESSION_FLAG_CLIENT_HELLO_CB_RUNNING = 0x20,
+
+    // Set while the QuicSession is executing a TLS callback
+    QUICSESSION_FLAG_TLS_CALLBACK = 0x40,
+
+    // Set while the QuicSession is executing an ngtcp2 callback
+    QUICSESSION_FLAG_NGTCP2_CALLBACK = 0x80
+  } QuicSessionFlags;
+
+  void SetFlag(QuicSessionFlags flag, bool on = true) {
+    if (on)
+      flags_ |= flag;
+    else
+      flags_ &= ~flag;
+  }
+
+  bool IsFlagSet(QuicSessionFlags flag) {
+    return flags_ & flag;
+  }
+
+  void SetOption(uint32_t option, bool on = true) {
+    if (on)
+      options_ |= option;
+    else
+      options_ &= ~option;
+  }
+
+  bool IsOptionSet(uint32_t option) {
+    return options_ & option;
+  }
+
   typedef ssize_t(*ngtcp2_close_fn)(
     ngtcp2_conn* conn,
     ngtcp2_path* path,
@@ -711,10 +773,10 @@ class QuicSession : public AsyncWrap,
   ngtcp2_crypto_level rx_crypto_level_;
   ngtcp2_crypto_level tx_crypto_level_;
   QuicError last_error_;
-  bool closing_;
-  bool destroyed_;
-  bool initial_;
-  bool updating_key_;
+
+  uint32_t flags_;
+  uint32_t options_;
+
   crypto::SSLPointer ssl_;
   ConnectionPointer connection_;
   SocketAddress remote_address_;
@@ -761,10 +823,6 @@ class QuicSession : public AsyncWrap,
   std::string alpn_;
 
   mem::Allocator<ngtcp2_mem> allocator_;
-  bool cert_cb_running_;
-  bool client_hello_cb_running_;
-  bool is_tls_callback_;
-  bool is_ngtcp2_callback_;
 
   struct session_stats {
     // The timestamp at which the session was created
@@ -844,15 +902,15 @@ class QuicSession : public AsyncWrap,
    public:
     explicit TLSHandshakeCallbackScope(QuicSession* session) :
         session_(session) {
-      session_->is_tls_callback_ = true;
+      session_->SetFlag(QUICSESSION_FLAG_TLS_CALLBACK);
     }
 
     ~TLSHandshakeCallbackScope() {
-      session_->is_tls_callback_ = false;
+      session_->SetFlag(QUICSESSION_FLAG_TLS_CALLBACK, false);
     }
 
     static bool IsInTLSHandshakeCallback(QuicSession* session) {
-      return session->is_tls_callback_;
+      return session->IsFlagSet(QUICSESSION_FLAG_TLS_CALLBACK);
     }
 
    private:
@@ -861,7 +919,7 @@ class QuicSession : public AsyncWrap,
 
   class TLSHandshakeScope {
    public:
-    TLSHandshakeScope(QuicSession* session, bool* monitor) :
+    TLSHandshakeScope(QuicSession* session, QuicSessionFlags monitor) :
         session_{session},
         monitor_(monitor) {}
 
@@ -873,7 +931,7 @@ class QuicSession : public AsyncWrap,
         // will be true. We set the monitor to false so we
         // can keep the handshake going when the TLS Handshake
         // is continued.
-        *monitor_ = false;
+        session_->SetFlag(monitor_, false);
         // Only continue the TLS handshake if we are not currently running
         // synchronously within the TLS handshake function. This can happen
         // when the callback function passed to the clientHello and cert
@@ -888,7 +946,7 @@ class QuicSession : public AsyncWrap,
 
    private:
     QuicSession* session_;
-    bool* monitor_;
+    QuicSessionFlags monitor_;
   };
 
   friend class QuicServerSession;
@@ -910,8 +968,7 @@ class QuicServerSession : public QuicSession {
       const ngtcp2_cid* ocid,
       uint32_t version,
       const std::string& alpn = NGTCP2_ALPN_H3,
-      bool reject_unauthorized = true,
-      bool request_cert_ = true);
+      uint32_t options = 0);
 
   void AddToSocket(QuicSocket* socket) override;
   void Init(
@@ -949,8 +1006,7 @@ class QuicServerSession : public QuicSession {
       const ngtcp2_cid* ocid,
       uint32_t version,
       const std::string& alpn,
-      bool reject_unauthorized,
-      bool request_cert);
+      uint32_t options);
 
   void DisassociateCID(const ngtcp2_cid* cid) override;
   int HandleError() override;
@@ -994,8 +1050,6 @@ class QuicServerSession : public QuicSession {
 
   ngtcp2_cid pscid_;
   ngtcp2_cid rcid_;
-  bool reject_unauthorized_;
-  bool request_cert_;
 
   MallocedBuffer<uint8_t> conn_closebuf_;
   v8::Global<v8::ArrayBufferView> ocsp_response_;
@@ -1053,11 +1107,10 @@ class QuicClientSession : public QuicSession {
       v8::Local<v8::Value> early_transport_params,
       v8::Local<v8::Value> session_ticket,
       v8::Local<v8::Value> dcid,
-      int select_preferred_address_policy =
+      SelectPreferredAddressPolicy select_preferred_address_policy =
           QUIC_PREFERRED_ADDRESS_IGNORE,
       const std::string& alpn = NGTCP2_ALPN_H3,
-      bool request_ocsp = false,
-      bool verify_hostname_identity = true);
+      uint32_t options = 0);
 
   QuicClientSession(
       QuicSocket* socket,
@@ -1070,10 +1123,9 @@ class QuicClientSession : public QuicSession {
       v8::Local<v8::Value> early_transport_params,
       v8::Local<v8::Value> session_ticket,
       v8::Local<v8::Value> dcid,
-      int select_preferred_address_policy,
+      SelectPreferredAddressPolicy select_preferred_address_policy,
       const std::string& alpn,
-      bool request_ocsp,
-      bool verify_hostname_identity);
+      uint32_t options);
 
   void AddToSocket(QuicSocket* socket) override;
   void MaybeTimeout() override;
@@ -1107,6 +1159,10 @@ class QuicClientSession : public QuicSession {
   int TLSHandshake_Complete() override;
   int TLSHandshake_Initial() override;
   int VerifyPeerIdentity(const char* hostname) override;
+  void VersionNegotiation(
+      const ngtcp2_pkt_hd* hd,
+      const uint32_t* sv,
+      size_t nsv) override;
 
   int Init(
       const struct sockaddr* addr,
@@ -1136,20 +1192,13 @@ class QuicClientSession : public QuicSession {
     SetClientCryptoLevel(level);
   }
 
-  void VersionNegotiation(
-      const ngtcp2_pkt_hd* hd,
-      const uint32_t* sv,
-      size_t nsv) override;
-
   uint32_t version_;
   bool resumption_;
   std::string hostname_;
   uint32_t port_;
 
   MaybeStackBuffer<char> transportParams_;
-  int select_preferred_address_policy_;
-  bool request_ocsp_;
-  bool verify_hostname_identity_;
+  SelectPreferredAddressPolicy select_preferred_address_policy_;
 
   const ngtcp2_conn_callbacks callbacks_ = {
     OnClientInitial,

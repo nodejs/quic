@@ -64,22 +64,18 @@ inline uint32_t GenerateReservedVersion(
 QuicSocket::QuicSocket(
     Environment* env,
     Local<Object> wrap,
-    bool validate_address,
     uint64_t retry_token_expiration,
-    size_t max_connections_per_host) :
+    size_t max_connections_per_host,
+    uint32_t options) :
     HandleWrap(env, wrap,
                reinterpret_cast<uv_handle_t*>(&handle_),
                AsyncWrap::PROVIDER_QUICSOCKET),
+    flags_(QUICSOCKET_FLAGS_NONE),
+    options_(options),
     pending_callbacks_(0),
-    pending_close_(false),
-    server_listening_(false),
-    validate_addr_(validate_address),
-    server_busy_(false),
     max_connections_per_host_(max_connections_per_host),
     server_secure_context_(nullptr),
     server_alpn_(NGTCP2_ALPN_H3),
-    reject_unauthorized_(false),
-    request_cert_(false),
     token_crypto_ctx_{},
     retry_token_expiration_(retry_token_expiration),
     rx_loss_(0.0),
@@ -196,9 +192,9 @@ int QuicSocket::Bind(
 }
 
 void QuicSocket::Close(Local<Value> close_callback) {
-  if (!IsInitialized() || pending_close_)
+  if (!IsInitialized() || IsFlagSet(QUICSOCKET_FLAGS_PENDING_CLOSE))
     return;
-  pending_close_ = true;
+  SetFlag(QUICSOCKET_FLAGS_PENDING_CLOSE);
 
   CHECK_EQ(false, persistent().IsEmpty());
   if (!close_callback.IsEmpty() && close_callback->IsFunction()) {
@@ -213,7 +209,9 @@ void QuicSocket::Close(Local<Value> close_callback) {
 // A QuicSocket can close if there are no pending udp send
 // callbacks and QuicSocket::Close() has been called.
 void QuicSocket::MaybeClose() {
-  if (!IsInitialized() || !pending_close_ || pending_callbacks_ > 0)
+  if (!IsInitialized() ||
+      !IsFlagSet(QUICSOCKET_FLAGS_PENDING_CLOSE) ||
+      pending_callbacks_ > 0)
     return;
 
   CHECK_EQ(false, persistent().IsEmpty());
@@ -231,18 +229,16 @@ void QuicSocket::Listen(
     SecureContext* sc,
     const sockaddr* preferred_address,
     const std::string& alpn,
-    bool reject_unauthorized,
-    bool request_cert) {
+    uint32_t options) {
   CHECK_NOT_NULL(sc);
   CHECK_NULL(server_secure_context_);
-  CHECK(!server_listening_);
+  CHECK(!IsFlagSet(QUICSOCKET_FLAGS_SERVER_LISTENING));
   Debug(this, "Starting to listen.");
   server_session_config_.Set(env(), preferred_address);
   server_secure_context_ = sc;
   server_alpn_ = alpn;
-  reject_unauthorized_ = reject_unauthorized;
-  request_cert_ = request_cert;
-  server_listening_ = true;
+  server_options_ = options;
+  SetFlag(QUICSOCKET_FLAGS_SERVER_LISTENING);
   socket_stats_.listen_at = uv_hrtime();
   ReceiveStart();
 }
@@ -368,12 +364,12 @@ void QuicSocket::Receive(
       // the CIDs and reset tokens from a QuicSocket bound to another).
       // It's not entirely clear how this should be implemented.
 
-      if (!server_listening_) {
+      if (!IsFlagSet(QUICSOCKET_FLAGS_SERVER_LISTENING)) {
         Debug(this, "Ignoring packet because socket is not listening.");
         IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
         return;
       }
-      if (server_busy_) {
+      if (IsFlagSet(QUICSOCKET_FLAGS_SERVER_BUSY)) {
         // While the server is busy, respond to all new connections with
         // a SERVER_BUSY error code.
         return SendInitialConnectionClose(
@@ -635,7 +631,8 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
   // retry token in the packet. If one does not exist, we send a retry with
   // a new token. If it does exist, and if it's valid, we grab the original
   // cid and continue.
-  if (validate_addr_ && hd.type == NGTCP2_PKT_INITIAL) {
+  if (IsOptionSet(QUICSOCKET_OPTIONS_VALIDATE_ADDRESS) &&
+      hd.type == NGTCP2_PKT_INITIAL) {
     Debug(this, "Performing explicit address validation.");
     if (hd.tokenlen == 0 ||
         VerifyRetryToken(
@@ -660,8 +657,7 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
           ocid_ptr,
           version,
           server_alpn_,
-          reject_unauthorized_,
-          request_cert_);
+          server_options_);
   Local<Value> arg = session->object();
   MakeCallback(env()->quic_on_session_ready_function(), 1, &arg);
 
@@ -691,7 +687,7 @@ size_t QuicSocket::GetCurrentSocketAddressCounter(const sockaddr* addr) {
 
 void QuicSocket::SetServerBusy(bool on) {
   Debug(this, "Turning Server Busy Response %s", on ? "on" : "off");
-  server_busy_ = on;
+  SetFlag(QUICSOCKET_FLAGS_SERVER_BUSY, on);
 
   HandleScope handle_scope(env()->isolate());
   Context::Scope context_scope(env()->context());
@@ -899,7 +895,8 @@ void NewQuicSocket(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   CHECK(args.IsConstructCall());
 
-  bool validate_address = args[0]->BooleanValue(args.GetIsolate());
+  uint32_t options = 0;
+  USE(args[0]->Uint32Value(env->context()).To(&options));
   uint32_t retry_token_expiration = DEFAULT_RETRYTOKEN_EXPIRATION;
   uint32_t max_connections_per_host = DEFAULT_MAX_CONNECTIONS_PER_HOST;
   USE(args[1]->Uint32Value(env->context()).To(&retry_token_expiration));
@@ -910,9 +907,9 @@ void NewQuicSocket(const FunctionCallbackInfo<Value>& args) {
   new QuicSocket(
       env,
       args.This(),
-      validate_address,
       retry_token_expiration,
-      max_connections_per_host);
+      max_connections_per_host,
+      options);
 }
 
 // Enabling diagnostic packet loss enables a mode where the QuicSocket
@@ -1028,12 +1025,10 @@ void QuicSocketListen(const FunctionCallbackInfo<Value>& args) {
     alpn += *val;
   }
 
-  socket->Listen(
-      sc,
-      preferred_address,
-      alpn,
-      args[5]->IsTrue(),   // reject_unauthorized
-      args[6]->IsTrue());  // request_cert
+  uint32_t options = 0;
+  USE(args[5]->Uint32Value(env->context()).To(&options));
+
+  socket->Listen(sc, preferred_address, alpn, options);
 }
 
 void QuicSocketReceiveStart(const FunctionCallbackInfo<Value>& args) {
