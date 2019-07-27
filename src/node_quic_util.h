@@ -24,10 +24,21 @@ constexpr size_t MIN_INITIAL_QUIC_PKT_SIZE = 1200;
 constexpr size_t NGTCP2_SV_SCIDLEN = NGTCP2_MAX_CIDLEN;
 constexpr size_t TOKEN_RAND_DATALEN = 16;
 constexpr size_t TOKEN_SECRETLEN = 16;
-constexpr size_t DEFAULT_MAX_STREAM_DATA_BIDI_LOCAL = 256 * 1024;
+
+constexpr size_t kMaxSizeT = std::numeric_limits<size_t>::max();
 constexpr size_t DEFAULT_MAX_CONNECTIONS_PER_HOST = 100;
+constexpr uint64_t MIN_MAX_CRYPTO_BUFFER = 4096;
 constexpr uint64_t MIN_RETRYTOKEN_EXPIRATION = 1;
 constexpr uint64_t MAX_RETRYTOKEN_EXPIRATION = 60;
+constexpr uint64_t DEFAULT_MAX_CRYPTO_BUFFER = MIN_MAX_CRYPTO_BUFFER * 4;
+constexpr uint64_t DEFAULT_ACTIVE_CONNECTION_ID_LIMIT = 10;
+constexpr uint64_t DEFAULT_MAX_STREAM_DATA_BIDI_LOCAL = 256 * 1024;
+constexpr uint64_t DEFAULT_MAX_STREAM_DATA_BIDI_REMOTE = 256 * 1024;
+constexpr uint64_t DEFAULT_MAX_STREAM_DATA_UNI = 256 * 1024;
+constexpr uint64_t DEFAULT_MAX_DATA = 1 * 1024 * 1024;
+constexpr uint64_t DEFAULT_MAX_STREAMS_BIDI = 100;
+constexpr uint64_t DEFAULT_MAX_STREAMS_UNI = 3;
+constexpr uint64_t DEFAULT_IDLE_TIMEOUT = 10 * 1000;
 constexpr uint64_t DEFAULT_RETRYTOKEN_EXPIRATION = 10ULL;
 
 #define RETURN_IF_FAIL(test, success, ret)                                     \

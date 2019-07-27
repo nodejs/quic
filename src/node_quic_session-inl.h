@@ -25,57 +25,6 @@ inline void SetConfig(Environment* env, int idx, uint64_t* val) {
     *val = static_cast<uint64_t>(buffer[idx]);
 }
 
-inline void QuicSessionConfig::ResetToDefaults() {
-  active_connection_id_limit_ = DEFAULT_ACTIVE_CONNECTION_ID_LIMIT;
-  max_stream_data_bidi_local_ = 256 * 1024;
-  max_stream_data_bidi_remote_ = 256 * 1024;
-  max_stream_data_uni_ = 256 * 1024;
-  max_data_ = 1 * 1024 * 1024;
-  max_streams_bidi_ = 100;
-  max_streams_uni_ = 3;
-  idle_timeout_ = 10 * 1000;
-  max_packet_size_ = NGTCP2_MAX_PKT_SIZE;
-  max_ack_delay_ = NGTCP2_DEFAULT_MAX_ACK_DELAY;
-  max_crypto_buffer_ = DEFAULT_MAX_CRYPTO_BUFFER;
-}
-
-// Sets the QuicSessionConfig using an AliasedBuffer for efficiency.
-inline void QuicSessionConfig::Set(
-    Environment* env,
-    const sockaddr* preferred_addr) {
-  ResetToDefaults();
-
-  SetConfig(env, IDX_QUIC_SESSION_ACTIVE_CONNECTION_ID_LIMIT,
-            &active_connection_id_limit_);
-  SetConfig(env, IDX_QUIC_SESSION_MAX_STREAM_DATA_BIDI_LOCAL,
-            &max_stream_data_bidi_local_);
-  SetConfig(env, IDX_QUIC_SESSION_MAX_STREAM_DATA_BIDI_REMOTE,
-            &max_stream_data_bidi_remote_);
-  SetConfig(env, IDX_QUIC_SESSION_MAX_STREAM_DATA_UNI,
-            &max_stream_data_uni_);
-  SetConfig(env, IDX_QUIC_SESSION_MAX_DATA,
-            &max_data_);
-  SetConfig(env, IDX_QUIC_SESSION_MAX_STREAMS_BIDI,
-            &max_streams_bidi_);
-  SetConfig(env, IDX_QUIC_SESSION_MAX_STREAMS_UNI,
-            &max_streams_uni_);
-  SetConfig(env, IDX_QUIC_SESSION_IDLE_TIMEOUT,
-            &idle_timeout_);
-  SetConfig(env, IDX_QUIC_SESSION_MAX_PACKET_SIZE,
-            &max_packet_size_);
-  SetConfig(env, IDX_QUIC_SESSION_MAX_ACK_DELAY,
-            &max_ack_delay_);
-  SetConfig(env, IDX_QUIC_SESSION_MAX_CRYPTO_BUFFER,
-            &max_crypto_buffer_);
-
-  max_crypto_buffer_ = std::max(max_crypto_buffer_, MINIMUM_MAX_CRYPTO_BUFFER);
-
-  if (preferred_addr != nullptr) {
-    preferred_address_set_ = true;
-    preferred_address_.Copy(preferred_addr);
-  }
-}
-
 // Forwards detailed(verbose) debugging information from ngtcp2. Enabled using
 // the NODE_DEBUG_NATIVE=NGTCP2_DEBUG category.
 inline void DebugLog(void* user_data, const char* fmt, ...) {
@@ -86,70 +35,105 @@ inline void DebugLog(void* user_data, const char* fmt, ...) {
   va_end(ap);
 }
 
-// Copies the QuicSessionConfig into a ngtcp2_settings object
-inline void QuicSessionConfig::ToSettings(
-    ngtcp2_settings* settings,
-    ngtcp2_cid* pscid,
-    bool stateless_reset_token) {
-  ngtcp2_settings_default(settings);
+inline void QuicSessionConfig::ResetToDefaults() {
+  ngtcp2_settings_default(&settings_);
+  settings_.initial_ts = uv_hrtime();
+  settings_.log_printf = DebugLog;
+  settings_.active_connection_id_limit = DEFAULT_ACTIVE_CONNECTION_ID_LIMIT;
+  settings_.max_stream_data_bidi_local = DEFAULT_MAX_STREAM_DATA_BIDI_LOCAL;
+  settings_.max_stream_data_bidi_remote = DEFAULT_MAX_STREAM_DATA_BIDI_REMOTE;
+  settings_.max_stream_data_uni = DEFAULT_MAX_STREAM_DATA_UNI;
+  settings_.max_data = DEFAULT_MAX_DATA;
+  settings_.max_streams_bidi = DEFAULT_MAX_STREAMS_BIDI;
+  settings_.max_streams_uni = DEFAULT_MAX_STREAMS_UNI;
+  settings_.idle_timeout = DEFAULT_IDLE_TIMEOUT;
+  settings_.max_packet_size = NGTCP2_MAX_PKT_SIZE;
+  settings_.max_ack_delay = NGTCP2_DEFAULT_MAX_ACK_DELAY;
+  settings_.disable_migration = 0;
+  settings_.preferred_address_present = 0;
+  settings_.stateless_reset_token_present = 0;
+  max_crypto_buffer_ = DEFAULT_MAX_CRYPTO_BUFFER;
+}
 
-  settings->active_connection_id_limit = active_connection_id_limit_;
-  settings->max_stream_data_bidi_local = max_stream_data_bidi_local_;
-  settings->max_stream_data_bidi_remote = max_stream_data_bidi_remote_;
-  settings->max_stream_data_uni = max_stream_data_uni_;
-  settings->max_data = max_data_;
-  settings->max_streams_bidi = max_streams_bidi_;
-  settings->max_streams_uni = max_streams_uni_;
-  settings->idle_timeout = idle_timeout_;
-  settings->max_packet_size = max_packet_size_;
-  settings->max_ack_delay = max_ack_delay_;
-  settings->log_printf = DebugLog;
-  settings->initial_ts = uv_hrtime();
-  settings->disable_migration = 0;
+// Sets the QuicSessionConfig using an AliasedBuffer for efficiency.
+inline void QuicSessionConfig::Set(
+    Environment* env,
+    const sockaddr* preferred_addr) {
+  ResetToDefaults();
 
-  if (stateless_reset_token) {
-    settings->stateless_reset_token_present = 1;
-    EntropySource(
-        settings->stateless_reset_token,
-        arraysize(settings->stateless_reset_token));
-  }
+  SetConfig(env, IDX_QUIC_SESSION_ACTIVE_CONNECTION_ID_LIMIT,
+            &settings_.active_connection_id_limit);
+  SetConfig(env, IDX_QUIC_SESSION_MAX_STREAM_DATA_BIDI_LOCAL,
+            &settings_.max_stream_data_bidi_local);
+  SetConfig(env, IDX_QUIC_SESSION_MAX_STREAM_DATA_BIDI_REMOTE,
+            &settings_.max_stream_data_bidi_remote);
+  SetConfig(env, IDX_QUIC_SESSION_MAX_STREAM_DATA_UNI,
+            &settings_.max_stream_data_uni);
+  SetConfig(env, IDX_QUIC_SESSION_MAX_DATA,
+            &settings_.max_data);
+  SetConfig(env, IDX_QUIC_SESSION_MAX_STREAMS_BIDI,
+            &settings_.max_streams_bidi);
+  SetConfig(env, IDX_QUIC_SESSION_MAX_STREAMS_UNI,
+            &settings_.max_streams_uni);
+  SetConfig(env, IDX_QUIC_SESSION_IDLE_TIMEOUT,
+            &settings_.idle_timeout);
+  SetConfig(env, IDX_QUIC_SESSION_MAX_PACKET_SIZE,
+            &settings_.max_packet_size);
+  SetConfig(env, IDX_QUIC_SESSION_MAX_ACK_DELAY,
+            &settings_.max_ack_delay);
 
-  if (pscid != nullptr && preferred_address_set_) {
-    settings->preferred_address_present = 1;
-    const sockaddr* addr = *preferred_address_;
-    switch (addr->sa_family) {
+  SetConfig(env, IDX_QUIC_SESSION_MAX_CRYPTO_BUFFER,
+            &max_crypto_buffer_);
+  max_crypto_buffer_ = std::max(max_crypto_buffer_, MIN_MAX_CRYPTO_BUFFER);
+
+  if (preferred_addr != nullptr) {
+    settings_.preferred_address_present = 1;
+    switch (preferred_addr->sa_family) {
       case AF_INET: {
-        auto& dest = settings->preferred_address.ipv4_addr;
+        auto& dest = settings_.preferred_address.ipv4_addr;
         memcpy(
             &dest,
-            &(reinterpret_cast<const sockaddr_in*>(addr)->sin_addr),
+            &(reinterpret_cast<const sockaddr_in*>(preferred_addr)->sin_addr),
             sizeof(dest));
-        settings->preferred_address.ipv4_port = SocketAddress::GetPort(addr);
+        settings_.preferred_address.ipv4_port =
+            SocketAddress::GetPort(preferred_addr);
         break;
       }
       case AF_INET6: {
-        auto& dest = settings->preferred_address.ipv6_addr;
+        auto& dest = settings_.preferred_address.ipv6_addr;
         memcpy(
             &dest,
-            &(reinterpret_cast<const sockaddr_in6*>(addr)->sin6_addr),
+            &(reinterpret_cast<const sockaddr_in6*>(preferred_addr)->sin6_addr),
             sizeof(dest));
-        settings->preferred_address.ipv6_port = SocketAddress::GetPort(addr);
+        settings_.preferred_address.ipv6_port =
+            SocketAddress::GetPort(preferred_addr);
         break;
       }
       default:
         UNREACHABLE();
     }
-
-    EntropySource(
-        settings->preferred_address.stateless_reset_token,
-        arraysize(settings->preferred_address.stateless_reset_token));
-
-    pscid->datalen = NGTCP2_SV_SCIDLEN;
-    EntropySource(pscid->data, pscid->datalen);
-    settings->preferred_address.cid = *pscid;
   }
 }
 
+inline void QuicSessionConfig::GenerateStatelessResetToken() {
+  settings_.stateless_reset_token_present = 1;
+  EntropySource(
+      settings_.stateless_reset_token,
+      arraysize(settings_.stateless_reset_token));
+}
+
+inline void QuicSessionConfig::GeneratePreferredAddressToken(
+    ngtcp2_cid* pscid) {
+  if (!settings_.preferred_address_present)
+    return;
+  EntropySource(
+      settings_.preferred_address.stateless_reset_token,
+      arraysize(settings_.preferred_address.stateless_reset_token));
+
+  pscid->datalen = NGTCP2_SV_SCIDLEN;
+  EntropySource(pscid->data, pscid->datalen);
+  settings_.preferred_address.cid = *pscid;
+}
 
 
 inline void QuicSession::CheckAllocatedSize(size_t previous_size) {

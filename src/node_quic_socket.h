@@ -101,10 +101,6 @@ class QuicSocket : public HandleWrap,
       QuicBuffer* buf,
       std::shared_ptr<QuicSession> session);
   void SetServerBusy(bool on);
-  void SetServerSessionSettings(
-      ngtcp2_cid* pscid,
-      ngtcp2_settings* settings,
-      uint64_t* max_crypto_buffer);
   void SetDiagnosticPacketLoss(double rx = 0.0, double tx = 0.0);
 
   crypto::SecureContext* GetServerSecureContext() {

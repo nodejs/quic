@@ -651,6 +651,7 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
   session =
       QuicServerSession::New(
           this,
+          &server_session_config_,
           **dcid,
           addr,
           **scid,
@@ -741,16 +742,6 @@ int QuicSocket::SendPacket(
   Debug(this, "Sending to %s at port %d", host, SocketAddress::GetPort(dest));
   return (new QuicSocket::SendWrap(this, dest, buffer, session))->Send();
 }
-
-void QuicSocket::SetServerSessionSettings(
-    ngtcp2_cid* pscid,
-    ngtcp2_settings* settings,
-    uint64_t* max_crypto_buffer) {
-  server_session_config_.ToSettings(settings, pscid, true);
-  *max_crypto_buffer = server_session_config_.GetMaxCryptoBuffer();
-}
-
-
 
 QuicSocket::SendWrapBase::SendWrapBase(
     QuicSocket* socket,

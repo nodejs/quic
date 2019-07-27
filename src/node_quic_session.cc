@@ -68,7 +68,6 @@ QuicSession::QuicSession(
     current_ngtcp2_memory_(0),
     connection_close_attempts_(0),
     connection_close_limit_(1),
-    idle_timeout_(10 * 1000),
     idle_(new Timer(socket->env(), OnIdleTimeoutCB, this)),
     retransmit_(new Timer(socket->env(), OnRetransmitTimeoutCB, this)),
     socket_(socket),
@@ -1448,6 +1447,7 @@ bool QuicSession::UpdateKey() {
 // so most of the overrides here deal with TLS handshake differences.
 QuicServerSession::QuicServerSession(
     QuicSocket* socket,
+    QuicSessionConfig* config,
     Local<Object> wrap,
     const ngtcp2_cid* rcid,
     const struct sockaddr* addr,
@@ -1465,11 +1465,12 @@ QuicServerSession::QuicServerSession(
         options),
     pscid_{},
     rcid_(*rcid) {
-  Init(addr, dcid, ocid, version);
+  Init(config, addr, dcid, ocid, version);
 }
 
 std::shared_ptr<QuicSession> QuicServerSession::New(
     QuicSocket* socket,
+    QuicSessionConfig* config,
     const ngtcp2_cid* rcid,
     const struct sockaddr* addr,
     const ngtcp2_cid* dcid,
@@ -1487,6 +1488,7 @@ std::shared_ptr<QuicSession> QuicServerSession::New(
   session.reset(
       new QuicServerSession(
           socket,
+          config,
           obj,
           rcid,
           addr,
@@ -1519,6 +1521,7 @@ void QuicServerSession::DisassociateCID(const ngtcp2_cid* cid) {
 }
 
 void QuicServerSession::Init(
+    QuicSessionConfig* config,
     const struct sockaddr* addr,
     const ngtcp2_cid* dcid,
     const ngtcp2_cid* ocid,
@@ -1531,12 +1534,10 @@ void QuicServerSession::Init(
 
   InitTLS();
 
-  ngtcp2_settings settings{};
-  Socket()->SetServerSessionSettings(
-      this->pscid(),
-      &settings,
-      &max_crypto_buffer_);
-  idle_timeout_ = settings.idle_timeout;
+  QuicSessionConfig cfg = *config;
+  cfg.GenerateStatelessResetToken();
+  cfg.GeneratePreferredAddressToken(this->pscid());
+  max_crypto_buffer_ = cfg.GetMaxCryptoBuffer();
 
   EntropySource(scid_.data, NGTCP2_SV_SCIDLEN);
   scid_.datalen = NGTCP2_SV_SCIDLEN;
@@ -1552,7 +1553,7 @@ void QuicServerSession::Init(
           *path,
           version,
           &callbacks_,
-          &settings,
+          *cfg,
           *allocator_,
           static_cast<QuicSession*>(this)), 0);
 
@@ -1560,7 +1561,7 @@ void QuicServerSession::Init(
     ngtcp2_conn_set_retry_ocid(conn, ocid);
   connection_.reset(conn);
 
-  UpdateIdleTimer(idle_timeout_);
+  UpdateIdleTimer(ngtcp2_conn_get_idle_timeout(Connection()));
 }
 
 void QuicServerSession::InitTLS_Post() {
@@ -1936,7 +1937,7 @@ int QuicServerSession::Receive(
   if (IsDestroyed() || IsInDrainingPeriod())
     return 0;
   SendPendingData();
-  UpdateIdleTimer(idle_timeout_);
+  UpdateIdleTimer(ngtcp2_conn_get_idle_timeout(Connection()));
   UpdateRecoveryStats();
 
   return 0;
@@ -1974,7 +1975,7 @@ bool QuicServerSession::SendConnectionClose() {
   if (!StartClosingPeriod())
     return false;
 
-  UpdateIdleTimer(idle_timeout_);
+  UpdateIdleTimer(ngtcp2_conn_get_idle_timeout(Connection()));
   CHECK_GT(conn_closebuf_.size, 0);
   sendbuf_.Cancel();
   // We don't use std::move here because we do not want
@@ -1994,7 +1995,7 @@ bool QuicServerSession::StartClosingPeriod() {
     return true;
 
   StopRetransmitTimer();
-  UpdateIdleTimer(idle_timeout_);
+  UpdateIdleTimer(ngtcp2_conn_get_idle_timeout(Connection()));
 
   sendbuf_.Cancel();
 
@@ -2023,7 +2024,7 @@ bool QuicServerSession::StartClosingPeriod() {
 void QuicServerSession::StartDrainingPeriod() {
   CHECK(!IsDestroyed());
   StopRetransmitTimer();
-  UpdateIdleTimer(idle_timeout_);
+  UpdateIdleTimer(ngtcp2_conn_get_idle_timeout(Connection()));
 }
 
 int QuicServerSession::TLSHandshake_Initial() {
@@ -2181,11 +2182,8 @@ bool QuicClientSession::Init(
 
   InitTLS();
 
-  ngtcp2_settings settings{};
-  QuicSessionConfig client_session_config;
-  client_session_config.Set(env());
-  client_session_config.ToSettings(&settings, nullptr);
-  max_crypto_buffer_ = client_session_config.GetMaxCryptoBuffer();
+  QuicSessionConfig config(env());
+  max_crypto_buffer_ = config.GetMaxCryptoBuffer();
 
   scid_.datalen = NGTCP2_MAX_CIDLEN;
   EntropySource(scid_.data, scid_.datalen);
@@ -2214,7 +2212,7 @@ bool QuicClientSession::Init(
           *path,
           version,
           &callbacks_,
-          &settings,
+          *config,
           *allocator_,
           static_cast<QuicSession*>(this)), 0);
 
@@ -2242,7 +2240,7 @@ bool QuicClientSession::Init(
     }
   }
 
-  UpdateIdleTimer(settings.idle_timeout);
+  UpdateIdleTimer(ngtcp2_conn_get_idle_timeout(conn));
   return true;
 }
 
@@ -2499,7 +2497,7 @@ int QuicClientSession::Receive(
   if (IsDestroyed() || IsInDrainingPeriod())
     return 0;
   SendPendingData();
-  UpdateIdleTimer(idle_timeout_);
+  UpdateIdleTimer(ngtcp2_conn_get_idle_timeout(Connection()));
   UpdateRecoveryStats();
 
   return 0;
@@ -2525,7 +2523,7 @@ bool QuicClientSession::SendConnectionClose() {
   if (IsInDrainingPeriod())
     return true;
 
-  UpdateIdleTimer(idle_timeout_);
+  UpdateIdleTimer(ngtcp2_conn_get_idle_timeout(Connection()));
   MallocedBuffer<uint8_t> data(max_pktlen_);
   sendbuf_.Cancel();
   QuicError error = GetLastError();

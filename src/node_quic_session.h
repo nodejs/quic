@@ -32,12 +32,6 @@ class QuicServerSession;
 class QuicSocket;
 class QuicStream;
 
-constexpr size_t kMaxSizeT = std::numeric_limits<size_t>::max();
-
-constexpr uint64_t MINIMUM_MAX_CRYPTO_BUFFER = 4096;
-constexpr uint64_t DEFAULT_MAX_CRYPTO_BUFFER = MINIMUM_MAX_CRYPTO_BUFFER * 4;
-constexpr uint64_t DEFAULT_ACTIVE_CONNECTION_ID_LIMIT = 10;
-
 // The QuicSessionConfig class holds the initial transport parameters and
 // configuration options set by the JavaScript side when either a
 // QuicClientSession or QuicServerSession is created. Instances are
@@ -46,44 +40,44 @@ constexpr uint64_t DEFAULT_ACTIVE_CONNECTION_ID_LIMIT = 10;
 // in non-numeric settings (e.g. preferred_addr).
 class QuicSessionConfig {
  public:
-  QuicSessionConfig() = default;
+  inline QuicSessionConfig() {
+    ResetToDefaults();
+  };
+
+  inline explicit QuicSessionConfig(Environment* env) {
+    ResetToDefaults();
+    Set(env);
+  }
+
+  inline QuicSessionConfig(const QuicSessionConfig& config) {
+    memcpy(&settings_, &config.settings_, sizeof(ngtcp2_settings));
+    max_crypto_buffer_ = config.max_crypto_buffer_;
+    settings_.initial_ts = uv_hrtime();
+  }
 
   inline void ResetToDefaults();
 
-  // QuicSessionConfig::Set() is where the magic happens. It pulls
-  // values out of the AliasedBuffer defined in node_quic_state.h
-  // and stores the values. If the preferred_addr is set, it will
-  // be copied into preferred_address_.
+  // QuicSessionConfig::Set() pulls values out of the AliasedBuffer
+  // defined in node_quic_state.h and stores the values in settings_.
+  // If preferred_addr is not nullptr, it is copied into the
+  // settings_.preferred_addr field
   inline void Set(
       Environment* env,
       const struct sockaddr* preferred_addr = nullptr);
 
-  // When a ngtcp2 connection is created, ToSettings is used to
-  // populate the given ngtcp2_settings object with the stored
-  // parameters. These are translated into QUIC transport params.
-  inline void ToSettings(
-      ngtcp2_settings* settings,
-      ngtcp2_cid* pscid,
-      bool stateless_reset_token = false);
+  // Generates the stateless reset token for the settings_
+  inline void GenerateStatelessResetToken();
 
-  uint64_t GetMaxCryptoBuffer() { return max_crypto_buffer_; }
+  // If the preferred address is set, generates the associated tokens
+  inline void GeneratePreferredAddressToken(ngtcp2_cid* pscid);
+
+  uint64_t GetMaxCryptoBuffer() const { return max_crypto_buffer_; }
+
+  const ngtcp2_settings* operator*() const { return &settings_; }
 
  private:
-  uint64_t active_connection_id_limit_ = DEFAULT_ACTIVE_CONNECTION_ID_LIMIT;
-  uint64_t max_stream_data_bidi_local_ = 256 * 1024;
-  uint64_t max_stream_data_bidi_remote_ = 256 * 1024;
-  uint64_t max_stream_data_uni_ = 256 * 1024;
-  uint64_t max_data_ = 1 * 1024 * 1024;
-  uint64_t max_streams_bidi_ = 100;
-  uint64_t max_streams_uni_ = 3;
-  uint64_t idle_timeout_ = 10 * 1000;
-  uint64_t max_packet_size_ = NGTCP2_MAX_PKT_SIZE;
-  uint64_t max_ack_delay_ = NGTCP2_DEFAULT_MAX_ACK_DELAY;
   uint64_t max_crypto_buffer_ = DEFAULT_MAX_CRYPTO_BUFFER;
-
-  bool preferred_address_set_ = false;
-
-  SocketAddress preferred_address_;
+  ngtcp2_settings settings_;
 };
 
 // Options to alter the behavior of various functions on the
@@ -834,7 +828,6 @@ class QuicSession : public AsyncWrap,
   size_t current_ngtcp2_memory_;
   size_t connection_close_attempts_;
   size_t connection_close_limit_;
-  uint64_t idle_timeout_;
 
   Timer* idle_;
   Timer* retransmit_;
@@ -1010,6 +1003,7 @@ class QuicServerSession : public QuicSession {
 
   static std::shared_ptr<QuicSession> New(
       QuicSocket* socket,
+      QuicSessionConfig* config,
       const ngtcp2_cid* rcid,
       const struct sockaddr* addr,
       const ngtcp2_cid* dcid,
@@ -1020,6 +1014,7 @@ class QuicServerSession : public QuicSession {
 
   void AddToSocket(QuicSocket* socket) override;
   void Init(
+      QuicSessionConfig* config,
       const struct sockaddr* addr,
       const ngtcp2_cid* dcid,
       const ngtcp2_cid* ocid,
@@ -1046,6 +1041,7 @@ class QuicServerSession : public QuicSession {
  private:
   QuicServerSession(
       QuicSocket* socket,
+      QuicSessionConfig* config,
       v8::Local<v8::Object> wrap,
       const ngtcp2_cid* rcid,
       const struct sockaddr* addr,
