@@ -111,7 +111,7 @@ void QuicStream::Destroy() {
         "Destroying.\n"
         "  Duration: %" PRIu64 "\n"
         "  Bytes Received: %" PRIu64 "\n"
-        "  Bytes Sent: " PRIu64,
+        "  Bytes Sent: %" PRIu64,
         now - stream_stats_.created_at,
         stream_stats_.bytes_received,
         stream_stats_.bytes_sent);
