@@ -138,7 +138,7 @@ void QuicSocket::AddSession(
   IncrementSocketAddressCounter(**session->GetRemoteAddress());
   IncrementSocketStat(
       1, &socket_stats_,
-      session->IsServer() ?
+      session->Type() == QUICSESSION_TYPE_SERVER ?
           &socket_stats::server_sessions :
           &socket_stats::client_sessions);
 }

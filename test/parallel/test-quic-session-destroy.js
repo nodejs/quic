@@ -17,7 +17,6 @@ const {
   }
 } = internalBinding('quic');
 
-const assert = require('assert');
 const fs = require('fs');
 const fixtures = require('../common/fixtures');
 const key = fixtures.readKey('agent1-key.pem', 'binary');
@@ -34,6 +33,7 @@ const kClientPort = process.env.NODE_DEBUG_KEYLOG ? 5679 : 0;
 const kServerName = 'agent2';  // Intentionally the wrong servername
 const kALPN = 'zzz';  // ALPN can be overriden to whatever we want
 
+let client;
 const server = createSocket({ port: kServerPort });
 
 server.listen({ key, cert, ca, alpn: kALPN });
@@ -46,16 +46,21 @@ server.on('session', common.mustCall((session) => {
     session.on('keylog', kl.write.bind(kl));
   }
 
-  session.on('close', common.mustCall());
+  session.on('close', common.mustCall(() => {
+    client.close();
+    server.close();
+  }));
   session.on('stream', common.mustNotCall());
-  session.destroy();
 
+  // Prematurely destroy the session without waiting for the
+  // handshake to complete.
+  session.destroy();
 }));
 
 server.on('ready', common.mustCall(() => {
   debug('Server is listening on port %d', server.address.port);
 
-  const client = createSocket({
+  client = createSocket({
     port: kClientPort,
     client: { key, cert, ca, alpn: kALPN }
   });

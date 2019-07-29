@@ -152,6 +152,11 @@ typedef enum QuicSessionState : int {
   IDX_QUIC_SESSION_STATE_COUNT
 } QuicSessionState;
 
+typedef enum QuicSessionType : int {
+  QUICSESSION_TYPE_SERVER,
+  QUICSESSION_TYPE_CLIENT
+} QuicSessionType;
+
 // The QuicSession class is an virtual class that serves as
 // the basis for both QuicServerSession and QuicClientSession.
 // It implements the functionality that is shared for both
@@ -180,10 +185,11 @@ class QuicSession : public AsyncWrap,
       // the TLS handshake has completed. The QuicSession
       // should never assume that the socket will always
       // remain the same.
+      QuicSessionType type,
       QuicSocket* socket,
       v8::Local<v8::Object> wrap,
       crypto::SecureContext* ctx,
-      AsyncWrap::ProviderType provider,
+      AsyncWrap::ProviderType provider_type,
       // QUIC is generally just a transport. The ALPN identifier
       // is used to specify the application protocol that is
       // layered on top. If not specified, this will default
@@ -302,11 +308,11 @@ class QuicSession : public AsyncWrap,
       int64_t stream_id,
       uint64_t error_code = NGTCP2_APP_NOERROR);
   int TLSRead();
+  QuicSessionType Type() const { return type_; }
   void WriteHandshake(const uint8_t* data, size_t datalen);
 
   // These may be implemented by QuicSession types
   virtual void HandleError();
-  virtual bool IsServer() const { return false; }
   virtual int OnClientHello() { return 0; }
   virtual void OnClientHelloDone() {}
   virtual int OnCert() { return 1; }
@@ -812,6 +818,8 @@ class QuicSession : public AsyncWrap,
     return ngtcp2_conn_write_connection_close;
   }
 
+  QuicSessionType type_;
+
   ngtcp2_crypto_level rx_crypto_level_;
   ngtcp2_crypto_level tx_crypto_level_;
   QuicError last_error_;
@@ -1030,7 +1038,6 @@ class QuicServerSession : public QuicSession {
       const ngtcp2_cid* dcid,
       const ngtcp2_cid* ocid,
       uint32_t version);
-  bool IsServer() const override { return true; }
   int OnCert() override;
   void OnCertDone(
       crypto::SecureContext* context,

@@ -50,13 +50,15 @@ namespace quic {
 // QuicSession is an abstract base class that defines the code used by both
 // server and client sessions.
 QuicSession::QuicSession(
+    QuicSessionType type,
     QuicSocket* socket,
     Local<Object> wrap,
     SecureContext* ctx,
-    AsyncWrap::ProviderType type,
+    AsyncWrap::ProviderType provider_type,
     const std::string& alpn,
     uint32_t options) :
-    AsyncWrap(socket->env(), wrap, type),
+    AsyncWrap(socket->env(), wrap, provider_type),
+    type_(type),
     rx_crypto_level_(NGTCP2_CRYPTO_LEVEL_INITIAL),
     tx_crypto_level_(NGTCP2_CRYPTO_LEVEL_INITIAL),
     last_error_(QUIC_ERROR_SESSION, NGTCP2_NO_ERROR),
@@ -155,6 +157,13 @@ QuicSession::~QuicSession() {
         txbuf_length);
 }
 
+std::string QuicSession::diagnostic_name() const {
+  return std::string("QuicSession ") +
+      (Type() == QUICSESSION_TYPE_SERVER ?
+          "Server" : "Client") +
+      " (" + std::to_string(static_cast<int64_t>(get_async_id())) + ")";
+}
+
 void QuicSession::AckedCryptoOffset(
     ngtcp2_crypto_level crypto_level,
     uint64_t offset,
@@ -206,13 +215,13 @@ void QuicSession::AddStream(QuicStream* stream) {
 
   switch (stream->GetOrigin()) {
     case QuicStream::QuicStreamOrigin::QUIC_STREAM_CLIENT:
-      if (IsServer())
+      if (Type() == QUICSESSION_TYPE_SERVER)
         IncrementStat(1, &session_stats_, &session_stats::streams_in_count);
       else
         IncrementStat(1, &session_stats_, &session_stats::streams_out_count);
       break;
     case QuicStream::QuicStreamOrigin::QUIC_STREAM_SERVER:
-      if (IsServer())
+      if (Type() == QUICSESSION_TYPE_SERVER)
         IncrementStat(1, &session_stats_, &session_stats::streams_out_count);
       else
         IncrementStat(1, &session_stats_, &session_stats::streams_in_count);
@@ -278,8 +287,23 @@ QuicStream* QuicSession::CreateStream(int64_t stream_id) {
 // likely will not be immediately freed.
 void QuicSession::Destroy() {
   Debug(this, "Destroying");
+
   if (IsDestroyed())
     return;
+
+  // If we're not in the closing or draining periods,
+  // then we should at least attempt to send a connection
+  // close to the peer.
+  // TODO(@jasnell): If the connection close happens to occur
+  // while we're still at the start of the TLS handshake, a
+  // CONNECTION_CLOSE is not going to be sent because ngtcp2
+  // currently does not yet support it. That will need to be
+  // addressed.
+  if (!IsInClosingPeriod() && !IsInDrainingPeriod()) {
+    Debug(this, "Making one last attempt to send a connection close");
+    SetLastError(QUIC_ERROR_SESSION, NGTCP2_NO_ERROR);
+    SendConnectionClose();
+  }
 
   // Streams should have already been destroyed by this point.
   CHECK(streams_.empty());
@@ -421,12 +445,6 @@ void QuicSession::ExtendMaxStreamData(int64_t stream_id, uint64_t max_data) {
   Debug(this,
         "Extending max stream %" PRId64 " data to %" PRIu64,
         stream_id, max_data);
-}
-
-std::string QuicSession::diagnostic_name() const {
-  return std::string("QuicSession ") +
-         (IsServer() ? "Server" : "Client") +
-         " (" + std::to_string(static_cast<int64_t>(get_async_id())) + ")";
 }
 
 int QuicSession::ExtendMaxStreams(bool bidi, uint64_t max_streams) {
@@ -767,7 +785,7 @@ int QuicSession::ReceiveCryptoData(
 // that will be used to secure the communication.
 int QuicSession::ReceiveClientInitial(const ngtcp2_cid* dcid) {
   CHECK(!IsDestroyed());
-  CHECK(IsServer());
+  CHECK(Type() == QUICSESSION_TYPE_SERVER);
   Debug(this, "Receiving client initial parameters.");
 
   CryptoInitialParams params;
@@ -1096,7 +1114,7 @@ void QuicSession::SendPendingData() {
   if (Ngtcp2CallbackScope::InNgtcp2CallbackScope(this) ||
       IsDestroyed() ||
       IsInDrainingPeriod() ||
-      (IsServer() && IsInClosingPeriod())) {
+      (Type() == QUICSESSION_TYPE_SERVER && IsInClosingPeriod())) {
     return;
   }
 
@@ -1312,7 +1330,7 @@ int QuicSession::TLSHandshake() {
 int QuicSession::TLSRead() {
   CHECK(!IsDestroyed());
   ClearTLSError();
-  return ClearTLS(ssl(), !IsServer());
+  return ClearTLS(ssl(), !Type() == QUICSESSION_TYPE_SERVER);
 }
 
 void QuicSession::UpdateIdleTimer() {
@@ -1539,6 +1557,7 @@ QuicServerSession::QuicServerSession(
     const std::string& alpn,
     uint32_t options) :
     QuicSession(
+        QUICSESSION_TYPE_SERVER,
         socket,
         wrap,
         socket->GetServerSecureContext(),
@@ -2080,6 +2099,7 @@ QuicClientSession::QuicClientSession(
     const std::string& alpn,
     uint32_t options) :
     QuicSession(
+        QUICSESSION_TYPE_CLIENT,
         socket,
         wrap,
         context,
@@ -2778,7 +2798,7 @@ void QuicSessionGetPeerCertificate(const FunctionCallbackInfo<Value>& args) {
   // NOTE: This is because of the odd OpenSSL behavior. On client `cert_chain`
   // contains the `peer_certificate`, but on server it doesn't.
   crypto::X509Pointer cert(
-      session->IsServer() ? SSL_get_peer_certificate(session->ssl()) : nullptr);
+      session->Type() == QUICSESSION_TYPE_SERVER ? SSL_get_peer_certificate(session->ssl()) : nullptr);
   STACK_OF(X509)* ssl_certs = SSL_get_peer_cert_chain(session->ssl());
   if (!cert && (ssl_certs == nullptr || sk_X509_num(ssl_certs) == 0))
     goto done;
