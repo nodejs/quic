@@ -296,7 +296,6 @@ void QuicSocket::Receive(
   }
 
   IncrementSocketStat(nread, &socket_stats_, &socket_stats::bytes_received);
-  int err;
 
   const uint8_t* data = reinterpret_cast<const uint8_t*>(buf->base);
 
@@ -305,19 +304,16 @@ void QuicSocket::Receive(
   size_t pdcidlen;
   const uint8_t* pscid;
   size_t pscidlen;
-  err = ngtcp2_pkt_decode_version_cid(
-      &pversion,
-      &pdcid,
-      &pdcidlen,
-      &pscid,
-      &pscidlen,
-      data, nread, NGTCP2_SV_SCIDLEN);
 
-  if (err < 0) {
-    // There's nothing we should really do here but return. The packet is
-    // likely not a QUIC packet. If this is sent by an attacker, returning
-    // and doing nothing is likely best but we also might want to keep some
-    // stats or record of the failure.
+  if (ngtcp2_pkt_decode_version_cid(
+        &pversion,
+        &pdcid,
+        &pdcidlen,
+        &pscid,
+        &pscidlen,
+        data, nread, NGTCP2_SV_SCIDLEN) < 0) {
+    // There's nothing we can do here but ignore the packet. The packet
+    // is likely not a QUIC packet or is malformed in some way.
     IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
     return;
   }
@@ -331,7 +327,6 @@ void QuicSocket::Receive(
     return;
   }
 
-  // Extract the DCID
   QuicCID dcid(pdcid, pdcidlen);
   QuicCID scid(pscid, pscidlen);
 
@@ -364,31 +359,29 @@ void QuicSocket::Receive(
       // the CIDs and reset tokens from a QuicSocket bound to another).
       // It's not entirely clear how this should be implemented.
 
-      if (!IsFlagSet(QUICSOCKET_FLAGS_SERVER_LISTENING)) {
-        Debug(this, "Ignoring packet because socket is not listening.");
-        IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
-        return;
-      }
-      if (IsFlagSet(QUICSOCKET_FLAGS_SERVER_BUSY)) {
-        // While the server is busy, respond to all new connections with
-        // a SERVER_BUSY error code.
-        return SendInitialConnectionClose(
-            pversion,
-            NGTCP2_SERVER_BUSY,
-            &dcid,
-            addr);
-      }
-      session = ServerReceive(
-        pversion,
-        &dcid,
-        &scid,
-        nread,
-        data,
-        addr,
-        flags);
+      // AcceptInitialPacket will first validate that the packet can be
+      // accepted, then create a new QuicServerSession instance if able
+      // to do so. If a new instance cannot be created (for any reason),
+      // the session shared_ptr will be empty on return.
+      session = AcceptInitialPacket(
+          pversion,
+          &dcid,
+          &scid,
+          nread,
+          data,
+          addr,
+          flags);
+
+      // There are many reasons why a QuicServerSession could not be
+      // created. The most common will be invalid packets or incorrect
+      // QUIC version. In any of these cases, however, to prevent a
+      // potential attacker from causing us to consume resources,
+      // we're just going to ignore the packet. It is possible that
+      // the AcceptInitialPacket sent a version negotiation packet,
+      // or (in the future) a CONNECTION_CLOSE packet.
       if (!session) {
         Debug(this, "Could not initialize a new QuicServerSession.");
-        // TODO(@jasnell): Should this be fatal for the QuicSocket?
+        IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
         return;
       }
     } else {
@@ -401,20 +394,22 @@ void QuicSocket::Receive(
   }
 
   CHECK_NOT_NULL(session);
+
+  // If the session has been destroyed already, there's nothing to do
+  // and we simply fall-through and do nothing.
   if (session->IsDestroyed()) {
-    // If the session has been destroyed already, there's nothing to do
-    // and we simply fall-through and do nothing.
-    Debug(this, "Ignoring packet because session is destroyed!");
+    Debug(this, "Ignoring packet because session is destroyed");
     IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
     return;
   }
-  err = session->Receive(nread, data, addr, flags);
-  if (err != 0) {
-    // Packet was not successfully processed for some reason, possibly
-    // due to being malformed or malicious in some way. Ignore.
+
+  // If the packet could not successfully processed for any reason (possibly
+  // due to being malformed or malicious in some way) we ignore it completely.
+  if (!session->Receive(nread, data, addr, flags)) {
     IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
     return;
   }
+
   IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_received);
 }
 
@@ -578,7 +573,7 @@ ssize_t QuicSocket::SendRetry(
   return req->Send();
 }
 
-std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
+std::shared_ptr<QuicSession> QuicSocket::AcceptInitialPacket(
     uint32_t version,
     QuicCID* dcid,
     QuicCID* scid,
@@ -589,41 +584,39 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
   std::shared_ptr<QuicSession> session;
   HandleScope handle_scope(env()->isolate());
   Context::Scope context_scope(env()->context());
-
-  if (static_cast<size_t>(nread) < MIN_INITIAL_QUIC_PKT_SIZE) {
-    // The initial packet is too short, which means it's not a valid
-    // QUIC packet. Ignore so we don't commit any further resources
-    // to handling.
-    IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
-    return session;
-  }
-
-  int err;
   ngtcp2_pkt_hd hd;
-  err = ngtcp2_accept(&hd, data, nread);
-  if (err == -1) {
-    // Not a valid QUIC packet. Ignore so we don't commit any further
-    // resources to handling.
-    IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
-    return session;
-  }
-  if (err == 1) {
-    // It was a QUIC packet, but it was the wrong version. Send a version
-    // negotiation in response but do nothing else.
-    SendVersionNegotiation(version, dcid, scid, addr);
-    return session;
-  }
-  if (GetCurrentSocketAddressCounter(addr) >= max_connections_per_host_) {
-    // The maximum number of connections for this client has been exceeded.
-    // For now, we handle this by just ignoring the packet to keep a malicious
-    // client from causing us to commit resources. However, later on we may
-    // want to revisit to see if there's some other way of handling.
-    IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
-    return session;
-  }
-
   ngtcp2_cid ocid;
   ngtcp2_cid* ocid_ptr = nullptr;
+
+  if (!IsFlagSet(QUICSOCKET_FLAGS_SERVER_LISTENING)) {
+    Debug(this, "QuicSocket is not listening");
+    return session;
+  }
+
+  // TODO(@jasnell): In the future, when the server is busy, handle by
+  // sending a CONNECTION_CLOSE in an initial packet. ngtcp2 currently
+  // does not support doing so.
+  if (IsFlagSet(QUICSOCKET_FLAGS_SERVER_BUSY)) {
+    Debug(this, "QuicSocket is busy");
+    return session;
+  }
+
+  // Perform some initial checks on the packet to see if it is an
+  // acceptable initial packet with the right QUIC version.
+  switch (QuicServerSession::Accept(&hd, data, nread)) {
+    case QuicServerSession::InitialPacketResult::PACKET_VERSION:
+      SendVersionNegotiation(version, dcid, scid, addr);
+      // Fall-through to ignore packet
+    case QuicServerSession::InitialPacketResult::PACKET_IGNORE:
+      return session;
+  }
+
+  // Check to see if the number of connections for this peer has been exceeded.
+  // TODO(@jasnell): In the future, we will handle this by sending a
+  // CONNECTION_CLOSE in an initial packet, but ngtcp2 currently does not
+  // support doing so.
+  if (GetCurrentSocketAddressCounter(addr) >= max_connections_per_host_)
+    return session;
 
   // QUIC has address validation built in to the handshake but allows for
   // an additional explicit validation request using RETRY frames. If we
@@ -631,16 +624,26 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
   // retry token in the packet. If one does not exist, we send a retry with
   // a new token. If it does exist, and if it's valid, we grab the original
   // cid and continue.
+  // TODO(@jasnell): Currently, this performs the address validation on every
+  // initial packet, even if the path for a given address has already been
+  // validated. This is good default behavior because network paths change
+  // and just because a path is valid at one moment, it doesn't make it valid
+  // the next. However, it does introduce an additional bit of latency. In the
+  // future, we may allow for an option to validate a path once per QuicSocket
+  // instance.
   if (IsOptionSet(QUICSOCKET_OPTIONS_VALIDATE_ADDRESS) &&
       hd.type == NGTCP2_PKT_INITIAL) {
     Debug(this, "Performing explicit address validation.");
     if (hd.tokenlen == 0 ||
         VerifyRetryToken(
-            env(), &ocid,
-            &hd, addr,
+            env(),
+            &ocid,
+            &hd,
+            addr,
             &token_crypto_ctx_,
             &token_secret_,
             retry_token_expiration_) != 0) {
+      Debug(this, "A valid retry token was not found. Sending retry.");
       SendRetry(version, dcid, scid, addr);
       return session;
     }
@@ -661,6 +664,11 @@ std::shared_ptr<QuicSession> QuicSocket::ServerReceive(
           server_options_);
   Local<Value> arg = session->object();
   MakeCallback(env()->quic_on_session_ready_function(), 1, &arg);
+
+  // The above MakeCallback will notify the JavaScript side that a new
+  // QuicServerSession has been created in an event emitted on nextTick.
+  // The user may destroy() the QuicServerSession in that event but that
+  // won't impact the code here.
 
   return session;
 }

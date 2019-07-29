@@ -149,7 +149,7 @@ class QuicSocket : public HandleWrap,
       QuicCID* scid,
       const sockaddr* addr);
 
-  std::shared_ptr<QuicSession> ServerReceive(
+  std::shared_ptr<QuicSession> AcceptInitialPacket(
       uint32_t version,
       QuicCID* dcid,
       QuicCID* scid,

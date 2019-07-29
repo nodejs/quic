@@ -115,6 +115,8 @@ QuicSession::QuicSession(
 }
 
 QuicSession::~QuicSession() {
+  // QuicSession instances are never destroyed within the callback scope.
+  CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
   CHECK(IsFlagSet(QUICSESSION_FLAG_DESTROYED));
 
   uint64_t sendbuf_length = sendbuf_.Cancel();
@@ -676,6 +678,65 @@ size_t QuicSession::ReadPeerHandshake(uint8_t* buf, size_t buflen) {
   return n;
 }
 
+bool QuicSession::Receive(
+    ssize_t nread,
+    const uint8_t* data,
+    const struct sockaddr* addr,
+    unsigned int flags) {
+  CHECK(!IsDestroyed());
+
+  IncrementStat(nread, &session_stats_, &session_stats::bytes_received);
+
+  // Closing period starts once ngtcp2 has detected that the session
+  // is being shutdown locally. Note that this is different that the
+  // IsGracefullyClosing() function, which indicates a graceful shutdown that
+  // allows the session and streams to finish naturally. When
+  // IsInClosingPeriod is true, ngtcp2 is actively in the process
+  // of shutting down the connection and a CONNECTION_CLOSE has
+  // already been sent. The only thing we can do at this point is
+  // either ignore the packet or send another CONNECTION_CLOSE.
+  if (IsInClosingPeriod()) {
+    IncrementConnectionCloseAttempts();
+    return ShouldAttemptConnectionClose() ?
+        SendConnectionClose() : true;
+  }
+
+  // When IsInDrainingPeriod is true, ngtcp2 has received a
+  // connection close and we are simply discarding received packets.
+  // No outbound packets may be sent. Return true here because
+  // the packet was correctly processed, even tho it is being
+  // ignored.
+  if (IsInDrainingPeriod())
+    return true;
+
+  // It's possible for the remote address to change from one
+  // packet to the next so we have to look at the addr on
+  // every packet.
+  remote_address_.Copy(addr);
+  QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
+
+  HandleScope handle_scope(env()->isolate());
+  InternalCallbackScope callback_scope(this);
+
+  if (!ReceivePacket(&path, data, nread)) {
+    HandleError();
+    return false;
+  }
+
+  if (IsDestroyed())
+    return true;
+
+  // Only send pending data if we haven't entered draining mode.
+  if (IsInDrainingPeriod())
+    StopRetransmitTimer();
+  else
+    SendPendingData();
+
+  UpdateIdleTimer();
+  UpdateRecoveryStats();
+  return true;
+}
+
 // Called by ngtcp2 when a chunk of peer TLS handshake data is received.
 // For every chunk, we move the TLS handshake further along until it
 // is complete.
@@ -729,18 +790,23 @@ int QuicSession::ReceiveClientInitial(const ngtcp2_cid* dcid) {
   return 0;
 }
 
-int QuicSession::ReceivePacket(
+bool QuicSession::ReceivePacket(
     QuicPath* path,
     const uint8_t* data,
     ssize_t nread) {
   CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
   uint64_t now = uv_hrtime();
   session_stats_.session_received_at = now;
-  return ngtcp2_conn_read_pkt(
+  int err = ngtcp2_conn_read_pkt(
       Connection(),
       **path,
       data, nread,
       now);
+  if (err < 0) {
+    SetLastError(QUIC_ERROR_SESSION, err);
+    return false;
+  }
+  return true;
 }
 
 // Called by ngtcp2 when a chunk of stream data has been received. If
@@ -1249,9 +1315,9 @@ int QuicSession::TLSRead() {
   return ClearTLS(ssl(), !IsServer());
 }
 
-void QuicSession::UpdateIdleTimer(uint64_t timeout) {
+void QuicSession::UpdateIdleTimer() {
   CHECK_NOT_NULL(idle_);
-  idle_->Update(timeout);
+  idle_->Update(ngtcp2_conn_get_idle_timeout(Connection()));
 }
 
 void QuicSession::WriteHandshake(const uint8_t* data, size_t datalen) {
@@ -1439,6 +1505,22 @@ bool QuicSession::UpdateKey() {
 
 
 // QuicServerSession
+QuicServerSession::InitialPacketResult QuicServerSession::Accept(
+    ngtcp2_pkt_hd* hd,
+    const uint8_t* data,
+    ssize_t nread) {
+  // The initial packet is too short and not a valid QUIC packet.
+  if (static_cast<size_t>(nread) < MIN_INITIAL_QUIC_PKT_SIZE)
+    return PACKET_IGNORE;
+
+  switch (ngtcp2_accept(hd, data, nread)) {
+    case -1:
+      return PACKET_IGNORE;
+    case 1:
+      return PACKET_VERSION;
+  }
+  return PACKET_OK;
+}
 
 // The QuicServerSession specializes the QuicSession with server specific
 // behaviors. The key differentiator between client and server lies with
@@ -1561,7 +1643,7 @@ void QuicServerSession::Init(
     ngtcp2_conn_set_retry_ocid(conn, ocid);
   connection_.reset(conn);
 
-  UpdateIdleTimer(ngtcp2_conn_get_idle_timeout(Connection()));
+  UpdateIdleTimer();
 }
 
 void QuicServerSession::InitTLS_Post() {
@@ -1886,63 +1968,6 @@ void QuicSession::UpdateRecoveryStats() {
   recovery_stats_.smoothed_rtt = static_cast<double>(stat.smoothed_rtt);
 }
 
-int QuicServerSession::Receive(
-    ssize_t nread,
-    const uint8_t* data,
-    const struct sockaddr* addr,
-    unsigned int flags) {
-  CHECK(!IsDestroyed());
-
-  IncrementStat(nread, &session_stats_, &session_stats::bytes_received);
-
-  // Closing period starts once ngtcp2 has detected that the session
-  // is being shutdown locally. Note that this is different that the
-  // IsGracefullyClosing() function, which indicates a graceful shutdown that
-  // allows the session and streams to finish naturally. When
-  // IsInClosingPeriod is true, ngtcp2 is actively in the process
-  // of shutting down the connection and a CONNECTION_CLOSE has
-  // already been sent. The only thing we can do at this point is
-  // either ignore the packet or send another CONNECTION_CLOSE.
-  if (IsInClosingPeriod()) {
-    IncrementConnectionCloseAttempts();
-    return ShouldAttemptConnectionClose() ?
-        SendConnectionClose() : 0;
-  }
-
-  // When IsInDrainingPeriod is true, ngtcp2 has received a
-  // connection close and is simply discarding received packets.
-  // No outbound packets may be sent.
-  if (IsInDrainingPeriod())
-    return 0;
-
-  // It's possible for the remote address to change from one
-  // packet to the next so we have to look at the addr on
-  // every packet.
-  remote_address_.Copy(addr);
-  QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
-
-  HandleScope handle_scope(env()->isolate());
-  InternalCallbackScope callback_scope(this);
-
-  int err = ReceivePacket(&path, data, nread);
-  if (err == NGTCP2_ERR_DRAINING) {
-    StartDrainingPeriod();
-    return -1;
-  } else if (ngtcp2_err_is_fatal(err)) {
-    SetLastError(QUIC_ERROR_SESSION, err);
-    HandleError();
-    return -1;
-  }
-
-  if (IsDestroyed() || IsInDrainingPeriod())
-    return 0;
-  SendPendingData();
-  UpdateIdleTimer(ngtcp2_conn_get_idle_timeout(Connection()));
-  UpdateRecoveryStats();
-
-  return 0;
-}
-
 // The QuicSocket maintains a map of std::shared_ptr's that keep
 // the QuicSession instance alive. Once socket_->RemoveSession()
 // is called, the QuicSession instance will be freed if there are
@@ -1975,7 +2000,7 @@ bool QuicServerSession::SendConnectionClose() {
   if (!StartClosingPeriod())
     return false;
 
-  UpdateIdleTimer(ngtcp2_conn_get_idle_timeout(Connection()));
+  UpdateIdleTimer();
   CHECK_GT(conn_closebuf_.size, 0);
   sendbuf_.Cancel();
   // We don't use std::move here because we do not want
@@ -1995,7 +2020,7 @@ bool QuicServerSession::StartClosingPeriod() {
     return true;
 
   StopRetransmitTimer();
-  UpdateIdleTimer(ngtcp2_conn_get_idle_timeout(Connection()));
+  UpdateIdleTimer();
 
   sendbuf_.Cancel();
 
@@ -2019,12 +2044,6 @@ bool QuicServerSession::StartClosingPeriod() {
   }
   conn_closebuf_.Realloc(nwrite);
   return true;
-}
-
-void QuicServerSession::StartDrainingPeriod() {
-  CHECK(!IsDestroyed());
-  StopRetransmitTimer();
-  UpdateIdleTimer(ngtcp2_conn_get_idle_timeout(Connection()));
 }
 
 int QuicServerSession::TLSHandshake_Initial() {
@@ -2240,7 +2259,7 @@ bool QuicClientSession::Init(
     }
   }
 
-  UpdateIdleTimer(ngtcp2_conn_get_idle_timeout(conn));
+  UpdateIdleTimer();
   return true;
 }
 
@@ -2470,39 +2489,6 @@ int QuicClientSession::OnTLSStatus() {
   return 1;
 }
 
-int QuicClientSession::Receive(
-    ssize_t nread,
-    const uint8_t* data,
-    const struct sockaddr* addr,
-    unsigned int flags) {
-  CHECK(!IsDestroyed());
-
-  IncrementStat(nread, &session_stats_, &session_stats::bytes_received);
-
-  // It's possible for the remote address to change from one
-  // packet to the next so we have to look at the addr on
-  // every packet.
-  remote_address_.Copy(addr);
-  QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
-
-  HandleScope handle_scope(env()->isolate());
-  InternalCallbackScope callback_scope(this);
-
-  int err = ReceivePacket(&path, data, nread);
-  if (ngtcp2_err_is_fatal(err)) {
-    ImmediateClose();
-    return err;
-  }
-
-  if (IsDestroyed() || IsInDrainingPeriod())
-    return 0;
-  SendPendingData();
-  UpdateIdleTimer(ngtcp2_conn_get_idle_timeout(Connection()));
-  UpdateRecoveryStats();
-
-  return 0;
-}
-
 // A HelloRetry will effectively restart the TLS handshake process
 // by generating new initial crypto material.
 bool QuicClientSession::ReceiveRetry() {
@@ -2523,7 +2509,7 @@ bool QuicClientSession::SendConnectionClose() {
   if (IsInDrainingPeriod())
     return true;
 
-  UpdateIdleTimer(ngtcp2_conn_get_idle_timeout(Connection()));
+  UpdateIdleTimer();
   MallocedBuffer<uint8_t> data(max_pktlen_);
   sendbuf_.Cancel();
   QuicError error = GetLastError();

@@ -247,6 +247,11 @@ class QuicSession : public AsyncWrap,
   bool OpenBidirectionalStream(int64_t* stream_id);
   bool OpenUnidirectionalStream(int64_t* stream_id);
   size_t ReadPeerHandshake(uint8_t* buf, size_t buflen);
+  bool Receive(
+      ssize_t nread,
+      const uint8_t* data,
+      const struct sockaddr* addr,
+      unsigned int flags);
   void ReceiveStreamData(
       int64_t stream_id,
       int fin,
@@ -318,11 +323,6 @@ class QuicSession : public AsyncWrap,
       const uint8_t* secret,
       size_t secretlen) = 0;
   virtual int OnTLSStatus() = 0;
-  virtual int Receive(
-      ssize_t nread,
-      const uint8_t* data,
-      const struct sockaddr* addr,
-      unsigned int flags) = 0;
   virtual bool SendConnectionClose() = 0;
   virtual int TLSHandshake_Initial() = 0;
 
@@ -493,7 +493,7 @@ class QuicSession : public AsyncWrap,
       uint64_t offset,
       const uint8_t* data,
       size_t datalen);
-  int ReceivePacket(QuicPath* path, const uint8_t* data, ssize_t nread);
+  bool ReceivePacket(QuicPath* path, const uint8_t* data, ssize_t nread);
   void RemoveConnectionID(const ngtcp2_cid* cid);
   void ScheduleRetransmit();
   bool SendPacket();
@@ -728,7 +728,7 @@ class QuicSession : public AsyncWrap,
   static inline void OnIdleTimeoutCB(void* data);
   static inline void OnRetransmitTimeoutCB(void* data);
 
-  void UpdateIdleTimer(uint64_t timeout);
+  void UpdateIdleTimer();
   void UpdateRetransmitTimer(uint64_t timeout);
   void StopRetransmitTimer();
   void StopIdleTimer();
@@ -996,6 +996,17 @@ class QuicSession : public AsyncWrap,
 
 class QuicServerSession : public QuicSession {
  public:
+  typedef enum InitialPacketResult : int {
+    PACKET_OK,
+    PACKET_IGNORE,
+    PACKET_VERSION
+  } InitialPacketResult;
+
+  static InitialPacketResult Accept(
+    ngtcp2_pkt_hd* hd,
+    const uint8_t* data,
+    ssize_t nread);
+
   static void Initialize(
       Environment* env,
       v8::Local<v8::Object> target,
@@ -1057,18 +1068,12 @@ class QuicServerSession : public QuicSession {
       int name,
       const uint8_t* secret,
       size_t secretlen) override;
-  int Receive(
-      ssize_t nread,
-      const uint8_t* data,
-      const struct sockaddr* addr,
-      unsigned int flags) override;
   void RemoveFromSocket() override;
 
   int TLSHandshake_Initial() override;
   int VerifyPeerIdentity(const char* hostname) override;
 
   bool StartClosingPeriod();
-  void StartDrainingPeriod();
 
   ngtcp2_crypto_level GetServerCryptoLevel() override {
     return tx_crypto_level_;
@@ -1187,11 +1192,6 @@ class QuicClientSession : public QuicSession {
   void HandleError() override;
   void InitTLS_Post() override;
   int OnKey(int name, const uint8_t* secret, size_t secretlen) override;
-  int Receive(
-      ssize_t nread,
-      const uint8_t* data,
-      const struct sockaddr* addr,
-      unsigned int flags) override;
   bool ReceiveRetry() override;
   bool SelectPreferredAddress(
     ngtcp2_addr* dest,
