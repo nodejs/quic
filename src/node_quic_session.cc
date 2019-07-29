@@ -299,8 +299,10 @@ void QuicSession::Destroy() {
   // CONNECTION_CLOSE is not going to be sent because ngtcp2
   // currently does not yet support it. That will need to be
   // addressed.
-  if (!IsInClosingPeriod() && !IsInDrainingPeriod()) {
-    Debug(this, "Making one last attempt to send a connection close");
+  if (!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this) &&
+      !IsInClosingPeriod() &&
+      !IsInDrainingPeriod()) {
+    Debug(this, "Making attempt to send a connection close");
     SetLastError(QUIC_ERROR_SESSION, NGTCP2_NO_ERROR);
     SendConnectionClose();
   }
@@ -741,8 +743,16 @@ bool QuicSession::Receive(
     return false;
   }
 
-  if (IsDestroyed())
+  if (IsDestroyed()) {
+    // If the QuicSession has been destroyed but it is not
+    // in the closing period, a CONNECTION_CLOSE has not yet
+    // been sent to the peer. Let's attempt to send one.
+    if (!IsInClosingPeriod() && !IsInDrainingPeriod()) {
+      SetLastError(QUIC_ERROR_SESSION, NGTCP2_NO_ERROR);
+      SendConnectionClose();
+    }
     return true;
+  }
 
   // Only send pending data if we haven't entered draining mode.
   if (IsInDrainingPeriod())
@@ -2007,7 +2017,6 @@ void QuicServerSession::RemoveFromSocket() {
 // the end of this QuicSession.
 bool QuicServerSession::SendConnectionClose() {
   CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
-  CHECK(!IsDestroyed());
 
   // Do not send any frames at all if we're in the draining period.
   if (IsInDrainingPeriod())
@@ -2523,7 +2532,6 @@ bool QuicClientSession::ReceiveRetry() {
 // based on the current value of last_error_.
 bool QuicClientSession::SendConnectionClose() {
   CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
-  CHECK(!IsDestroyed());
 
   // Do not send any frames if we are in the draining period
   if (IsInDrainingPeriod())
