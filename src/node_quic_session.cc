@@ -208,7 +208,6 @@ void QuicSession::AckedStreamDataOffset(
 // Add the given QuicStream to this QuicSession's collection of streams. All
 // streams added must be removed before the QuicSession instance is freed.
 void QuicSession::AddStream(QuicStream* stream) {
-  CHECK(!IsDestroyed());
   CHECK(!IsGracefullyClosing());
   Debug(this, "Adding stream %" PRId64 " to session.", stream->GetID());
   streams_.emplace(stream->GetID(), stream);
@@ -254,7 +253,6 @@ void QuicSession::ImmediateClose() {
   // naming a bit of a misnomer in that the connection is
   // not immediately torn down, but is allowed to drain
   // properly per the QUIC spec description of "immediate close".
-  CHECK(!IsDestroyed());
   Debug(this, "Immediate close");
   HandleScope scope(env()->isolate());
   Local<Context> context = env()->context();
@@ -340,6 +338,8 @@ ssize_t QuicSession::DoDecrypt(
     size_t noncelen,
     const uint8_t* ad,
     size_t adlen) {
+  if (IsDestroyed())
+    return NGTCP2_ERR_CALLBACK_FAILURE;
   CHECK(!IsDestroyed());
   return Decrypt(
       dest, destlen,
@@ -361,7 +361,8 @@ ssize_t QuicSession::DoEncrypt(
     size_t noncelen,
     const uint8_t* ad,
     size_t adlen) {
-  CHECK(!IsDestroyed());
+  if (IsDestroyed())
+    return NGTCP2_ERR_CALLBACK_FAILURE;
   return Encrypt(
       dest, destlen,
       plaintext, plaintextlen,
@@ -378,7 +379,8 @@ ssize_t QuicSession::DoHPMask(
     size_t keylen,
     const uint8_t* sample,
     size_t samplelen) {
-  CHECK(!IsDestroyed());
+  if (IsDestroyed())
+    return NGTCP2_ERR_CALLBACK_FAILURE;
   return HP_Mask(
       dest, destlen,
       crypto_ctx_,
@@ -397,7 +399,8 @@ ssize_t QuicSession::DoHSDecrypt(
     size_t noncelen,
     const uint8_t* ad,
     size_t adlen) {
-  CHECK(!IsDestroyed());
+  if (IsDestroyed())
+    return NGTCP2_ERR_CALLBACK_FAILURE;
   return Decrypt(
       dest, destlen,
       ciphertext, ciphertextlen,
@@ -418,7 +421,8 @@ ssize_t QuicSession::DoHSEncrypt(
     size_t noncelen,
     const uint8_t* ad,
     size_t adlen) {
-  CHECK(!IsDestroyed());
+  if (IsDestroyed())
+    return NGTCP2_ERR_CALLBACK_FAILURE;
   return Encrypt(
       dest, destlen,
       plaintext, plaintextlen,
@@ -435,7 +439,8 @@ ssize_t QuicSession::DoInHPMask(
     size_t keylen,
     const uint8_t* sample,
     size_t samplelen) {
-  CHECK(!IsDestroyed());
+  if (IsDestroyed())
+    return NGTCP2_ERR_CALLBACK_FAILURE;
   return HP_Mask(
       dest, destlen,
       hs_crypto_ctx_,
@@ -450,7 +455,8 @@ void QuicSession::ExtendMaxStreamData(int64_t stream_id, uint64_t max_data) {
 }
 
 int QuicSession::ExtendMaxStreams(bool bidi, uint64_t max_streams) {
-  CHECK(!IsDestroyed());
+  if (IsDestroyed())
+    return 0;
   HandleScope scope(env()->isolate());
   Local<Context> context = env()->context();
   Context::Scope context_scope(context);
@@ -463,12 +469,10 @@ int QuicSession::ExtendMaxStreams(bool bidi, uint64_t max_streams) {
 }
 
 int QuicSession::ExtendMaxStreamsUni(uint64_t max_streams) {
-  CHECK(!IsDestroyed());
   return ExtendMaxStreams(false, max_streams);
 }
 
 int QuicSession::ExtendMaxStreamsBidi(uint64_t max_streams) {
-  CHECK(!IsDestroyed());
   return ExtendMaxStreams(true, max_streams);
 }
 
@@ -599,7 +603,6 @@ void QuicSession::InitTLS() {
 }
 
 bool QuicSession::IsHandshakeCompleted() {
-  CHECK(!IsDestroyed());
   return ngtcp2_conn_get_handshake_completed(Connection());
 }
 
@@ -691,7 +694,6 @@ int QuicSession::PathValidation(
 
 // Reads a chunk of received peer TLS handshake data for processing
 size_t QuicSession::ReadPeerHandshake(uint8_t* buf, size_t buflen) {
-  CHECK(!IsDestroyed());
   size_t n = std::min(buflen, peer_handshake_.size() - ncread_);
   std::copy_n(std::begin(peer_handshake_) + ncread_, n, buf);
   ncread_ += n;
@@ -703,7 +705,8 @@ bool QuicSession::Receive(
     const uint8_t* data,
     const struct sockaddr* addr,
     unsigned int flags) {
-  CHECK(!IsDestroyed());
+  if (IsDestroyed())
+    return false;
 
   IncrementStat(nread, &session_stats_, &session_stats::bytes_received);
 
@@ -735,12 +738,17 @@ bool QuicSession::Receive(
   remote_address_.Copy(addr);
   QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
 
-  HandleScope handle_scope(env()->isolate());
-  InternalCallbackScope callback_scope(this);
-
-  if (!ReceivePacket(&path, data, nread)) {
-    HandleError();
-    return false;
+  {
+    // These are within a scope to ensure that the InternalCallbackScope
+    // and HandleScope are both exited before continuing on with the
+    // function. This allows any nextTicks and queued tasks to be processed
+    // before we continue.
+    HandleScope handle_scope(env()->isolate());
+    InternalCallbackScope callback_scope(this);
+    if (!ReceivePacket(&path, data, nread)) {
+      HandleError();
+      return false;
+    }
   }
 
   if (IsDestroyed()) {
@@ -773,7 +781,8 @@ int QuicSession::ReceiveCryptoData(
     uint64_t offset,
     const uint8_t* data,
     size_t datalen) {
-  CHECK(!IsDestroyed());
+  if (IsDestroyed())
+    return NGTCP2_ERR_CALLBACK_FAILURE;
   Debug(this, "Receiving %d bytes of crypto data.", datalen);
 
   int err = WritePeerHandshake(crypto_level, data, datalen);
@@ -794,7 +803,9 @@ int QuicSession::ReceiveCryptoData(
 // establishing a communication channel is to setup the keys
 // that will be used to secure the communication.
 int QuicSession::ReceiveClientInitial(const ngtcp2_cid* dcid) {
-  CHECK(!IsDestroyed());
+  if (IsDestroyed())
+    return NGTCP2_ERR_CALLBACK_FAILURE;
+
   CHECK(Type() == QUICSESSION_TYPE_SERVER);
   Debug(this, "Receiving client initial parameters.");
 
@@ -854,7 +865,9 @@ void QuicSession::ReceiveStreamData(
   if (UNLIKELY(fin == 0 && datalen == 0))
     return;
 
-  CHECK(!IsDestroyed());
+  if (IsDestroyed())
+    return;
+
   HandleScope scope(env()->isolate());
   Context::Scope context_scope(env()->context());
 
@@ -889,7 +902,8 @@ void QuicSession::ReceiveStreamData(
 
 // Removes the given connection id from the QuicSession.
 void QuicSession::RemoveConnectionID(const ngtcp2_cid* cid) {
-  CHECK(!IsDestroyed());
+  if (IsDestroyed())
+    return;
   state_[IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT] =
     state_[IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT] - 1;
   CHECK_GE(state_[IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT], 0);
@@ -920,7 +934,6 @@ void QuicSession::RemoveFromSocket() {
 // Removes the given stream from the QuicSession. All streams must
 // be removed before the QuicSession is destroyed.
 void QuicSession::RemoveStream(int64_t stream_id) {
-  CHECK(!IsDestroyed());
   Debug(this, "Removing stream %" PRId64, stream_id);
 
   // This will have the side effect of destroying the QuicSession
@@ -969,15 +982,16 @@ bool QuicSession::SendStreamData(QuicStream* stream) {
   // it is not permitted to be called while we are running within
   // an ngtcp2 callback function.
   CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
-  CHECK(!IsDestroyed());
 
   // No stream data may be serialized and sent if:
+  //   - the QuicSession is destroyed
   //   - the QuicStream was never writable,
   //   - a final stream frame has already been sent,
   //   - the QuicSession is in the draining period,
   //   - the QuicSession is in the closing period, or
   //   - we are blocked from sending any data because of flow control
-  if (!stream->WasEverWritable() ||
+  if (IsDestroyed() ||
+      !stream->WasEverWritable() ||
       stream->HasSentFin() ||
       IsInDrainingPeriod() ||
       IsInClosingPeriod() ||
@@ -1155,7 +1169,6 @@ void QuicSession::SendPendingData() {
 
 // Notifies the ngtcp2_conn that the TLS handshake is completed.
 void QuicSession::SetHandshakeCompleted() {
-  CHECK(!IsDestroyed());
   ngtcp2_conn_handshake_completed(Connection());
 }
 
@@ -1165,13 +1178,11 @@ void QuicSession::SetLocalAddress(const ngtcp2_addr* addr) {
 
 // Set the transport parameters received from the remote peer
 int QuicSession::SetRemoteTransportParams(ngtcp2_transport_params* params) {
-  CHECK(!IsDestroyed());
   StoreRemoteTransportParams(params);
   return ngtcp2_conn_set_remote_transport_params(Connection(), params);
 }
 
 int QuicSession::ShutdownStream(int64_t stream_id, uint64_t code) {
-  CHECK(!IsDestroyed());
   // First, update the internal ngtcp2 state of the given stream
   // and schedule the STOP_SENDING and RESET_STREAM frames as
   // appropriate.
@@ -1240,7 +1251,6 @@ void QuicSession::StopRetransmitTimer() {
 // a stream commitment attack. The only exception is shutting the
 // stream down explicitly if we are in a graceful close period.
 void QuicSession::StreamOpen(int64_t stream_id) {
-  CHECK(!IsDestroyed());
   if (IsGracefullyClosing()) {
     ngtcp2_conn_shutdown_stream(
         Connection(),
@@ -1272,7 +1282,8 @@ void QuicSession::StreamReset(
     int64_t stream_id,
     uint64_t final_size,
     uint64_t app_error_code) {
-  CHECK(!IsDestroyed());
+  if (IsDestroyed())
+    return;
   QuicStream* stream = FindStream(stream_id);
   if (stream == nullptr)
     return;
@@ -1296,7 +1307,8 @@ void QuicSession::StreamReset(
 // multiple times while handshake data is being passed back and forth
 // between the peers.
 int QuicSession::TLSHandshake() {
-  CHECK(!IsDestroyed());
+  if (IsDestroyed())
+    return 0;
 
   ClearTLSError();
 
@@ -1338,7 +1350,6 @@ int QuicSession::TLSHandshake() {
 // consumed by ngtcp2. That's ok and the data is just extraneous. We just
 // read it and throw it away, unless there's an error.
 int QuicSession::TLSRead() {
-  CHECK(!IsDestroyed());
   ClearTLSError();
   return ClearTLS(ssl(), !Type() == QUICSESSION_TYPE_SERVER);
 }
@@ -1349,7 +1360,8 @@ void QuicSession::UpdateIdleTimer() {
 }
 
 void QuicSession::WriteHandshake(const uint8_t* data, size_t datalen) {
-  CHECK(!IsDestroyed());
+  if (IsDestroyed())
+    return;
   Debug(this, "Writing %d bytes of handshake data.", datalen);
   MallocedBuffer<uint8_t> buffer(datalen);
   memcpy(buffer.data, data, datalen);
@@ -1416,7 +1428,6 @@ int QuicSession::WritePeerHandshake(
     ngtcp2_crypto_level crypto_level,
     const uint8_t* data,
     size_t datalen) {
-  CHECK(!IsDestroyed());
   if (rx_crypto_level_ != crypto_level)
     return -1;
   if (peer_handshake_.size() + datalen > max_crypto_buffer_)
@@ -1429,7 +1440,8 @@ int QuicSession::WritePeerHandshake(
 // Called by ngtcp2 when the QuicSession keys need to be updated. This may
 // happen multiple times through the lifetime of the QuicSession.
 bool QuicSession::UpdateKey() {
-  CHECK(!IsDestroyed());
+  if (IsDestroyed())
+    return false;
 
   // There's generally no user code that should be able to
   // run while UpdateKey is running, but we need to gate on
@@ -1895,7 +1907,6 @@ int QuicServerSession::OnKey(
     int name,
     const uint8_t* secret,
     size_t secretlen) {
-  CHECK(!IsDestroyed());
   switch (name) {
     case SSL_KEY_CLIENT_EARLY_TRAFFIC:
     case SSL_KEY_CLIENT_HANDSHAKE_TRAFFIC:
@@ -2043,7 +2054,8 @@ bool QuicServerSession::SendConnectionClose() {
 }
 
 bool QuicServerSession::StartClosingPeriod() {
-  CHECK(!IsDestroyed());
+  if (IsDestroyed())
+    return false;
   if (IsInClosingPeriod())
     return true;
 
@@ -2180,7 +2192,8 @@ void QuicClientSession::VersionNegotiation(
       const ngtcp2_pkt_hd* hd,
       const uint32_t* sv,
       size_t nsv) {
-  CHECK(!IsDestroyed());
+  if (IsDestroyed())
+    return;
   HandleScope scope(env()->isolate());
   Local<Context> context = env()->context();
   Context::Scope context_scope(context);
@@ -2433,7 +2446,6 @@ int QuicClientSession::OnKey(
     int name,
     const uint8_t* secret,
     size_t secretlen) {
-  CHECK(!IsDestroyed());
   switch (name) {
     case SSL_KEY_CLIENT_EARLY_TRAFFIC:
     case SSL_KEY_CLIENT_HANDSHAKE_TRAFFIC:
@@ -2521,7 +2533,8 @@ int QuicClientSession::OnTLSStatus() {
 // A HelloRetry will effectively restart the TLS handshake process
 // by generating new initial crypto material.
 bool QuicClientSession::ReceiveRetry() {
-  CHECK(!IsDestroyed());
+  if (IsDestroyed())
+    return false;
   Debug(this, "A retry packet was received. Restarting the handshake.");
   IncrementStat(1, &session_stats_, &session_stats::retry_count);
   return SetupInitialCryptoContext();
@@ -2596,7 +2609,6 @@ bool QuicClientSession::SetSession(Local<Value> buffer) {
 // The very first step is to setup the initial crypto context on the
 // client side by creating the initial keying material.
 bool QuicClientSession::SetupInitialCryptoContext() {
-  CHECK(!IsDestroyed());
   Debug(this, "Setting up initial crypto context");
 
   CryptoInitialParams params;

@@ -635,12 +635,10 @@ inline void QuicSession::SetLastError(QuicErrorFamily family, int code) {
 }
 
 inline bool QuicSession::IsInClosingPeriod() {
-  CHECK(!IsDestroyed());
   return ngtcp2_conn_is_in_closing_period(Connection());
 }
 
 inline bool QuicSession::IsInDrainingPeriod() {
-  CHECK(!IsDestroyed());
   return ngtcp2_conn_is_in_draining_period(Connection());
 }
 
