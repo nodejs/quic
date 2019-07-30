@@ -609,6 +609,9 @@ std::shared_ptr<QuicSession> QuicSocket::AcceptInitialPacket(
       // Fall-through to ignore packet
     case QuicServerSession::InitialPacketResult::PACKET_IGNORE:
       return session;
+    case QuicServerSession::InitialPacketResult::PACKET_OK:
+      // Fall-through
+      break;
   }
 
   // Check to see if the number of connections for this peer has been exceeded.

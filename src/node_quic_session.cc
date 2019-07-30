@@ -842,7 +842,8 @@ bool QuicSession::ReceivePacket(
       data, nread,
       now);
   if (err < 0) {
-    SetLastError(QUIC_ERROR_SESSION, err);
+    if (err != NGTCP2_ERR_RECV_VERSION_NEGOTIATION)
+      SetLastError(QUIC_ERROR_SESSION, err);
     return false;
   }
   return true;
@@ -1326,7 +1327,7 @@ int QuicSession::TLSHandshake() {
         session_stats_.handshake_continue_at > 0 ?
             session_stats_.handshake_continue_at :
             session_stats_.handshake_start_at;
-    crypto_handshake_rate_.Record(now - session_stats_.handshake_start_at);
+    crypto_handshake_rate_.Record(now - ts);
     // TODO(@jasnell): Monitor the rate to detect slow handshake
   }
   session_stats_.handshake_continue_at = now;
@@ -2172,7 +2173,7 @@ std::shared_ptr<QuicSession> QuicClientSession::New(
           options);
 
   session->AddToSocket(socket);
-  int err = session->TLSHandshake();
+  session->TLSHandshake();
   return session;
 }
 
@@ -2222,9 +2223,7 @@ void QuicClientSession::VersionNegotiation(
 }
 
 void QuicClientSession::HandleError() {
-  if (connection_ &&
-      !IsInClosingPeriod() &&
-      GetLastError().code != NGTCP2_ERR_RECV_VERSION_NEGOTIATION) {
+  if (connection_ && !IsInClosingPeriod()) {
     QuicSession::HandleError();
   }
 }
@@ -2555,12 +2554,6 @@ bool QuicClientSession::SendConnectionClose() {
   sendbuf_.Cancel();
   QuicError error = GetLastError();
 
-  // Do not send a connection close for version negotiation
-  if (error.family == QUIC_ERROR_SESSION &&
-      error.code == NGTCP2_ERR_RECV_VERSION_NEGOTIATION) {
-    return true;
-  }
-
   if (!WritePackets())
     return false;
 
@@ -2696,7 +2689,6 @@ int QuicClientSession::VerifyPeerIdentity(const char* hostname) {
 
 namespace {
 void QuicSessionSetSocket(const FunctionCallbackInfo<Value>& args) {
-  Environment* env = Environment::GetCurrent(args);
   QuicClientSession* session;
   ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
   CHECK(args[0]->IsObject());
