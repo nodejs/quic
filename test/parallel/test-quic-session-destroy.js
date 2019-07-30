@@ -1,4 +1,3 @@
-// Flags: --expose-internals
 'use strict';
 
 // Test that destroying a QuicStream immediately and synchronously
@@ -8,14 +7,6 @@
 const common = require('../common');
 if (!common.hasCrypto)
   common.skip('missing crypto');
-
-const { internalBinding } = require('internal/test/binding');
-const {
-  constants: {
-    NGTCP2_NO_ERROR,
-    QUIC_ERROR_APPLICATION,
-  }
-} = internalBinding('quic');
 
 const fs = require('fs');
 const fixtures = require('../common/fixtures');
