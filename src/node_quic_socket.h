@@ -14,6 +14,7 @@
 #include "v8.h"
 #include "uv.h"
 
+#include <deque>
 #include <map>
 #include <string>
 #include <vector>
@@ -28,8 +29,18 @@ using v8::Value;
 
 namespace quic {
 
+static constexpr size_t MAX_VALIDATE_ADDRESS_LRU = 10;
+
 typedef enum QuicSocketOptions : uint32_t {
-  QUICSOCKET_OPTIONS_VALIDATE_ADDRESS = 0x1
+  // When enabled the QuicSocket will validate the address
+  // using a RETRY packet to the peer.
+  QUICSOCKET_OPTIONS_VALIDATE_ADDRESS = 0x1,
+
+  // When enabled, and the VALIDATE_ADDRESS option is also
+  // set, the QuicSocket will use an LRU cache to track
+  // validated addresses. Address validation will be skipped
+  // if the address is currently in the cache.
+  QUICSOCKET_OPTIONS_VALIDATE_ADDRESS_LRU = 0x2,
 } QuicSocketOptions;
 
 class QuicSocket : public HandleWrap,
@@ -149,6 +160,10 @@ class QuicSocket : public HandleWrap,
       QuicCID* scid,
       const sockaddr* addr);
 
+  void SetValidatedAddress(const sockaddr* addr);
+
+  bool IsValidatedAddress(const sockaddr* addr);
+
   std::shared_ptr<QuicSession> AcceptInitialPacket(
       uint32_t version,
       QuicCID* dcid,
@@ -246,6 +261,12 @@ class QuicSocket : public HandleWrap,
   // until the value falls back below the limit.
   std::unordered_map<const sockaddr*, size_t, SocketAddress::Hash>
     addr_counts_;
+
+  // The validated_addrs_ vector is used as an LRU cache for
+  // validated addresses only when the VALIDATE_ADDRESS_LRU
+  // option is set.
+  typedef size_t SocketAddressHash;
+  std::deque<SocketAddressHash> validated_addrs_;
 
   struct socket_stats {
     // The timestamp at which the socket was created

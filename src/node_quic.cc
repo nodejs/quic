@@ -272,6 +272,9 @@ void Initialize(Local<Object> target,
   NODE_DEFINE_CONSTANT(
       constants,
       QUICSOCKET_OPTIONS_VALIDATE_ADDRESS);
+  NODE_DEFINE_CONSTANT(
+      constants,
+      QUICSOCKET_OPTIONS_VALIDATE_ADDRESS_LRU);
 
   target->Set(context,
               env->constants_string(),

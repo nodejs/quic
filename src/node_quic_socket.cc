@@ -573,6 +573,29 @@ ssize_t QuicSocket::SendRetry(
   return req->Send();
 }
 
+namespace {
+  SocketAddress::Hash addr_hash;
+};
+
+void QuicSocket::SetValidatedAddress(const sockaddr* addr) {
+  if (IsOptionSet(QUICSOCKET_OPTIONS_VALIDATE_ADDRESS_LRU)) {
+    // Remove the oldest item if we've hit the LRU limit
+    validated_addrs_.push_back(addr_hash(addr));
+    if (validated_addrs_.size() > MAX_VALIDATE_ADDRESS_LRU)
+      validated_addrs_.pop_front();
+  }
+}
+
+bool QuicSocket::IsValidatedAddress(const sockaddr* addr) {
+  if (IsOptionSet(QUICSOCKET_OPTIONS_VALIDATE_ADDRESS_LRU)) {
+    auto res = std::find(std::begin(validated_addrs_),
+                         std::end(validated_addrs_),
+                         addr_hash((addr)));
+    return res != std::end(validated_addrs_);
+  }
+  return false;
+}
+
 std::shared_ptr<QuicSession> QuicSocket::AcceptInitialPacket(
     uint32_t version,
     QuicCID* dcid,
@@ -627,31 +650,33 @@ std::shared_ptr<QuicSession> QuicSocket::AcceptInitialPacket(
   // retry token in the packet. If one does not exist, we send a retry with
   // a new token. If it does exist, and if it's valid, we grab the original
   // cid and continue.
-  // TODO(@jasnell): Currently, this performs the address validation on every
-  // initial packet, even if the path for a given address has already been
-  // validated. This is good default behavior because network paths change
-  // and just because a path is valid at one moment, it doesn't make it valid
-  // the next. However, it does introduce an additional bit of latency. In the
-  // future, we may allow for an option to validate a path once per QuicSocket
-  // instance.
   if (IsOptionSet(QUICSOCKET_OPTIONS_VALIDATE_ADDRESS) &&
       hd.type == NGTCP2_PKT_INITIAL) {
-    Debug(this, "Performing explicit address validation.");
-    if (hd.tokenlen == 0 ||
-        VerifyRetryToken(
-            env(),
-            &ocid,
-            &hd,
-            addr,
-            &token_crypto_ctx_,
-            &token_secret_,
-            retry_token_expiration_) != 0) {
-      Debug(this, "A valid retry token was not found. Sending retry.");
-      SendRetry(version, dcid, scid, addr);
-      return session;
+      // If the VALIDATE_ADDRESS_LRU option is set, IsValidatedAddress
+      // will check to see if the given address is in the validated_addrs_
+      // LRU cache. If it is, we'll skip the validation step entirely.
+      // The VALIDATE_ADDRESS_LRU option is disable by default.
+    if (!IsValidatedAddress(addr)) {
+      Debug(this, "Performing explicit address validation.");
+      if (hd.tokenlen == 0 ||
+          VerifyRetryToken(
+              env(),
+              &ocid,
+              &hd,
+              addr,
+              &token_crypto_ctx_,
+              &token_secret_,
+              retry_token_expiration_) != 0) {
+        Debug(this, "A valid retry token was not found. Sending retry.");
+        SendRetry(version, dcid, scid, addr);
+        return session;
+      }
+      Debug(this, "A valid retry token was found. Continuing.");
+      SetValidatedAddress(addr);
+      ocid_ptr = &ocid;
+    } else {
+      Debug(this, "Skipping validation for recently validated address.");
     }
-    Debug(this, "A valid retry token was found. Continuing.");
-    ocid_ptr = &ocid;
   }
 
   session =

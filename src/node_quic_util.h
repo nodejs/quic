@@ -306,6 +306,11 @@ class SocketAddress {
   sockaddr_storage address_;
 };
 
+class SocketAddressLRU : public MemoryRetainer {
+ public:
+ private:
+};
+
 class QuicPath {
  public:
   QuicPath(
