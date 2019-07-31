@@ -329,7 +329,9 @@ void QuicSession::Destroy() {
   // that pointer, allowing the QuicSession to be
   // deconstructed once the stack unwinds and any
   // remaining shared_ptr instances fall out of scope.
+  std::shared_ptr<QuicSession> ptr = this->shared_from_this();
   RemoveFromSocket();
+  ptr.reset();
 }
 
 
@@ -1090,6 +1092,16 @@ bool QuicSession::SendStreamData(QuicStream* stream) {
           // congestion window has expanded.
           Debug(stream, "Congestion limit reached");
           return true;
+        case NGTCP2_ERR_PKT_NUM_EXHAUSTED:
+          // There is a finite number of packets that can be sent
+          // per connection. Once those are exhausted, there's
+          // absolutely nothing we can do except immediately
+          // and silently tear down the QuicSession. This has
+          // to be silent because we can't even send a
+          // CONNECTION_CLOSE since even those require a
+          // packet number.
+          SilentClose();
+          return false;
         case NGTCP2_ERR_STREAM_DATA_BLOCKED:
           Debug(stream, "Stream data blocked");
           return true;
@@ -1253,6 +1265,7 @@ void QuicSession::SilentClose() {
   Context::Scope context_scope(env()->context());
   // Grab a shared pointer to this to prevent the QuicSession
   // from being freed while the MakeCallback is running.
+  SetFlag(QUICSESSION_FLAG_SILENT_CLOSE);
   std::shared_ptr<QuicSession> ptr(this->shared_from_this());
   MakeCallback(env()->quic_on_session_silent_close_function(), 0, nullptr);
 }
@@ -1460,13 +1473,26 @@ bool QuicSession::WritePackets() {
             data.data,
             max_pktlen_,
             uv_hrtime());
-
-    if (nwrite == 0)
-      return true;
-    else if (nwrite < 0) {
-      SetLastError(QUIC_ERROR_SESSION, static_cast<int>(nwrite));
-      return false;
+    if (nwrite <= 0) {
+      switch (nwrite) {
+        case 0:
+          return true;
+        case NGTCP2_ERR_PKT_NUM_EXHAUSTED:
+          // There is a finite number of packets that can be sent
+          // per connection. Once those are exhausted, there's
+          // absolutely nothing we can do except immediately
+          // and silently tear down the QuicSession. This has
+          // to be silent because we can't even send a
+          // CONNECTION_CLOSE since even those require a
+          // packet number.
+          SilentClose();
+          return false;
+        default:
+          SetLastError(QUIC_ERROR_SESSION, static_cast<int>(nwrite));
+          return false;
+      }
     }
+
     data.Realloc(nwrite);
     remote_address_.Update(&path.path.remote);
     sendbuf_.Push(std::move(data));
@@ -2087,8 +2113,9 @@ void QuicServerSession::RemoveFromSocket() {
 bool QuicServerSession::SendConnectionClose() {
   CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
 
-  // Do not send any frames at all if we're in the draining period.
-  if (IsInDrainingPeriod())
+  // Do not send any frames at all if we're in the draining period
+  // or in the middle of a silent close
+  if (IsInDrainingPeriod() || IsFlagSet(QUICSESSION_FLAG_SILENT_CLOSE))
     return true;
 
   if (!WritePackets())
@@ -2137,7 +2164,10 @@ bool QuicServerSession::StartClosingPeriod() {
           error.code,
           uv_hrtime());
   if (nwrite < 0) {
-    SetLastError(QUIC_ERROR_SESSION, static_cast<int>(nwrite));
+    if (nwrite == NGTCP2_ERR_PKT_NUM_EXHAUSTED)
+      SilentClose();
+    else
+      SetLastError(QUIC_ERROR_SESSION, static_cast<int>(nwrite));
     return false;
   }
   conn_closebuf_.Realloc(nwrite);
@@ -2610,8 +2640,9 @@ bool QuicClientSession::ReceiveRetry() {
 bool QuicClientSession::SendConnectionClose() {
   CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
 
-  // Do not send any frames if we are in the draining period
-  if (IsInDrainingPeriod())
+  // Do not send any frames if we are in the draining period or
+  // if we're in middle of a silent close
+  if (IsInDrainingPeriod() || IsFlagSet(QUICSESSION_FLAG_SILENT_CLOSE))
     return true;
 
   UpdateIdleTimer();

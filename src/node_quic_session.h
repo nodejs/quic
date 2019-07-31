@@ -763,7 +763,11 @@ class QuicSession : public AsyncWrap,
     QUICSESSION_FLAG_TLS_CALLBACK = 0x40,
 
     // Set while the QuicSession is executing an ngtcp2 callback
-    QUICSESSION_FLAG_NGTCP2_CALLBACK = 0x80
+    QUICSESSION_FLAG_NGTCP2_CALLBACK = 0x80,
+
+    // Set if the QuicSession is in the middle of a silent close
+    // (that is, a CONNECTION_CLOSE should not be sent)
+    QUICSESSION_FLAG_SILENT_CLOSE = 0x100
   } QuicSessionFlags;
 
   void SetFlag(QuicSessionFlags flag, bool on = true) {
