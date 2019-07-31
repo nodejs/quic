@@ -315,6 +315,19 @@ Returns a new `QuicStream`.
 An error will be thrown if the `QuicSession` has been destroyed or is in the
 process of a graceful shutdown.
 
+### quicsession.ping()
+<!--YAML
+added: REPLACEME
+-->
+
+The `ping()` method will trigger the underlying QUIC connection to serialize
+any frames currently pending in the outbound queue if it is able to do so.
+This has the effect of keeping the connection with the peer active and resets
+the idle and retransmission timers. The `ping()` method is a best-effort
+that ignores any errors that may occur during the serialization and send
+operations. There is no return value and there is no way to monitor the status
+of the `ping()` operation.
+
 ### quicsession.servername
 <!-- YAML
 added: REPLACEME

@@ -692,6 +692,28 @@ int QuicSession::PathValidation(
   return 0;
 }
 
+// Calling Ping will trigger the ngtcp2_conn to serialize any
+// packets it currently has pending along with a probe frame
+// that should keep the connection alive. This is a fire and
+// forget and any errors that may occur will be ignored. The
+// idle_timeout and retransmit timers will be updated. If Ping
+// is called while processing an ngtcp2 callback, or if the
+// closing or draining period has started, this is a non-op.
+void QuicSession::Ping() {
+  if (Ngtcp2CallbackScope::InNgtcp2CallbackScope(this) ||
+      IsDestroyed() ||
+      IsInClosingPeriod() ||
+      IsInDrainingPeriod()) {
+    return;
+  }
+  // TODO(@jasnell): We might want to revisit whether to handle
+  // errors right here. For now, we're ignoring them with the
+  // intent of capturing them elsewhere.
+  WritePackets();
+  UpdateIdleTimer();
+  ScheduleRetransmit();
+}
+
 // Reads a chunk of received peer TLS handshake data for processing
 size_t QuicSession::ReadPeerHandshake(uint8_t* buf, size_t buflen) {
   size_t n = std::min(buflen, peer_handshake_.size() - ncread_);
@@ -2877,6 +2899,12 @@ void QuicSessionGetCertificate(
   args.GetReturnValue().Set(result);
 }
 
+void QuicSessionPing(const FunctionCallbackInfo<Value>& args) {
+  QuicSession* session;
+  ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
+  session->Ping();
+}
+
 void QuicSessionUpdateKey(const FunctionCallbackInfo<Value>& args) {
   QuicSession* session;
   ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
@@ -2958,6 +2986,7 @@ void AddMethods(Environment* env, Local<FunctionTemplate> session) {
                       QuicSessionGetPeerCertificate);
   env->SetProtoMethod(session, "gracefulClose", QuicSessionGracefulClose);
   env->SetProtoMethod(session, "updateKey", QuicSessionUpdateKey);
+  env->SetProtoMethod(session, "ping", QuicSessionPing);
 }
 }  // namespace
 

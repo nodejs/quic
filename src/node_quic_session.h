@@ -252,6 +252,7 @@ class QuicSession : public AsyncWrap,
   void OnIdleTimeout();
   bool OpenBidirectionalStream(int64_t* stream_id);
   bool OpenUnidirectionalStream(int64_t* stream_id);
+  void Ping();
   size_t ReadPeerHandshake(uint8_t* buf, size_t buflen);
   bool Receive(
       ssize_t nread,
