@@ -1063,7 +1063,7 @@ bool QuicSession::SendStreamData(QuicStream* stream) {
           return true;
         default:
           Debug(stream, "Error writing packet. Code %" PRIu64, nwrite);
-          SetLastError(QUIC_ERROR_SESSION, nwrite);
+          SetLastError(QUIC_ERROR_SESSION, static_cast<int>(nwrite));
           return false;
       }
     }
@@ -1413,7 +1413,7 @@ bool QuicSession::WritePackets() {
     if (nwrite == 0)
       return true;
     else if (nwrite <= 0) {
-      SetLastError(QUIC_ERROR_SESSION, nwrite);
+      SetLastError(QUIC_ERROR_SESSION, static_cast<int>(nwrite));
       return false;
     }
     data.Realloc(nwrite);
@@ -2080,7 +2080,7 @@ bool QuicServerSession::StartClosingPeriod() {
           error.code,
           uv_hrtime());
   if (nwrite < 0) {
-    SetLastError(QUIC_ERROR_SESSION, nwrite);
+    SetLastError(QUIC_ERROR_SESSION, static_cast<int>(nwrite));
     return false;
   }
   conn_closebuf_.Realloc(nwrite);
@@ -2567,7 +2567,7 @@ bool QuicClientSession::SendConnectionClose() {
         uv_hrtime());
   if (nwrite < 0) {
     Debug(this, "Error writing connection close: %d", nwrite);
-    SetLastError(QUIC_ERROR_SESSION, nwrite);
+    SetLastError(QUIC_ERROR_SESSION, static_cast<int>(nwrite));
     return false;
   }
   data.Realloc(nwrite);
