@@ -262,6 +262,9 @@ void QuicSession::ImmediateClose() {
     Number::New(env()->isolate(), static_cast<double>(last_error.code)),
     Integer::New(env()->isolate(), last_error.family)
   };
+  // Grab a shared pointer to this to prevent the QuicSession
+  // from being freed while the MakeCallback is running.
+  std::shared_ptr<QuicSession> ptr(this->shared_from_this());
   MakeCallback(env()->quic_on_session_close_function(), arraysize(argv), argv);
 }
 
@@ -276,6 +279,9 @@ QuicStream* QuicSession::CreateStream(int64_t stream_id) {
     stream->object(),
     Number::New(env()->isolate(), static_cast<double>(stream_id))
   };
+  // Grab a shared pointer to this to prevent the QuicSession
+  // from being freed while the MakeCallback is running.
+  std::shared_ptr<QuicSession> ptr(this->shared_from_this());
   MakeCallback(env()->quic_on_stream_ready_function(), arraysize(argv), argv);
   return stream;
 }
@@ -464,6 +470,9 @@ int QuicSession::ExtendMaxStreams(bool bidi, uint64_t max_streams) {
     bidi ? v8::True(env()->isolate()) : v8::False(env()->isolate()),
     Number::New(env()->isolate(), static_cast<double>(max_streams))
   };
+  // Grab a shared pointer to this to prevent the QuicSession
+  // from being freed while the MakeCallback is running.
+  std::shared_ptr<QuicSession> ptr(this->shared_from_this());
   MakeCallback(env()->quic_on_session_extend_function(), arraysize(argv), argv);
   return 0;
 }
@@ -567,6 +576,9 @@ void QuicSession::HandshakeCompleted() {
     verifyErrorCode
   };
 
+  // Grab a shared pointer to this to prevent the QuicSession
+  // from being freed while the MakeCallback is running.
+  std::shared_ptr<QuicSession> ptr(this->shared_from_this());
   MakeCallback(env()->quic_on_session_handshake_function(),
                arraysize(argv),
                argv);
@@ -621,6 +633,10 @@ void QuicSession::Keylog(const char* line) {
   Local<Value> line_bf = Buffer::Copy(env(), line, 1 + size).ToLocalChecked();
   char* data = Buffer::Data(line_bf);
   data[size] = '\n';
+
+  // Grab a shared pointer to this to prevent the QuicSession
+  // from being freed while the MakeCallback is running.
+  std::shared_ptr<QuicSession> ptr(this->shared_from_this());
   MakeCallback(env()->quic_on_session_keylog_function(), 1, &line_bf);
 }
 
@@ -684,6 +700,9 @@ int QuicSession::PathValidation(
     AddressToJS(env(), reinterpret_cast<const sockaddr*>(path->local.addr)),
     AddressToJS(env(), reinterpret_cast<const sockaddr*>(path->remote.addr))
   };
+  // Grab a shared pointer to this to prevent the QuicSession
+  // from being freed while the MakeCallback is running.
+  std::shared_ptr<QuicSession> ptr(this->shared_from_this());
   MakeCallback(
       env()->quic_on_session_path_validation_function(),
       arraysize(argv),
@@ -1232,6 +1251,9 @@ void QuicSession::SilentClose() {
   Debug(this, "Silent close");
   HandleScope scope(env()->isolate());
   Context::Scope context_scope(env()->context());
+  // Grab a shared pointer to this to prevent the QuicSession
+  // from being freed while the MakeCallback is running.
+  std::shared_ptr<QuicSession> ptr(this->shared_from_this());
   MakeCallback(env()->quic_on_session_silent_close_function(), 0, nullptr);
 }
 
@@ -1255,6 +1277,9 @@ void QuicSession::StreamClose(int64_t stream_id, uint64_t app_error_code) {
     Number::New(env()->isolate(), static_cast<double>(app_error_code))
   };
 
+  // Grab a shared pointer to this to prevent the QuicSession
+  // from being freed while the MakeCallback is running.
+  std::shared_ptr<QuicSession> ptr(this->shared_from_this());
   MakeCallback(env()->quic_on_stream_close_function(), arraysize(argv), argv);
 }
 
@@ -1323,6 +1348,9 @@ void QuicSession::StreamReset(
     Number::New(env()->isolate(), static_cast<double>(app_error_code)),
     Number::New(env()->isolate(), static_cast<double>(final_size))
   };
+  // Grab a shared pointer to this to prevent the QuicSession
+  // from being freed while the MakeCallback is running.
+  std::shared_ptr<QuicSession> ptr(this->shared_from_this());
   MakeCallback(env()->quic_on_stream_reset_function(), arraysize(argv), argv);
 }
 
@@ -1432,9 +1460,10 @@ bool QuicSession::WritePackets() {
             data.data,
             max_pktlen_,
             uv_hrtime());
+
     if (nwrite == 0)
       return true;
-    else if (nwrite <= 0) {
+    else if (nwrite < 0) {
       SetLastError(QUIC_ERROR_SESSION, static_cast<int>(nwrite));
       return false;
     }
@@ -1787,6 +1816,7 @@ int QuicServerSession::OnClientHello() {
         break;
     }
   }
+  OPENSSL_free(exts);
 
   Local<Value> argv[] = {
     Undefined(env()->isolate()),
@@ -1813,11 +1843,13 @@ int QuicServerSession::OnClientHello() {
         v8::NewStringType::kNormal).ToLocalChecked();
   }
 
+  // Grab a shared pointer to this to prevent the QuicSession
+  // from being freed while the MakeCallback is running.
+  std::shared_ptr<QuicSession> ptr(this->shared_from_this());
   MakeCallback(
       env()->quic_on_session_client_hello_function(),
       arraysize(argv), argv);
 
-  OPENSSL_free(exts);
   return IsFlagSet(QUICSESSION_FLAG_CLIENT_HELLO_CB_RUNNING) ? -1 : 0;
 }
 
@@ -1921,6 +1953,9 @@ int QuicServerSession::OnCert() {
         v8::SideEffectType::kHasNoSideEffect).ToLocalChecked()
   };
 
+  // Grab a shared pointer to this to prevent the QuicSession
+  // from being freed while the MakeCallback is running.
+  std::shared_ptr<QuicSession> ptr(this->shared_from_this());
   MakeCallback(env()->quic_on_session_cert_function(), arraysize(argv), argv);
 
   return IsFlagSet(QUICSESSION_FLAG_CERT_CB_RUNNING) ? -1 : 1;
@@ -2239,6 +2274,9 @@ void QuicClientSession::VersionNegotiation(
     supportedVersions
   };
 
+  // Grab a shared pointer to this to prevent the QuicSession
+  // from being freed while the MakeCallback is running.
+  std::shared_ptr<QuicSession> ptr(this->shared_from_this());
   MakeCallback(
       env()->quic_on_session_version_negotiation_function(),
       arraysize(argv), argv);
@@ -2392,6 +2430,9 @@ int QuicClientSession::SetSession(SSL_SESSION* session) {
         transportParams_.length(),
         [](char* data, void* hint) {}, nullptr).ToLocalChecked();
   }
+  // Grab a shared pointer to this to prevent the QuicSession
+  // from being freed while the MakeCallback is running.
+  std::shared_ptr<QuicSession> ptr(this->shared_from_this());
   MakeCallback(env()->quic_on_session_ticket_function(), arraysize(argv), argv);
 
   return 1;
@@ -2546,7 +2587,9 @@ int QuicClientSession::OnTLSStatus() {
     arg = Buffer::Copy(env(), reinterpret_cast<const char*>(resp), len)
         .ToLocalChecked();
   }
-
+  // Grab a shared pointer to this to prevent the QuicSession
+  // from being freed while the MakeCallback is running.
+  std::shared_ptr<QuicSession> ptr(this->shared_from_this());
   MakeCallback(env()->quic_on_session_status_function(), 1, &arg);
   return 1;
 }
