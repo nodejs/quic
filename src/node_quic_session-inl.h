@@ -180,10 +180,8 @@ inline int QuicSession::OnReceiveClientInitial(
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
   QuicSession::Ngtcp2CallbackScope callback_scope(session);
-  RETURN_IF_FAIL(
-      session->ReceiveClientInitial(dcid), 0,
-      NGTCP2_ERR_CALLBACK_FAILURE);
-  return 0;
+  return session->ReceiveClientInitial(dcid) ?
+      0 : NGTCP2_ERR_CALLBACK_FAILURE;
 }
 
 // Called by ngtcp2 for both client and server connections when
@@ -607,7 +605,7 @@ inline int QuicSession::OnStatelessReset(
     const ngtcp2_pkt_stateless_reset* sr,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
-  session->StatelessReset(sr);
+  session->StatelessReset();
   return 0;
 }
 

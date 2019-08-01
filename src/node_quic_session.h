@@ -491,7 +491,7 @@ class QuicSession : public AsyncWrap,
   int PathValidation(
     const ngtcp2_path* path,
     ngtcp2_path_validation_result res);
-  int ReceiveClientInitial(const ngtcp2_cid* dcid);
+  bool ReceiveClientInitial(const ngtcp2_cid* dcid);
   int ReceiveCryptoData(
       ngtcp2_crypto_level crypto_level,
       uint64_t offset,
@@ -503,7 +503,7 @@ class QuicSession : public AsyncWrap,
   bool SendPacket();
   void SetHandshakeCompleted();
   void SetLocalAddress(const ngtcp2_addr* addr);
-  void StatelessReset(const ngtcp2_pkt_stateless_reset* sr);
+  void StatelessReset();
   void StreamClose(int64_t stream_id, uint64_t app_error_code);
   void StreamOpen(int64_t stream_id);
   void StreamReset(

@@ -325,9 +325,7 @@ void QuicSession::Destroy() {
   // that pointer, allowing the QuicSession to be
   // deconstructed once the stack unwinds and any
   // remaining shared_ptr instances fall out of scope.
-  std::shared_ptr<QuicSession> ptr = this->shared_from_this();
   RemoveFromSocket();
-  ptr.reset();
 }
 
 
@@ -841,7 +839,7 @@ int QuicSession::ReceiveCryptoData(
 // a new connection has been initiated. The very first step to
 // establishing a communication channel is to setup the keys
 // that will be used to secure the communication.
-int QuicSession::ReceiveClientInitial(const ngtcp2_cid* dcid) {
+bool QuicSession::ReceiveClientInitial(const ngtcp2_cid* dcid) {
   if (IsDestroyed())
     return NGTCP2_ERR_CALLBACK_FAILURE;
 
@@ -855,17 +853,17 @@ int QuicSession::ReceiveClientInitial(const ngtcp2_cid* dcid) {
           &params,
           dcid,
           reinterpret_cast<const uint8_t *>(NGTCP2_INITIAL_SALT),
-          strsize(NGTCP2_INITIAL_SALT)), 0, -1);
+          strsize(NGTCP2_INITIAL_SALT)), 0, false);
 
   SetupTokenContext(&hs_crypto_ctx_);
 
-  RETURN_IF_FAIL(SetupServerSecret(&params, &hs_crypto_ctx_), 0, -1);
+  RETURN_IF_FAIL(SetupServerSecret(&params, &hs_crypto_ctx_), 0, false);
   InstallKeys<ngtcp2_conn_install_initial_tx_keys>(Connection(), params);
 
-  RETURN_IF_FAIL(SetupClientSecret(&params, &hs_crypto_ctx_), 0, -1);
+  RETURN_IF_FAIL(SetupClientSecret(&params, &hs_crypto_ctx_), 0, false);
   InstallKeys<ngtcp2_conn_install_initial_rx_keys>(Connection(), params);
 
-  return 0;
+  return true;
 }
 
 bool QuicSession::ReceivePacket(
@@ -1003,7 +1001,7 @@ void QuicSession::ScheduleRetransmit() {
 // absolutely no frames can be sent. What we need to do is
 // notify the JavaScript side and destroy the connection with
 // a flag set that indicates stateless reset.
-void QuicSession::StatelessReset(const ngtcp2_pkt_stateless_reset* sr) {
+void QuicSession::StatelessReset() {
   // Grab a pointer to the QuicSession so that it's not actually
   // destroyed until after the MakeCallback returns.
   std::shared_ptr<QuicSession> this_(shared_from_this());
