@@ -900,6 +900,11 @@ bool QuicSession::ReceivePacket(
     const uint8_t* data,
     ssize_t nread) {
   CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
+
+  // If the QuicSession has been destroyed, we're not going
+  // to process any more packets for it.
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
+    return false;
   uint64_t now = uv_hrtime();
   session_stats_.session_received_at = now;
   int err = ngtcp2_conn_read_pkt(
@@ -935,6 +940,13 @@ void QuicSession::ReceiveStreamData(
   if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return;
 
+  OnScopeLeave leave([&]() {
+    // This extends the flow control window for the entire session
+    // but not for the individual Stream. Stream flow control is
+    // only expanded as data is read on the JavaScript side.
+    ngtcp2_conn_extend_max_offset(Connection(), datalen);
+  });
+
   HandleScope scope(env()->isolate());
   Context::Scope context_scope(env()->context());
 
@@ -960,11 +972,6 @@ void QuicSession::ReceiveStreamData(
   }
   CHECK_NOT_NULL(stream);
   stream->ReceiveData(fin, data, datalen, offset);
-
-  // This extends the flow control window for the entire session
-  // but not for the individual Stream. Stream flow control is
-  // only expanded as data is read on the JavaScript side.
-  ngtcp2_conn_extend_max_offset(Connection(), datalen);
 }
 
 // Removes the given connection id from the QuicSession.
@@ -1003,7 +1010,7 @@ void QuicSession::RemoveFromSocket() {
 void QuicSession::RemoveStream(int64_t stream_id) {
   Debug(this, "Removing stream %" PRId64, stream_id);
 
-  // This will have the side effect of destroying the QuicSession
+  // This will have the side effect of destroying the QuicStream
   // instance.
   streams_.erase(stream_id);
   // Ensure that the stream state is closed and discarded by ngtcp2
