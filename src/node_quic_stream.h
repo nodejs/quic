@@ -304,11 +304,7 @@ class QuicStream : public AsyncWrap,
   AsyncWrap* GetAsyncWrap() override { return this; }
 
   void MemoryInfo(MemoryTracker* tracker) const override {
-    // TODO(@jasnell): Verify that we're tracking the right things here.
-    tracker->TrackFieldWithSize(
-      "buffer",
-      available_outbound_length_,
-      "QuicBuffer");
+    tracker->TrackField("buffer", &streambuf_);
   }
 
   SET_MEMORY_INFO_NAME(QuicStream)

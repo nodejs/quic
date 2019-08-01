@@ -50,15 +50,6 @@ void QuicStreamListener::OnStreamRead(ssize_t nread, const uv_buf_t& buf) {
   stream->CallJSOnreadMethod(nread, buffer.ToArrayBuffer());
 }
 
-// TODO(@jasnell): QUIC connections have an absolute maximum
-// number of packets that can be transmitted over the lifetime
-// of the stream. When the number of packets is exhausted, the
-// connection must be silently closed without sending any
-// additional frames to the peer. When that happens, all
-// existing streams need to be shutdown and special event
-// should be emitted so that we can pick up where things
-// left off.
-
 QuicStream::QuicStream(
     QuicSession* session,
     Local<Object> wrap,
