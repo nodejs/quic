@@ -483,7 +483,9 @@ class QuicSession : public AsyncWrap,
       const uint8_t* sample,
       size_t samplelen);
   void ExtendMaxStreamData(int64_t stream_id, uint64_t max_data);
-  int ExtendMaxStreams(bool bidi, uint64_t max_streams);
+  void ExtendMaxStreams(bool bidi, uint64_t max_streams);
+  void ExtendMaxStreamsUni(uint64_t max_streams);
+  void ExtendMaxStreamsBidi(uint64_t max_streams);
   int GetNewConnectionID(ngtcp2_cid* cid, uint8_t* token, size_t cidlen);
   void HandshakeCompleted();
   void InitTLS();
@@ -520,8 +522,6 @@ class QuicSession : public AsyncWrap,
   void UpdateRecoveryStats();
 
   virtual void DisassociateCID(const ngtcp2_cid* cid) {}
-  virtual int ExtendMaxStreamsUni(uint64_t max_streams);
-  virtual int ExtendMaxStreamsBidi(uint64_t max_streams);
   virtual bool ReceiveRetry() { return true; }
   virtual bool SelectPreferredAddress(
     ngtcp2_addr* dest,
@@ -741,31 +741,35 @@ class QuicSession : public AsyncWrap,
     // Initial state when a QuicSession is created but nothing yet done.
     QUICSESSION_FLAG_INITIAL = 0x1,
 
-    // Set while the QuicSession is in the process of closing.
+    // Set while the QuicSession is in the process of an Immediate
+    // or silent close.
     QUICSESSION_FLAG_CLOSING = 0x2,
+
+    // Set while the QuicSession is in the process of a graceful close.
+    QUICSESSION_FLAG_GRACEFUL_CLOSING = 0x4,
 
     // Set when the QuicSession has been destroyed (but not
     // yet freed)
-    QUICSESSION_FLAG_DESTROYED = 0x4,
+    QUICSESSION_FLAG_DESTROYED = 0x8,
 
     // Set while the QuicSession is in a KeyUpdate (to prevent reentrance)
-    QUICSESSION_FLAG_KEYUPDATE = 0x8,
+    QUICSESSION_FLAG_KEYUPDATE = 0x10,
 
     // Set while the QuicSession is in the cert callback
-    QUICSESSION_FLAG_CERT_CB_RUNNING = 0x10,
+    QUICSESSION_FLAG_CERT_CB_RUNNING = 0x20,
 
     // Set while the QuicSession is in the client hello callback
-    QUICSESSION_FLAG_CLIENT_HELLO_CB_RUNNING = 0x20,
+    QUICSESSION_FLAG_CLIENT_HELLO_CB_RUNNING = 0x40,
 
     // Set while the QuicSession is executing a TLS callback
-    QUICSESSION_FLAG_TLS_CALLBACK = 0x40,
+    QUICSESSION_FLAG_TLS_CALLBACK = 0x80,
 
     // Set while the QuicSession is executing an ngtcp2 callback
-    QUICSESSION_FLAG_NGTCP2_CALLBACK = 0x80,
+    QUICSESSION_FLAG_NGTCP2_CALLBACK = 0x100,
 
     // Set if the QuicSession is in the middle of a silent close
     // (that is, a CONNECTION_CLOSE should not be sent)
-    QUICSESSION_FLAG_SILENT_CLOSE = 0x100
+    QUICSESSION_FLAG_SILENT_CLOSE = 0x200
   } QuicSessionFlags;
 
   void SetFlag(QuicSessionFlags flag, bool on = true) {

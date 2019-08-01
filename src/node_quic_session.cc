@@ -166,17 +166,23 @@ void QuicSession::AckedCryptoOffset(size_t datalen) {
   // It is possible for the QuicSession to have been destroyed but not yet
   // deconstructed. In such cases, we want to ignore the callback as there
   // is nothing to do but wait for further cleanup to happen.
-  if (IsDestroyed())
+  if (UNLIKELY(IsFlagSet(QUICSESSION_FLAG_DESTROYED)))
     return;
   Debug(this, "Acknowledging %d crypto bytes", datalen);
 
   // Consumes the given number of bytes in the handshake buffer.
   handshake_.Consume(datalen);
 
+  // Update the statistics for the handshake, allowing us to track
+  // how long the handshake is taking to be acknowledged. A malicious
+  // peer could potentially force the QuicSession to hold on to
+  // crypto data for a long time by not sending an acknowledgement.
+  // The histogram will allow us to track the time periods between
+  // acknowlegements.
   uint64_t now = uv_hrtime();
   if (session_stats_.handshake_acked_at > 0)
     crypto_rx_ack_.Record(now - session_stats_.handshake_acked_at);
-  session_stats_.handshake_start_at = now;
+  session_stats_.handshake_acked_at = now;
 }
 
 void QuicSession::AckedStreamDataOffset(
@@ -186,7 +192,7 @@ void QuicSession::AckedStreamDataOffset(
   // It is possible for the QuicSession to have been destroyed but not yet
   // deconstructed. In such cases, we want to ignore the callback as there
   // is nothing to do but wait for further cleanup to happen.
-  if (IsDestroyed())
+  if (UNLIKELY(IsFlagSet(QUICSESSION_FLAG_DESTROYED)))
     return;
   Debug(this,
         "Received acknowledgement for %" PRIu64
@@ -197,17 +203,19 @@ void QuicSession::AckedStreamDataOffset(
   // It is possible that the QuicStream has already been destroyed and
   // removed from the collection. In such cases, we want to ignore the
   // callback as there is nothing further to do.
-  if (stream != nullptr)
+  if (LIKELY(stream != nullptr))
     stream->AckedDataOffset(offset, datalen);
 }
 
 // Add the given QuicStream to this QuicSession's collection of streams. All
 // streams added must be removed before the QuicSession instance is freed.
 void QuicSession::AddStream(QuicStream* stream) {
-  CHECK(!IsGracefullyClosing());
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_GRACEFUL_CLOSING));
   Debug(this, "Adding stream %" PRId64 " to session.", stream->GetID());
   streams_.emplace(stream->GetID(), stream);
 
+  // Update tracking statistics for the number of streams associated with
+  // this session.
   switch (stream->GetOrigin()) {
     case QuicStream::QuicStreamOrigin::QUIC_STREAM_CLIENT:
       if (Type() == QUICSESSION_TYPE_SERVER)
@@ -239,25 +247,35 @@ void QuicSession::AssociateCID(ngtcp2_cid* cid) {
   Socket()->AssociateCID(&id, &scid);
 }
 
+// Like the silent close, the immediate close must start with
+// the JavaScript side, first shutting down any existing
+// streams before entering the closing period. Unlike silent
+// close, however, all streams are closed using proper
+// STOP_SENDING and RESET_STREAM frames and a CONNECTION_CLOSE
+// frame is ultimately sent to the peer. This makes the
+// naming a bit of a misnomer in that the connection is
+// not immediately torn down, but is allowed to drain
+// properly per the QUIC spec description of "immediate close".
 void QuicSession::ImmediateClose() {
-  // Like the silent close, the immediate close must start with
-  // the JavaScript side, first shutting down any existing
-  // streams before entering the closing period. Unlike silent
-  // close, however, all streams are closed using proper
-  // STOP_SENDING and RESET_STREAM frames and a CONNECTION_CLOSE
-  // frame is ultimately sent to the peer. This makes the
-  // naming a bit of a misnomer in that the connection is
-  // not immediately torn down, but is allowed to drain
-  // properly per the QUIC spec description of "immediate close".
-  Debug(this, "Immediate close");
-  HandleScope scope(env()->isolate());
-  Local<Context> context = env()->context();
-  Context::Scope context_scope(context);
+  // Calling either ImmediateClose or SilentClose will cause
+  // the QUICSESSION_FLAG_CLOSING to be set. In either case,
+  // we should never re-enter ImmediateClose or SilentClose.
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_CLOSING));
+  SetFlag(QUICSESSION_FLAG_CLOSING);
+
   QuicError last_error = GetLastError();
+  Debug(this, "Immediate close with code %" PRIu64 " (%s)",
+        last_error.code,
+        ErrorFamilyName(last_error.family));
+
+  HandleScope scope(env()->isolate());
+  Context::Scope context_scope(env()->context());
+
   Local<Value> argv[] = {
     Number::New(env()->isolate(), static_cast<double>(last_error.code)),
     Integer::New(env()->isolate(), last_error.family)
   };
+
   // Grab a shared pointer to this to prevent the QuicSession
   // from being freed while the MakeCallback is running.
   std::shared_ptr<QuicSession> ptr(this->shared_from_this());
@@ -267,14 +285,17 @@ void QuicSession::ImmediateClose() {
 // Creates a new stream object and passes it off to the javascript side.
 // This has to be called from within a handlescope/contextscope.
 QuicStream* QuicSession::CreateStream(int64_t stream_id) {
-  CHECK(!IsDestroyed());
-  CHECK(!IsGracefullyClosing());
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_DESTROYED));
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_GRACEFUL_CLOSING));
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_CLOSING));
+
   QuicStream* stream = QuicStream::New(this, stream_id);
   CHECK_NOT_NULL(stream);
   Local<Value> argv[] = {
     stream->object(),
     Number::New(env()->isolate(), static_cast<double>(stream_id))
   };
+
   // Grab a shared pointer to this to prevent the QuicSession
   // from being freed while the MakeCallback is running.
   std::shared_ptr<QuicSession> ptr(this->shared_from_this());
@@ -288,7 +309,7 @@ QuicStream* QuicSession::CreateStream(int64_t stream_id) {
 void QuicSession::Destroy() {
   Debug(this, "Destroying");
 
-  if (IsDestroyed())
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return;
 
   // If we're not in the closing or draining periods,
@@ -311,10 +332,11 @@ void QuicSession::Destroy() {
   CHECK(streams_.empty());
 
   // Mark the session destroyed.
-  SetFlag(QUICSESSION_FLAG_DESTROYED, true);
+  SetFlag(QUICSESSION_FLAG_DESTROYED);
   SetFlag(QUICSESSION_FLAG_CLOSING, false);
+  SetFlag(QUICSESSION_FLAG_GRACEFUL_CLOSING, false);
 
-  // Stop the idle and retransmission timers if they are active.
+  // Stop and free the idle and retransmission timers if they are active.
   StopIdleTimer();
   StopRetransmitTimer();
 
@@ -328,7 +350,6 @@ void QuicSession::Destroy() {
   RemoveFromSocket();
 }
 
-
 ssize_t QuicSession::DoDecrypt(
     uint8_t* dest,
     size_t destlen,
@@ -340,9 +361,8 @@ ssize_t QuicSession::DoDecrypt(
     size_t noncelen,
     const uint8_t* ad,
     size_t adlen) {
-  if (IsDestroyed())
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return NGTCP2_ERR_CALLBACK_FAILURE;
-  CHECK(!IsDestroyed());
   return Decrypt(
       dest, destlen,
       ciphertext, ciphertextlen,
@@ -363,7 +383,7 @@ ssize_t QuicSession::DoEncrypt(
     size_t noncelen,
     const uint8_t* ad,
     size_t adlen) {
-  if (IsDestroyed())
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return NGTCP2_ERR_CALLBACK_FAILURE;
   return Encrypt(
       dest, destlen,
@@ -381,7 +401,7 @@ ssize_t QuicSession::DoHPMask(
     size_t keylen,
     const uint8_t* sample,
     size_t samplelen) {
-  if (IsDestroyed())
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return NGTCP2_ERR_CALLBACK_FAILURE;
   return HP_Mask(
       dest, destlen,
@@ -401,7 +421,7 @@ ssize_t QuicSession::DoHSDecrypt(
     size_t noncelen,
     const uint8_t* ad,
     size_t adlen) {
-  if (IsDestroyed())
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return NGTCP2_ERR_CALLBACK_FAILURE;
   return Decrypt(
       dest, destlen,
@@ -423,7 +443,7 @@ ssize_t QuicSession::DoHSEncrypt(
     size_t noncelen,
     const uint8_t* ad,
     size_t adlen) {
-  if (IsDestroyed())
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return NGTCP2_ERR_CALLBACK_FAILURE;
   return Encrypt(
       dest, destlen,
@@ -441,7 +461,7 @@ ssize_t QuicSession::DoInHPMask(
     size_t keylen,
     const uint8_t* sample,
     size_t samplelen) {
-  if (IsDestroyed())
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return NGTCP2_ERR_CALLBACK_FAILURE;
   return HP_Mask(
       dest, destlen,
@@ -456,9 +476,9 @@ void QuicSession::ExtendMaxStreamData(int64_t stream_id, uint64_t max_data) {
         stream_id, max_data);
 }
 
-int QuicSession::ExtendMaxStreams(bool bidi, uint64_t max_streams) {
-  if (IsDestroyed())
-    return 0;
+void QuicSession::ExtendMaxStreams(bool bidi, uint64_t max_streams) {
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
+    return;
   HandleScope scope(env()->isolate());
   Local<Context> context = env()->context();
   Context::Scope context_scope(context);
@@ -470,15 +490,14 @@ int QuicSession::ExtendMaxStreams(bool bidi, uint64_t max_streams) {
   // from being freed while the MakeCallback is running.
   std::shared_ptr<QuicSession> ptr(this->shared_from_this());
   MakeCallback(env()->quic_on_session_extend_function(), arraysize(argv), argv);
-  return 0;
 }
 
-int QuicSession::ExtendMaxStreamsUni(uint64_t max_streams) {
-  return ExtendMaxStreams(false, max_streams);
+void QuicSession::ExtendMaxStreamsUni(uint64_t max_streams) {
+  ExtendMaxStreams(false, max_streams);
 }
 
-int QuicSession::ExtendMaxStreamsBidi(uint64_t max_streams) {
-  return ExtendMaxStreams(true, max_streams);
+void QuicSession::ExtendMaxStreamsBidi(uint64_t max_streams) {
+  ExtendMaxStreams(true, max_streams);
 }
 
 void QuicSession::ExtendStreamOffset(QuicStream* stream, size_t amount) {
@@ -491,13 +510,13 @@ void QuicSession::ExtendStreamOffset(QuicStream* stream, size_t amount) {
 // Copies the local transport params into the given struct
 // for serialization.
 void QuicSession::GetLocalTransportParams(ngtcp2_transport_params* params) {
-  CHECK(!IsDestroyed());
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_DESTROYED));
   ngtcp2_conn_get_local_transport_params(Connection(), params);
 }
 
 // Gets the QUIC version negotiated for this QuicSession
 uint32_t QuicSession::GetNegotiatedVersion() {
-  CHECK(!IsDestroyed());
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_DESTROYED));
   return ngtcp2_conn_get_negotiated_version(Connection());
 }
 
@@ -508,7 +527,7 @@ int QuicSession::GetNewConnectionID(
     ngtcp2_cid* cid,
     uint8_t* token,
     size_t cidlen) {
-  CHECK(!IsDestroyed());
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_DESTROYED));
   cid->datalen = cidlen;
   EntropySource(cid->data, cidlen);
   EntropySource(token, NGTCP2_STATELESS_RESET_TOKENLEN);
@@ -581,10 +600,16 @@ void QuicSession::HandshakeCompleted() {
 }
 
 bool QuicSession::InitiateUpdateKey() {
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_DESTROYED));
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_CLOSING));
   CHECK(!IsFlagSet(QUICSESSION_FLAG_KEYUPDATE));
+  Debug(this, "Initiating a key update");
   if (!UpdateKey())
     return false;
   return ngtcp2_conn_initiate_key_update(Connection()) == 0;
+  // TODO(@jasnell): If we're not within a ngtcp2 callback when this is
+  // called, we likely need to manually trigger a send operation. Need
+  // to verify.
 }
 
 // Initialize the TLS context for this QuicSession. This
@@ -640,7 +665,7 @@ void QuicSession::Keylog(const char* line) {
 // immediately closed without attempting to send any additional data to
 // the peer. All existing streams are abandoned and closed.
 void QuicSession::OnIdleTimeout() {
-  if (IsDestroyed())
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return;
   Debug(this, "Idle timeout");
   return SilentClose();
@@ -664,14 +689,16 @@ void QuicSession::MaybeTimeout() {
 }
 
 bool QuicSession::OpenBidirectionalStream(int64_t* stream_id) {
-  CHECK(!IsDestroyed());
-  CHECK(!IsGracefullyClosing());
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_DESTROYED));
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_CLOSING));
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_GRACEFUL_CLOSING));
   return ngtcp2_conn_open_bidi_stream(Connection(), stream_id, nullptr) == 0;
 }
 
 bool QuicSession::OpenUnidirectionalStream(int64_t* stream_id) {
-  CHECK(!IsDestroyed());
-  CHECK(!IsGracefullyClosing());
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_DESTROYED));
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_CLOSING));
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_GRACEFUL_CLOSING));
   if (ngtcp2_conn_open_uni_stream(Connection(), stream_id, nullptr))
     return false;
   ngtcp2_conn_shutdown_stream_read(Connection(), *stream_id, 0);
@@ -716,7 +743,8 @@ int QuicSession::PathValidation(
 // closing or draining period has started, this is a non-op.
 void QuicSession::Ping() {
   if (Ngtcp2CallbackScope::InNgtcp2CallbackScope(this) ||
-      IsDestroyed() ||
+      IsFlagSet(QUICSESSION_FLAG_DESTROYED) ||
+      IsFlagSet(QUICSESSION_FLAG_CLOSING) ||
       IsInClosingPeriod() ||
       IsInDrainingPeriod()) {
     return;
@@ -742,19 +770,20 @@ bool QuicSession::Receive(
     const uint8_t* data,
     const struct sockaddr* addr,
     unsigned int flags) {
-  if (IsDestroyed())
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return false;
 
   IncrementStat(nread, &session_stats_, &session_stats::bytes_received);
 
   // Closing period starts once ngtcp2 has detected that the session
   // is being shutdown locally. Note that this is different that the
-  // IsGracefullyClosing() function, which indicates a graceful shutdown that
-  // allows the session and streams to finish naturally. When
-  // IsInClosingPeriod is true, ngtcp2 is actively in the process
-  // of shutting down the connection and a CONNECTION_CLOSE has
-  // already been sent. The only thing we can do at this point is
-  // either ignore the packet or send another CONNECTION_CLOSE.
+  // IsFlagSet(QUICSESSION_FLAG_GRACEFUL_CLOSING) function, which
+  // indicates a graceful shutdown that allows the session and streams
+  // to finish naturally. When IsInClosingPeriod is true, ngtcp2 is
+  // actively in the process of shutting down the connection and a
+  // CONNECTION_CLOSE has already been sent. The only thing we can do
+  // at this point is either ignore the packet or send another
+  // CONNECTION_CLOSE.
   if (IsInClosingPeriod()) {
     IncrementConnectionCloseAttempts();
     return ShouldAttemptConnectionClose() ?
@@ -788,7 +817,7 @@ bool QuicSession::Receive(
     }
   }
 
-  if (IsDestroyed()) {
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED)) {
     // If the QuicSession has been destroyed but it is not
     // in the closing period, a CONNECTION_CLOSE has not yet
     // been sent to the peer. Let's attempt to send one.
@@ -818,7 +847,7 @@ int QuicSession::ReceiveCryptoData(
     uint64_t offset,
     const uint8_t* data,
     size_t datalen) {
-  if (IsDestroyed())
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return NGTCP2_ERR_CALLBACK_FAILURE;
   Debug(this, "Receiving %d bytes of crypto data.", datalen);
 
@@ -840,8 +869,8 @@ int QuicSession::ReceiveCryptoData(
 // establishing a communication channel is to setup the keys
 // that will be used to secure the communication.
 bool QuicSession::ReceiveClientInitial(const ngtcp2_cid* dcid) {
-  if (IsDestroyed())
-    return NGTCP2_ERR_CALLBACK_FAILURE;
+  if (UNLIKELY(IsFlagSet(QUICSESSION_FLAG_DESTROYED)))
+    return false;
 
   CHECK(Type() == QUICSESSION_TYPE_SERVER);
   Debug(this, "Receiving client initial parameters.");
@@ -903,7 +932,7 @@ void QuicSession::ReceiveStreamData(
   if (UNLIKELY(fin == 0 && datalen == 0))
     return;
 
-  if (IsDestroyed())
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return;
 
   HandleScope scope(env()->isolate());
@@ -912,7 +941,7 @@ void QuicSession::ReceiveStreamData(
   QuicStream* stream = FindStream(stream_id);
   if (stream == nullptr) {
     // Shutdown the stream explicitly if the session is being closed.
-    if (IsGracefullyClosing()) {
+    if (IsFlagSet(QUICSESSION_FLAG_GRACEFUL_CLOSING)) {
       ngtcp2_conn_shutdown_stream(
           Connection(),
           stream_id,
@@ -940,7 +969,7 @@ void QuicSession::ReceiveStreamData(
 
 // Removes the given connection id from the QuicSession.
 void QuicSession::RemoveConnectionID(const ngtcp2_cid* cid) {
-  if (IsDestroyed())
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return;
   state_[IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT] =
     state_[IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT] - 1;
@@ -1028,7 +1057,7 @@ bool QuicSession::SendStreamData(QuicStream* stream) {
   //   - the QuicSession is in the draining period,
   //   - the QuicSession is in the closing period, or
   //   - we are blocked from sending any data because of flow control
-  if (IsDestroyed() ||
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED) ||
       !stream->WasEverWritable() ||
       stream->HasSentFin() ||
       IsInDrainingPeriod() ||
@@ -1149,7 +1178,7 @@ bool QuicSession::SendStreamData(QuicStream* stream) {
 
 // Transmits the current contents of the internal sendbuf_ to the peer.
 bool QuicSession::SendPacket() {
-  CHECK(!IsDestroyed());
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_DESTROYED));
   CHECK(!IsInDrainingPeriod());
   // Move the contents of sendbuf_ to the tail of txbuf_ and reset sendbuf_
   if (sendbuf_.Length() > 0) {
@@ -1184,7 +1213,7 @@ void QuicSession::SendPendingData() {
   //  * The QuicSession is in the draining period
   //  * The QuicSession is a server in the closing period
   if (Ngtcp2CallbackScope::InNgtcp2CallbackScope(this) ||
-      IsDestroyed() ||
+      IsFlagSet(QUICSESSION_FLAG_DESTROYED) ||
       IsInDrainingPeriod() ||
       (Type() == QUICSESSION_TYPE_SERVER && IsInClosingPeriod())) {
     return;
@@ -1206,7 +1235,7 @@ void QuicSession::SendPendingData() {
 
     // Check to make sure QuicSession state did not change in this
     // iteration
-    if (IsInDrainingPeriod() || IsInClosingPeriod() || IsDestroyed())
+    if (IsInDrainingPeriod() || IsInClosingPeriod() || IsFlagSet(QUICSESSION_FLAG_DESTROYED))
       return;
   }
 
@@ -1254,12 +1283,20 @@ int QuicSession::ShutdownStream(int64_t stream_id, uint64_t code) {
 // destroy the handle when done. The most important characteristic
 // of the SilentClose is that no frames are sent to the peer.
 void QuicSession::SilentClose() {
+  // Calling either ImmediateClose or SilentClose will cause
+  // the QUICSESSION_FLAG_CLOSING to be set. In either case,
+  // we should never re-enter ImmediateClose or SilentClose.
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_CLOSING));
+  SetFlag(QUICSESSION_FLAG_SILENT_CLOSE);
+  SetFlag(QUICSESSION_FLAG_CLOSING);
+
   Debug(this, "Silent close");
+
   HandleScope scope(env()->isolate());
   Context::Scope context_scope(env()->context());
+
   // Grab a shared pointer to this to prevent the QuicSession
   // from being freed while the MakeCallback is running.
-  SetFlag(QUICSESSION_FLAG_SILENT_CLOSE);
   std::shared_ptr<QuicSession> ptr(this->shared_from_this());
   MakeCallback(env()->quic_on_session_silent_close_function(), 0, nullptr);
 }
@@ -1267,7 +1304,7 @@ void QuicSession::SilentClose() {
 // Called by ngtcp2 when a stream has been closed. If the stream does
 // not exist, the close is ignored.
 void QuicSession::StreamClose(int64_t stream_id, uint64_t app_error_code) {
-  if (IsDestroyed())
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return;
 
   if (!HasStream(stream_id))
@@ -1307,7 +1344,7 @@ void QuicSession::StopRetransmitTimer() {
 // a stream commitment attack. The only exception is shutting the
 // stream down explicitly if we are in a graceful close period.
 void QuicSession::StreamOpen(int64_t stream_id) {
-  if (IsGracefullyClosing()) {
+  if (IsFlagSet(QUICSESSION_FLAG_GRACEFUL_CLOSING)) {
     ngtcp2_conn_shutdown_stream(
         Connection(),
         stream_id,
@@ -1338,7 +1375,7 @@ void QuicSession::StreamReset(
     int64_t stream_id,
     uint64_t final_size,
     uint64_t app_error_code) {
-  if (IsDestroyed())
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return;
 
   if (!HasStream(stream_id))
@@ -1369,7 +1406,7 @@ void QuicSession::StreamReset(
 // multiple times while handshake data is being passed back and forth
 // between the peers.
 int QuicSession::TLSHandshake() {
-  if (IsDestroyed())
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return 0;
 
   ClearTLSError();
@@ -1389,7 +1426,6 @@ int QuicSession::TLSHandshake() {
             session_stats_.handshake_continue_at :
             session_stats_.handshake_start_at;
     crypto_handshake_rate_.Record(now - ts);
-    // TODO(@jasnell): Monitor the rate to detect slow handshake
   }
   session_stats_.handshake_continue_at = now;
 
@@ -1422,7 +1458,7 @@ void QuicSession::UpdateIdleTimer() {
 }
 
 void QuicSession::WriteHandshake(const uint8_t* data, size_t datalen) {
-  if (IsDestroyed())
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return;
   Debug(this, "Writing %d bytes of handshake data.", datalen);
   MallocedBuffer<uint8_t> buffer(datalen);
@@ -1449,7 +1485,7 @@ void QuicSession::WriteHandshake(const uint8_t* data, size_t datalen) {
 // serialize stream data that is being sent initially.
 bool QuicSession::WritePackets() {
   CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
-  CHECK(!IsDestroyed());
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_DESTROYED));
 
   // During the draining period, we must not send any frames at all.
   if (IsInDrainingPeriod())
@@ -1516,7 +1552,7 @@ int QuicSession::WritePeerHandshake(
 // Called by ngtcp2 when the QuicSession keys need to be updated. This may
 // happen multiple times through the lifetime of the QuicSession.
 bool QuicSession::UpdateKey() {
-  if (IsDestroyed())
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return false;
 
   // There's generally no user code that should be able to
@@ -2137,7 +2173,7 @@ bool QuicServerSession::SendConnectionClose() {
 }
 
 bool QuicServerSession::StartClosingPeriod() {
-  if (IsDestroyed())
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return false;
   if (IsInClosingPeriod())
     return true;
@@ -2278,7 +2314,7 @@ void QuicClientSession::VersionNegotiation(
       const ngtcp2_pkt_hd* hd,
       const uint32_t* sv,
       size_t nsv) {
-  if (IsDestroyed())
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return;
   HandleScope scope(env()->isolate());
   Local<Context> context = env()->context();
@@ -2422,7 +2458,7 @@ bool QuicClientSession::SelectPreferredAddress(
 }
 
 int QuicClientSession::SetSession(SSL_SESSION* session) {
-  CHECK(!IsDestroyed());
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_DESTROYED));
   int size = i2d_SSL_SESSION(session, nullptr);
   if (size > SecureContext::kMaxSessionSize)
     return 0;
@@ -2467,8 +2503,8 @@ int QuicClientSession::SetSession(SSL_SESSION* session) {
 }
 
 bool QuicClientSession::SetSocket(QuicSocket* socket, bool nat_rebinding) {
-  CHECK(!IsDestroyed());
-  CHECK(!IsGracefullyClosing());
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_DESTROYED));
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_GRACEFUL_CLOSING));
   if (socket == nullptr || socket == socket_)
     return true;
 
@@ -2500,7 +2536,7 @@ bool QuicClientSession::SetSocket(QuicSocket* socket, bool nat_rebinding) {
 
 void QuicClientSession::StoreRemoteTransportParams(
     ngtcp2_transport_params* params) {
-  CHECK(!IsDestroyed());
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_DESTROYED));
   transportParams_.AllocateSufficientStorage(sizeof(ngtcp2_transport_params));
   memcpy(*transportParams_, params, sizeof(ngtcp2_transport_params));
 }
@@ -2625,7 +2661,7 @@ int QuicClientSession::OnTLSStatus() {
 // A HelloRetry will effectively restart the TLS handshake process
 // by generating new initial crypto material.
 bool QuicClientSession::ReceiveRetry() {
-  if (IsDestroyed())
+  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return false;
   Debug(this, "A retry packet was received. Restarting the handshake.");
   IncrementStat(1, &session_stats_, &session_stats::retry_count);

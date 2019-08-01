@@ -220,9 +220,7 @@ inline int QuicSession::OnExtendMaxStreamsBidi(
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
   QuicSession::Ngtcp2CallbackScope callback_scope(session);
-  RETURN_IF_FAIL(
-      session->ExtendMaxStreamsBidi(max_streams), 0,
-      NGTCP2_ERR_CALLBACK_FAILURE);
+  session->ExtendMaxStreamsBidi(max_streams);
   return 0;
 }
 
@@ -235,9 +233,7 @@ inline int QuicSession::OnExtendMaxStreamsUni(
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
   QuicSession::Ngtcp2CallbackScope callback_scope(session);
-  RETURN_IF_FAIL(
-      session->ExtendMaxStreamsUni(max_streams), 0,
-      NGTCP2_ERR_CALLBACK_FAILURE);
+  session->ExtendMaxStreamsUni(max_streams);
   return 0;
 }
 
@@ -649,7 +645,7 @@ inline bool QuicSession::HasStream(int64_t id) {
 inline QuicError QuicSession::GetLastError() { return last_error_; }
 
 inline bool QuicSession::IsGracefullyClosing() {
-  return IsFlagSet(QUICSESSION_FLAG_CLOSING);
+  return IsFlagSet(QUICSESSION_FLAG_GRACEFUL_CLOSING);
 }
 
 inline bool QuicSession::IsDestroyed() {
@@ -657,7 +653,7 @@ inline bool QuicSession::IsDestroyed() {
 }
 
 inline void QuicSession::StartGracefulClose() {
-  SetFlag(QUICSESSION_FLAG_CLOSING);
+  SetFlag(QUICSESSION_FLAG_GRACEFUL_CLOSING);
   session_stats_.closing_at = uv_hrtime();
 }
 

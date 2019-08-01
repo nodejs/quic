@@ -122,6 +122,19 @@ inline uint64_t ExtractErrorCode(Environment* env, v8::Local<v8::Value> arg) {
   return code;
 }
 
+inline const char* ErrorFamilyName(QuicErrorFamily family) {
+  switch (family) {
+    case QUIC_ERROR_SESSION:
+      return "Session";
+    case QUIC_ERROR_APPLICATION:
+      return "Application";
+    case QUIC_ERROR_CRYPTO:
+      return "Crypto";
+    default:
+      return "<unknown>";
+  }
+}
+
 class SocketAddress {
  public:
   // std::hash specialization for sockaddr instances (ipv4 or ipv6) used
