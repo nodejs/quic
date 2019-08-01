@@ -462,7 +462,7 @@ inline int QuicSession::OnAckedCryptoOffset(
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
   QuicSession::Ngtcp2CallbackScope callback_scope(session);
-  session->AckedCryptoOffset(crypto_level, offset, datalen);
+  session->AckedCryptoOffset(datalen);
   return 0;
 }
 
@@ -642,6 +642,10 @@ inline QuicStream* QuicSession::FindStream(int64_t id) {
   if (it == std::end(streams_))
     return nullptr;
   return (*it).second.get();
+}
+
+inline bool QuicSession::HasStream(int64_t id) {
+  return streams_.find(id) != std::end(streams_);
 }
 
 inline QuicError QuicSession::GetLastError() { return last_error_; }

@@ -377,16 +377,14 @@ class QuicSession : public AsyncWrap,
   // QuicSession is explicitly destroyed.
   inline bool IsInDrainingPeriod();
   inline QuicStream* FindStream(int64_t id);
+  inline bool HasStream(int64_t id);
 
   bool IsHandshakeSuspended() {
     return IsFlagSet(QUICSESSION_FLAG_CERT_CB_RUNNING) ||
            IsFlagSet(QUICSESSION_FLAG_CLIENT_HELLO_CB_RUNNING);
   }
 
-  void AckedCryptoOffset(
-      ngtcp2_crypto_level crypto_level,
-      uint64_t offset,
-      size_t datalen);
+  void AckedCryptoOffset(size_t datalen);
   void AckedStreamDataOffset(
       int64_t stream_id,
       uint64_t offset,

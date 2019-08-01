@@ -117,7 +117,6 @@ QuicSession::QuicSession(
 }
 
 QuicSession::~QuicSession() {
-  // QuicSession instances are never destroyed within the callback scope.
   CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
   CHECK(IsFlagSet(QUICSESSION_FLAG_DESTROYED));
 
@@ -159,15 +158,11 @@ QuicSession::~QuicSession() {
 
 std::string QuicSession::diagnostic_name() const {
   return std::string("QuicSession ") +
-      (Type() == QUICSESSION_TYPE_SERVER ?
-          "Server" : "Client") +
+      (Type() == QUICSESSION_TYPE_SERVER ? "Server" : "Client") +
       " (" + std::to_string(static_cast<int64_t>(get_async_id())) + ")";
 }
 
-void QuicSession::AckedCryptoOffset(
-    ngtcp2_crypto_level crypto_level,
-    uint64_t offset,
-    size_t datalen) {
+void QuicSession::AckedCryptoOffset(size_t datalen) {
   // It is possible for the QuicSession to have been destroyed but not yet
   // deconstructed. In such cases, we want to ignore the callback as there
   // is nothing to do but wait for further cleanup to happen.
@@ -197,6 +192,7 @@ void QuicSession::AckedStreamDataOffset(
         "Received acknowledgement for %" PRIu64
         " bytes of stream %" PRId64 " data",
         datalen, stream_id);
+
   QuicStream* stream = FindStream(stream_id);
   // It is possible that the QuicStream has already been destroyed and
   // removed from the collection. In such cases, we want to ignore the
@@ -1276,11 +1272,12 @@ void QuicSession::StreamClose(int64_t stream_id, uint64_t app_error_code) {
   if (IsDestroyed())
     return;
 
-  QuicStream* stream = FindStream(stream_id);
-  if (stream == nullptr)
+  if (!HasStream(stream_id))
     return;
 
-  Debug(stream, "Closing with code %" PRIu64, app_error_code);
+  Debug(this, "Closing stream %" PRId64 " with code %" PRIu64,
+        stream_id,
+        app_error_code);
 
   HandleScope scope(env()->isolate());
   Context::Scope context_scope(env()->context());
@@ -1345,11 +1342,14 @@ void QuicSession::StreamReset(
     uint64_t app_error_code) {
   if (IsDestroyed())
     return;
-  QuicStream* stream = FindStream(stream_id);
-  if (stream == nullptr)
+
+  if (!HasStream(stream_id))
     return;
 
-  Debug(stream, "Reset with code %" PRIu64 " and final size %" PRIu64,
+  Debug(this,
+        "Reset stream %" PRId64 " with code %" PRIu64
+        " and final size %" PRIu64,
+        stream_id,
         app_error_code,
         final_size);
 
