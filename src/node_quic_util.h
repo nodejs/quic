@@ -163,8 +163,7 @@ class SocketAddress {
 
   static bool numeric_host(const char* hostname, int family) {
     std::array<uint8_t, sizeof(struct in6_addr)> dst;
-    int err = inet_pton(family, hostname, dst.data());
-    return err == 1;
+    return inet_pton(family, hostname, dst.data()) == 1;
   }
 
   static size_t GetMaxPktLen(const sockaddr* addr) {
@@ -310,11 +309,6 @@ class SocketAddress {
 
  private:
   sockaddr_storage address_;
-};
-
-class SocketAddressLRU : public MemoryRetainer {
- public:
- private:
 };
 
 class QuicPath {
