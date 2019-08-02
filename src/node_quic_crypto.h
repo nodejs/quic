@@ -161,66 +161,39 @@ inline ssize_t Encrypt(
   actx.reset(EVP_CIPHER_CTX_new());
   CHECK(actx);
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_EncryptInit_ex(
-          actx.get(),
-          ctx->aead,
-          nullptr,
-          nullptr,
-          nullptr));
-
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_CIPHER_CTX_ctrl(
-          actx.get(),
-          EVP_CTRL_AEAD_SET_IVLEN,
-          noncelen,
-          nullptr));
-
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_EncryptInit_ex(
-          actx.get(),
-          nullptr,
-          nullptr,
-          key,
-          nonce));
-
   size_t outlen = 0;
   int len;
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_EncryptUpdate(
-          actx.get(),
-          nullptr,
-          &len,
-          ad,
-          adlen));
+  if (EVP_EncryptInit_ex(actx.get(), ctx->aead, nullptr, nullptr, nullptr) != 1)
+    return NGTCP2_ERR_CRYPTO;
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_EncryptUpdate(
-          actx.get(),
-          dest,
-          &len,
-          plaintext,
-          plaintextlen));
+  if (EVP_CIPHER_CTX_ctrl(actx.get(), EVP_CTRL_AEAD_SET_IVLEN,
+                          noncelen, nullptr) != 1) {
+    return NGTCP2_ERR_CRYPTO;
+  }
+
+  if (EVP_EncryptInit_ex(actx.get(), nullptr, nullptr, key, nonce) != 1)
+    return NGTCP2_ERR_CRYPTO;
+
+  if (EVP_EncryptUpdate(actx.get(), nullptr, &len, ad, adlen) != 1)
+    return NGTCP2_ERR_CRYPTO;
+
+  if (EVP_EncryptUpdate(actx.get(), dest, &len, plaintext, plaintextlen) != 1)
+    return NGTCP2_ERR_CRYPTO;
 
   outlen = len;
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_EncryptFinal_ex(
-          actx.get(),
-          dest + outlen,
-          &len));
+  if (EVP_EncryptFinal_ex(actx.get(), dest + outlen, &len) != 1)
+    return NGTCP2_ERR_CRYPTO;
 
   outlen += len;
 
   CHECK_LE(outlen + taglen, destlen);
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_CIPHER_CTX_ctrl(
-          actx.get(),
-          EVP_CTRL_AEAD_GET_TAG,
-          taglen,
-          dest + outlen));
+  if (EVP_CIPHER_CTX_ctrl(actx.get(), EVP_CTRL_AEAD_GET_TAG, taglen,
+                          dest + outlen) != 1) {
+    return NGTCP2_ERR_CRYPTO;
+  }
 
   outlen += taglen;
 
@@ -254,62 +227,35 @@ inline ssize_t Decrypt(
   actx.reset(EVP_CIPHER_CTX_new());
   CHECK(actx);
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_DecryptInit_ex(
-          actx.get(),
-          ctx->aead,
-          nullptr,
-          nullptr,
-          nullptr));
-
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_CIPHER_CTX_ctrl(
-          actx.get(),
-          EVP_CTRL_AEAD_SET_IVLEN,
-          noncelen,
-          nullptr));
-
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_DecryptInit_ex(
-          actx.get(),
-          nullptr,
-          nullptr,
-          key,
-          nonce));
-
   size_t outlen;
   int len;
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_DecryptUpdate(
-          actx.get(),
-          nullptr,
-          &len,
-          ad,
-          adlen));
+  if (EVP_DecryptInit_ex(actx.get(), ctx->aead, nullptr, nullptr, nullptr) != 1)
+    return NGTCP2_ERR_TLS_DECRYPT;
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_DecryptUpdate(
-          actx.get(),
-          dest,
-          &len,
-          ciphertext,
-          ciphertextlen));
+  if (EVP_CIPHER_CTX_ctrl(actx.get(), EVP_CTRL_AEAD_SET_IVLEN,
+                          noncelen, nullptr) != 1) {
+    return NGTCP2_ERR_TLS_DECRYPT;
+  }
+
+  if (EVP_DecryptInit_ex(actx.get(), nullptr, nullptr, key, nonce) != 1)
+    return NGTCP2_ERR_TLS_DECRYPT;
+
+  if (EVP_DecryptUpdate(actx.get(), nullptr, &len, ad, adlen) != 1)
+    return NGTCP2_ERR_TLS_DECRYPT;
+
+  if (EVP_DecryptUpdate(actx.get(), dest, &len, ciphertext, ciphertextlen) != 1)
+    return NGTCP2_ERR_TLS_DECRYPT;
 
   outlen = len;
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_CIPHER_CTX_ctrl(
-          actx.get(),
-          EVP_CTRL_AEAD_SET_TAG,
-          taglen,
-          const_cast<uint8_t *>(tag)));
+  if (EVP_CIPHER_CTX_ctrl(actx.get(), EVP_CTRL_AEAD_SET_TAG,
+                          taglen, const_cast<uint8_t *>(tag)) != 1) {
+    return NGTCP2_ERR_TLS_DECRYPT;
+  }
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_DecryptFinal_ex(
-          actx.get(),
-          dest + outlen,
-          &len));
+  if (EVP_DecryptFinal_ex(actx.get(), dest + outlen, &len) != 1)
+    return NGTCP2_ERR_TLS_DECRYPT;
 
   outlen += len;
 
@@ -335,32 +281,23 @@ inline ssize_t HP_Mask(
   actx.reset(EVP_CIPHER_CTX_new());
   CHECK(actx);
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_EncryptInit_ex(
-          actx.get(),
-          ctx.hp,
-          nullptr,
-          key,
-          sample));
-
   size_t outlen = 0;
   int len;
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_EncryptUpdate(
-          actx.get(),
-          dest,
-          &len,
-          PLAINTEXT,
-          strsize(PLAINTEXT)));
+
+  if (EVP_EncryptInit_ex(actx.get(), ctx.hp, nullptr, key, sample) != 1)
+    return NGTCP2_ERR_CRYPTO;
+
+  if (EVP_EncryptUpdate(actx.get(), dest, &len, PLAINTEXT,
+                        strsize(PLAINTEXT)) != 1) {
+    return NGTCP2_ERR_CRYPTO;
+  }
+
   CHECK_EQ(len, 5);
 
   outlen = len;
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_EncryptFinal_ex(
-          actx.get(),
-          dest + outlen,
-          &len));
+  if (EVP_EncryptFinal_ex(actx.get(), dest + outlen, &len) != 1)
+    return NGTCP2_ERR_CRYPTO;
 
   CHECK_EQ(len, 0);
 
@@ -371,7 +308,7 @@ inline ssize_t HP_Mask(
 // function to establish the packet protection keys. HKDF-Expand-Label
 // is a component of TLS 1.3. This function is only called by the
 // HKDF_Expand_label function.
-inline int HKDF_Expand(
+inline bool HKDF_Expand(
     uint8_t* dest,
     size_t destlen,
     const uint8_t* secret,
@@ -383,47 +320,34 @@ inline int HKDF_Expand(
   pctx.reset(EVP_PKEY_CTX_new_id(EVP_PKEY_HKDF, nullptr));
   CHECK(pctx);
 
-  RETURN_IF_FAIL_OPENSSL(EVP_PKEY_derive_init(pctx.get()));
+  if (EVP_PKEY_derive_init(pctx.get()) != 1)
+    return false;
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_PKEY_CTX_hkdf_mode(
-          pctx.get(),
-          EVP_PKEY_HKDEF_MODE_EXPAND_ONLY));
+  if (EVP_PKEY_CTX_hkdf_mode(pctx.get(), EVP_PKEY_HKDEF_MODE_EXPAND_ONLY) != 1)
+    return false;
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_PKEY_CTX_set_hkdf_md(
-          pctx.get(),
-          ctx->prf));
+  if (EVP_PKEY_CTX_set_hkdf_md(pctx.get(), ctx->prf) != 1)
+    return false;
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_PKEY_CTX_set1_hkdf_salt(
-          pctx.get(), "", 0));
+  if (EVP_PKEY_CTX_set1_hkdf_salt(pctx.get(), "", 0) != 1)
+    return false;
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_PKEY_CTX_set1_hkdf_key(
-          pctx.get(),
-          secret,
-          secretlen));
+  if (EVP_PKEY_CTX_set1_hkdf_key(pctx.get(), secret, secretlen) != 1)
+    return false;
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_PKEY_CTX_add1_hkdf_info(
-          pctx.get(),
-          info,
-          infolen));
+  if (EVP_PKEY_CTX_add1_hkdf_info(pctx.get(), info, infolen) != 1)
+    return false;
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_PKEY_derive(
-          pctx.get(),
-          dest,
-          &destlen));
+  if (EVP_PKEY_derive(pctx.get(), dest, &destlen) != 1)
+    return false;
 
-  return 0;
+  return true;
 }
 
 // The HKDF_Extract function is used to extract initial keying material
 // used to derive the packet protection keys. HKDF-Extract is a component
 // of TLS 1.3.
-inline int HKDF_Extract(
+inline bool HKDF_Extract(
     uint8_t* dest,
     size_t destlen,
     const uint8_t* secret,
@@ -435,44 +359,30 @@ inline int HKDF_Extract(
   pctx.reset(EVP_PKEY_CTX_new_id(EVP_PKEY_HKDF, nullptr));
   CHECK(pctx);
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_PKEY_derive_init(
-          pctx.get()));
+  if (EVP_PKEY_derive_init(pctx.get()) != 1)
+    return false;
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_PKEY_CTX_hkdf_mode(
-          pctx.get(),
-          EVP_PKEY_HKDEF_MODE_EXTRACT_ONLY));
+  if (EVP_PKEY_CTX_hkdf_mode(pctx.get(), EVP_PKEY_HKDEF_MODE_EXTRACT_ONLY) != 1)
+    return false;
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_PKEY_CTX_set_hkdf_md(
-          pctx.get(),
-          ctx->prf));
+  if (EVP_PKEY_CTX_set_hkdf_md(pctx.get(), ctx->prf) != 1)
+    return false;
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_PKEY_CTX_set1_hkdf_salt(
-          pctx.get(),
-          salt,
-          saltlen));
+  if (EVP_PKEY_CTX_set1_hkdf_salt(pctx.get(), salt, saltlen) != 1)
+    return false;
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_PKEY_CTX_set1_hkdf_key(
-          pctx.get(),
-          secret,
-          secretlen));
+  if (EVP_PKEY_CTX_set1_hkdf_key(pctx.get(), secret, secretlen) != 1)
+    return false;
 
-  RETURN_IF_FAIL_OPENSSL(
-      EVP_PKEY_derive(
-          pctx.get(),
-          dest,
-          &destlen));
+  if (EVP_PKEY_derive(pctx.get(), dest, &destlen) != 1)
+    return false;
 
-  return 0;
+  return true;
 }
 
 // The HKDF_Expand_Label function is used as part of the process to
 // derive packet protection keys for QUIC packets.
-inline int HKDF_Expand_Label(
+inline bool HKDF_Expand_Label(
     uint8_t* dest,
     size_t destlen,
     const uint8_t* secret,
@@ -511,7 +421,7 @@ inline bool DeriveInitialSecret(
       params->initial_secret.size(),
       secret->data, secret->datalen,
       salt, saltlen,
-      &ctx) == 0;
+      &ctx);
 }
 
 inline bool DeriveServerInitialSecret(
@@ -524,7 +434,7 @@ inline bool DeriveServerInitialSecret(
       params->secret.size(),
       params->initial_secret.data(),
       params->initial_secret.size(),
-      LABEL, strsize(LABEL), &ctx) == 0;
+      LABEL, strsize(LABEL), &ctx);
 }
 
 inline bool DeriveClientInitialSecret(
@@ -537,7 +447,7 @@ inline bool DeriveClientInitialSecret(
       params->secret.size(),
       params->initial_secret.data(),
       params->initial_secret.size(),
-      LABEL, strsize(LABEL), &ctx) == 0;
+      LABEL, strsize(LABEL), &ctx);
 }
 
 inline bool DerivePacketProtectionKey(
@@ -557,7 +467,7 @@ inline bool DerivePacketProtectionKey(
   return HKDF_Expand_Label(
     dest, *keylen,
     secret, secretlen,
-    LABEL, strsize(LABEL), ctx) == 0;
+    LABEL, strsize(LABEL), ctx);
 }
 
 inline bool DerivePacketProtectionIV(
@@ -576,7 +486,7 @@ inline bool DerivePacketProtectionIV(
   return HKDF_Expand_Label(
     dest, *ivlen,
     secret, secretlen,
-    LABEL, strsize(LABEL), ctx) == 0;
+    LABEL, strsize(LABEL), ctx);
 }
 
 inline bool DeriveHeaderProtectionKey(
@@ -595,7 +505,7 @@ inline bool DeriveHeaderProtectionKey(
   return HKDF_Expand_Label(
     dest, *keylen,
     secret, secretlen,
-    LABEL, strsize(LABEL), ctx) == 0;
+    LABEL, strsize(LABEL), ctx);
 }
 
 inline bool DeriveTokenKey(
@@ -606,14 +516,14 @@ inline bool DeriveTokenKey(
     std::array<uint8_t, TOKEN_SECRETLEN>* token_secret) {
   std::array<uint8_t, 32> secret;
 
-  if (HKDF_Extract(
+  if (!HKDF_Extract(
           secret.data(),
           secret.size(),
           token_secret->data(),
           token_secret->size(),
           rand_data,
           rand_datalen,
-          context) != 0) {
+          context)) {
     return false;
   }
 
@@ -652,7 +562,7 @@ inline bool UpdateTrafficSecret(
   return HKDF_Expand_Label(
     dest.data(), secret->size(),
     secret->data(), secret->size(),
-    LABEL, strsize(LABEL), ctx) == 0;
+    LABEL, strsize(LABEL), ctx);
 }
 
 template <update_fn fn>

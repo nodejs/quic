@@ -41,13 +41,6 @@ constexpr uint64_t DEFAULT_MAX_STREAMS_UNI = 3;
 constexpr uint64_t DEFAULT_IDLE_TIMEOUT = 10 * 1000;
 constexpr uint64_t DEFAULT_RETRYTOKEN_EXPIRATION = 10ULL;
 
-#define RETURN_IF_FAIL(test, success, ret)                                     \
-  do {                                                                         \
-    if (UNLIKELY((test) != (success))) return (ret);                           \
-  } while (0)
-
-#define RETURN_IF_FAIL_OPENSSL(test) RETURN_IF_FAIL(test, 1, -1)
-
 typedef enum SelectPreferredAddressPolicy : int {
   // Ignore the server-provided preferred address
   QUIC_PREFERRED_ADDRESS_IGNORE,
