@@ -363,13 +363,14 @@ ssize_t QuicSession::DoDecrypt(
     size_t adlen) {
   if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return NGTCP2_ERR_CALLBACK_FAILURE;
-  return Decrypt(
+  ssize_t nwrite = Decrypt(
       dest, destlen,
       ciphertext, ciphertextlen,
       &crypto_ctx_,
       key, keylen,
       nonce, noncelen,
       ad, adlen);
+  return nwrite >= 0 ? nwrite : static_cast<ssize_t>(NGTCP2_ERR_TLS_DECRYPT);
 }
 
 ssize_t QuicSession::DoEncrypt(
@@ -385,13 +386,16 @@ ssize_t QuicSession::DoEncrypt(
     size_t adlen) {
   if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return NGTCP2_ERR_CALLBACK_FAILURE;
-  return Encrypt(
+  ssize_t nwrite = Encrypt(
       dest, destlen,
       plaintext, plaintextlen,
       &crypto_ctx_,
       key, keylen,
       nonce, noncelen,
       ad, adlen);
+  return nwrite >= 0 ?
+      nwrite :
+      static_cast<ssize_t>(NGTCP2_ERR_CALLBACK_FAILURE);
 }
 
 ssize_t QuicSession::DoHPMask(
@@ -403,11 +407,14 @@ ssize_t QuicSession::DoHPMask(
     size_t samplelen) {
   if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return NGTCP2_ERR_CALLBACK_FAILURE;
-  return HP_Mask(
+  ssize_t nwrite = HP_Mask(
       dest, destlen,
       crypto_ctx_,
       key, keylen,
       sample, samplelen);
+  return nwrite >= 0 ?
+      nwrite :
+      static_cast<ssize_t>(NGTCP2_ERR_CALLBACK_FAILURE);
 }
 
 ssize_t QuicSession::DoHSDecrypt(
@@ -423,13 +430,16 @@ ssize_t QuicSession::DoHSDecrypt(
     size_t adlen) {
   if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return NGTCP2_ERR_CALLBACK_FAILURE;
-  return Decrypt(
+  ssize_t nwrite = Decrypt(
       dest, destlen,
       ciphertext, ciphertextlen,
       &hs_crypto_ctx_,
       key, keylen,
       nonce, noncelen,
       ad, adlen);
+  return nwrite >= 0 ?
+      nwrite :
+      static_cast<ssize_t>(NGTCP2_ERR_CALLBACK_FAILURE);
 }
 
 ssize_t QuicSession::DoHSEncrypt(
@@ -445,13 +455,16 @@ ssize_t QuicSession::DoHSEncrypt(
     size_t adlen) {
   if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return NGTCP2_ERR_CALLBACK_FAILURE;
-  return Encrypt(
+  ssize_t nwrite = Encrypt(
       dest, destlen,
       plaintext, plaintextlen,
       &hs_crypto_ctx_,
       key, keylen,
       nonce, noncelen,
       ad, adlen);
+  return nwrite >= 0 ?
+      nwrite :
+      static_cast<ssize_t>(NGTCP2_ERR_CALLBACK_FAILURE);
 }
 
 ssize_t QuicSession::DoInHPMask(
@@ -463,11 +476,14 @@ ssize_t QuicSession::DoInHPMask(
     size_t samplelen) {
   if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return NGTCP2_ERR_CALLBACK_FAILURE;
-  return HP_Mask(
+  ssize_t nwrite = HP_Mask(
       dest, destlen,
       hs_crypto_ctx_,
       key, keylen,
       sample, samplelen);
+  return nwrite >= 0 ?
+      nwrite :
+      static_cast<ssize_t>(NGTCP2_ERR_CALLBACK_FAILURE);
 }
 
 void QuicSession::ExtendMaxStreamData(int64_t stream_id, uint64_t max_data) {
