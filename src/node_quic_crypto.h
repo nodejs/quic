@@ -115,36 +115,25 @@ inline void SetupTokenContext(CryptoContext* context) {
   prf_sha256(context);
 }
 
-inline int Negotiated_PRF(CryptoContext* ctx, SSL* ssl) {
-  switch (SSL_CIPHER_get_id(SSL_get_current_cipher(ssl))) {
-    case 0x03001301u:  // TLS_AES_128_GCM_SHA256
-    case 0x03001303u:  // TLS_CHACHA20_POLY1305_SHA256
-      ctx->prf = EVP_sha256();
-      return 0;
-    case 0x03001302u:  // TLS_AES_256_GCM_SHA384
-      ctx->prf = EVP_sha384();
-      return 0;
-    default:
-      return -1;
-  }
-}
-
-inline int Negotiated_AEAD(CryptoContext* ctx, SSL* ssl) {
+inline bool Negotiated_PRF_AEAD(CryptoContext* ctx, SSL* ssl) {
   switch (SSL_CIPHER_get_id(SSL_get_current_cipher(ssl))) {
     case 0x03001301u:  // TLS_AES_128_GCM_SHA256
       ctx->aead = EVP_aes_128_gcm();
       ctx->hp = EVP_aes_128_ctr();
-      return 0;
-    case 0x03001302u:  // TLS_AES_256_GCM_SHA384
-      ctx->aead = EVP_aes_256_gcm();
-      ctx->hp = EVP_aes_256_ctr();
-      return 0;
+      ctx->prf = EVP_sha256();
+      return true;
     case 0x03001303u:  // TLS_CHACHA20_POLY1305_SHA256
       ctx->aead = EVP_chacha20_poly1305();
       ctx->hp = EVP_chacha20();
-      return 0;
+      ctx->prf = EVP_sha256();
+      return true;
+    case 0x03001302u:  // TLS_AES_256_GCM_SHA384
+      ctx->aead = EVP_aes_256_gcm();
+      ctx->hp = EVP_aes_256_ctr();
+      ctx->prf = EVP_sha384();
+      return true;
     default:
-      return -1;
+      return false;
   }
 }
 
@@ -510,7 +499,7 @@ inline int HKDF_Expand_Label(
       ctx);
 }
 
-inline int DeriveInitialSecret(
+inline bool DeriveInitialSecret(
     CryptoInitialParams* params,
     const ngtcp2_cid* secret,
     const uint8_t* salt,
@@ -522,10 +511,10 @@ inline int DeriveInitialSecret(
       params->initial_secret.size(),
       secret->data, secret->datalen,
       salt, saltlen,
-      &ctx);
+      &ctx) == 0;
 }
 
-inline int DeriveServerInitialSecret(
+inline bool DeriveServerInitialSecret(
     CryptoInitialParams* params) {
   static constexpr uint8_t LABEL[] = "server in";
   CryptoContext ctx;
@@ -535,10 +524,10 @@ inline int DeriveServerInitialSecret(
       params->secret.size(),
       params->initial_secret.data(),
       params->initial_secret.size(),
-      LABEL, strsize(LABEL), &ctx);
+      LABEL, strsize(LABEL), &ctx) == 0;
 }
 
-inline int DeriveClientInitialSecret(
+inline bool DeriveClientInitialSecret(
     CryptoInitialParams* params) {
   static constexpr uint8_t LABEL[] = "client in";
   CryptoContext ctx;
@@ -548,85 +537,68 @@ inline int DeriveClientInitialSecret(
       params->secret.size(),
       params->initial_secret.data(),
       params->initial_secret.size(),
-      LABEL, strsize(LABEL), &ctx);
+      LABEL, strsize(LABEL), &ctx) == 0;
 }
 
-inline ssize_t DerivePacketProtectionKey(
+inline bool DerivePacketProtectionKey(
     uint8_t* dest,
     size_t destlen,
     const uint8_t* secret,
     size_t secretlen,
-    const CryptoContext* ctx) {
+    const CryptoContext* ctx,
+    size_t* keylen) {
   static constexpr uint8_t LABEL[] = "quic key";
 
-  size_t keylen = aead_key_length(ctx);
-  if (keylen > destlen)
-    return -1;
+  *keylen = aead_key_length(ctx);
 
-  RETURN_IF_FAIL(
-      HKDF_Expand_Label(
-          dest,
-          keylen,
-          secret,
-          secretlen,
-          LABEL,
-          strsize(LABEL),
-          ctx), 0, -1);
+  if (*keylen > destlen)
+    return false;
 
-  return keylen;
+  return HKDF_Expand_Label(
+    dest, *keylen,
+    secret, secretlen,
+    LABEL, strsize(LABEL), ctx) == 0;
 }
 
-inline ssize_t DerivePacketProtectionIV(
+inline bool DerivePacketProtectionIV(
     uint8_t* dest,
     size_t destlen,
     const uint8_t* secret,
     size_t secretlen,
-    const CryptoContext* ctx) {
+    const CryptoContext* ctx,
+    size_t* ivlen) {
   static constexpr uint8_t LABEL[] = "quic iv";
 
-  size_t ivlen = std::max(static_cast<size_t>(8), aead_nonce_length(ctx));
-  if (ivlen > destlen)
-    return -1;
+  *ivlen = std::max(static_cast<size_t>(8), aead_nonce_length(ctx));
+  if (*ivlen > destlen)
+    return false;
 
-  RETURN_IF_FAIL(
-      HKDF_Expand_Label(
-          dest,
-          ivlen,
-          secret,
-          secretlen,
-          LABEL,
-          strsize(LABEL),
-          ctx), 0, -1);
-
-  return ivlen;
+  return HKDF_Expand_Label(
+    dest, *ivlen,
+    secret, secretlen,
+    LABEL, strsize(LABEL), ctx) == 0;
 }
 
-inline ssize_t DeriveHeaderProtectionKey(
+inline bool DeriveHeaderProtectionKey(
     uint8_t* dest,
     size_t destlen,
     const uint8_t* secret,
     size_t secretlen,
-    const CryptoContext* ctx) {
+    const CryptoContext* ctx,
+    size_t* keylen) {
   static constexpr uint8_t LABEL[] = "quic hp";
 
-  size_t keylen = aead_key_length(ctx);
-  if (keylen > destlen)
-    return -1;
+  *keylen = aead_key_length(ctx);
+  if (*keylen > destlen)
+    return false;
 
-  RETURN_IF_FAIL(
-      HKDF_Expand_Label(
-          dest,
-          keylen,
-          secret,
-          secretlen,
-          LABEL,
-          strsize(LABEL),
-          ctx), 0, -1);
-
-  return keylen;
+  return HKDF_Expand_Label(
+    dest, *keylen,
+    secret, secretlen,
+    LABEL, strsize(LABEL), ctx) == 0;
 }
 
-inline int DeriveTokenKey(
+inline bool DeriveTokenKey(
     CryptoToken* params,
     const uint8_t* rand_data,
     size_t rand_datalen,
@@ -634,98 +606,124 @@ inline int DeriveTokenKey(
     std::array<uint8_t, TOKEN_SECRETLEN>* token_secret) {
   std::array<uint8_t, 32> secret;
 
-  RETURN_IF_FAIL(
-      HKDF_Extract(
+  if (HKDF_Extract(
           secret.data(),
           secret.size(),
           token_secret->data(),
           token_secret->size(),
           rand_data,
           rand_datalen,
-          context), 0, -1);
+          context) != 0) {
+    return false;
+  }
 
-  ssize_t slen =
-      DerivePacketProtectionKey(
+  if (!DerivePacketProtectionKey(
           params->key.data(),
           params->keylen,
           secret.data(),
           secret.size(),
-          context);
-  if (slen < 0)
-    return -1;
-  params->keylen = slen;
+          context,
+          &params->keylen)) {
+    return false;
+  }
 
-  slen =
-      DerivePacketProtectionIV(
+  if (!DerivePacketProtectionIV(
           params->iv.data(),
           params->ivlen,
           secret.data(),
           secret.size(),
-          context);
-  if (slen < 0)
-    return -1;
-  params->ivlen = slen;
+          context,
+          &params->ivlen)) {
+    return false;
+  }
 
-  return 0;
+  return true;
 }
 
-inline ssize_t UpdateTrafficSecret(
-    uint8_t* dest,
-    size_t destlen,
-    const uint8_t* secret,
-    size_t secretlen,
+inline bool UpdateTrafficSecret(
+    std::array<uint8_t, 64>& dest,
+    std::vector<uint8_t>* secret,
     const CryptoContext* ctx) {
 
   static constexpr uint8_t LABEL[] = "traffic upd";
 
-  if (destlen < secretlen)
-    return -1;
+  CHECK_GE(dest.size(), secret->size());
 
-  RETURN_IF_FAIL(
-      HKDF_Expand_Label(
-          dest,
-          secretlen,
-          secret,
-          secretlen,
-          LABEL,
-          strsize(LABEL),
-          ctx), 0, -1);
-
-  return secretlen;
+  return HKDF_Expand_Label(
+    dest.data(), secret->size(),
+    secret->data(), secret->size(),
+    LABEL, strsize(LABEL), ctx) == 0;
 }
 
-inline int MessageDigest(
-    uint8_t* res,
-    const EVP_MD* meth,
-    const uint8_t* data,
-    size_t len) {
+template <update_fn fn>
+inline bool DoUpdateKey(
+    ngtcp2_conn* conn,
+    std::vector<uint8_t>* s,
+    CryptoContext* ctx) {
+  std::array<uint8_t, 64> secret;
+  CryptoParams params;
+
+  size_t secretlen = s->size();
+  if (!UpdateTrafficSecret(secret, s, ctx))
+    return false;
+
+  s->assign(std::begin(secret), std::end(secret));
+
+  if (!DerivePacketProtectionKey(
+          params.key.data(),
+          params.key.size(),
+          secret.data(),
+          secretlen, ctx,
+          &params.keylen)) {
+    return false;
+  }
+
+  if (!DerivePacketProtectionIV(
+          params.iv.data(),
+          params.iv.size(),
+          secret.data(),
+          secretlen, ctx,
+          &params.ivlen)) {
+    return false;
+  }
+
+  return fn(
+      conn,
+      params.key.data(), params.keylen,
+      params.iv.data(),
+      params.ivlen) == 0;
+}
+
+inline bool MessageDigest(
+    std::array<uint8_t, 32>* dest,
+    const std::array<uint8_t, 16>& rand) {
+  const EVP_MD* meth = EVP_sha256();
   DeleteFnPtr<EVP_MD_CTX, EVP_MD_CTX_free> ctx;
   ctx.reset(EVP_MD_CTX_new());
   CHECK(ctx);
 
-  RETURN_IF_FAIL_OPENSSL(EVP_DigestInit_ex(ctx.get(), meth, nullptr));
-  RETURN_IF_FAIL_OPENSSL(EVP_DigestUpdate(ctx.get(), data, len));
+  if (EVP_DigestInit_ex(ctx.get(), meth, nullptr) != 1)
+    return false;
+
+  if (EVP_DigestUpdate(ctx.get(), rand.data(), rand.size()) != 1)
+    return false;
+
   unsigned int mdlen = EVP_MD_size(meth);
-  RETURN_IF_FAIL_OPENSSL(EVP_DigestFinal_ex(ctx.get(), res, &mdlen));
-  return 0;
+
+  return EVP_DigestFinal_ex(ctx.get(), dest->data(), &mdlen) == 1;
 }
 
-inline int GenerateRandData(
-    uint8_t* buf,
-    size_t len) {
+inline bool GenerateRandData(uint8_t* buf, size_t len) {
   std::array<uint8_t, 16> rand;
   std::array<uint8_t, 32> md;
   EntropySource(rand.data(), rand.size());
 
-  RETURN_IF_FAIL(
-      MessageDigest(
-          md.data(),
-          EVP_sha256(),
-          rand.data(),
-          rand.size()), 0, -1);
+  if (!MessageDigest(&md, rand))
+    return false;
+
   CHECK_LE(len, md.size());
   std::copy_n(std::begin(md), len, buf);
-  return 0;
+  return true;
 }
 
 inline void ClearTLSError() {
@@ -736,124 +734,127 @@ inline const char* TLSErrorString(int code) {
   return ERR_error_string(code, nullptr);
 }
 
-inline int SetupKeys(
+inline bool SetupKeys(
   const uint8_t* secret,
   size_t secretlen,
   CryptoParams* params,
   const CryptoContext* context) {
-  params->keylen =
-      DerivePacketProtectionKey(
+
+  if (!DerivePacketProtectionKey(
           params->key.data(),
           params->key.size(),
           secret,
           secretlen,
-          context);
-  if (params->keylen < 0)
-    return -1;
+          context,
+          &params->keylen)) {
+    return false;
+  }
 
-  params->ivlen =
-      DerivePacketProtectionIV(
+  if (!DerivePacketProtectionIV(
           params->iv.data(),
           params->iv.size(),
           secret, secretlen,
-          context);
-  if (params->ivlen < 0)
-    return -1;
+          context,
+          &params->ivlen)) {
+    return false;
+  }
 
-  params->hplen =
-      DeriveHeaderProtectionKey(
+  if (!DeriveHeaderProtectionKey(
           params->hp.data(),
           params->hp.size(),
           secret, secretlen,
-          context);
-  if (params->hplen < 0)
-    return -1;
+          context,
+          &params->hplen)) {
+    return false;
+  }
 
-  return 0;
+  return true;
 }
 
-inline int SetupClientSecret(
-  CryptoInitialParams* params,
-  const CryptoContext* context) {
-  RETURN_IF_FAIL(DeriveClientInitialSecret(params), 0, -1);
+inline bool SetupClientSecret(
+    CryptoInitialParams* params,
+    const CryptoContext* context) {
+  if (!DeriveClientInitialSecret(params))
+    return false;
 
-  params->keylen =
-      DerivePacketProtectionKey(
+  if (!DerivePacketProtectionKey(
           params->key.data(),
           params->key.size(),
           params->secret.data(),
           params->secret.size(),
-          context);
-  if (params->keylen < 0)
-    return -1;
+          context,
+          &params->keylen)) {
+            return false;
+  }
 
-  params->ivlen =
-      DerivePacketProtectionIV(
+  if (!DerivePacketProtectionIV(
           params->iv.data(),
           params->iv.size(),
           params->secret.data(),
           params->secret.size(),
-          context);
-  if (params->ivlen < 0)
-    return -1;
+          context,
+          &params->ivlen)) {
+    return false;
+  }
 
-  params->hplen =
-      DeriveHeaderProtectionKey(
+  if (!DeriveHeaderProtectionKey(
           params->hp.data(),
           params->hp.size(),
           params->secret.data(),
           params->secret.size(),
-          context);
-  if (params->hplen < 0)
-    return -1;
+          context,
+          &params->hplen)) {
+    return false;
+  }
 
-  return 0;
+  return true;
 }
 
-inline int SetupServerSecret(
+inline bool SetupServerSecret(
     CryptoInitialParams* params,
     const CryptoContext* context) {
 
-  RETURN_IF_FAIL(DeriveServerInitialSecret(params), 0, -1);
+  if (!DeriveServerInitialSecret(params))
+    return false;
 
-  params->keylen =
-      DerivePacketProtectionKey(
+  if (!DerivePacketProtectionKey(
           params->key.data(),
           params->key.size(),
           params->secret.data(),
           params->secret.size(),
-          context);
-  if (params->keylen < 0)
-    return -1;
+          context,
+          &params->keylen)) {
+    return false;
+  }
 
-  params->ivlen =
-      DerivePacketProtectionIV(
+  if (!DerivePacketProtectionIV(
           params->iv.data(),
           params->iv.size(),
           params->secret.data(),
           params->secret.size(),
-          context);
-  if (params->ivlen < 0)
-    return -1;
+          context,
+          &params->ivlen)) {
+    return false;
+  }
 
-  params->hplen =
-      DeriveHeaderProtectionKey(
+  if (!DeriveHeaderProtectionKey(
           params->hp.data(),
           params->hp.size(),
           params->secret.data(),
           params->secret.size(),
-          context);
-  if (params->hplen < 0)
-    return -1;
+          context,
+          &params->hplen)) {
+    return false;
+  }
 
-  return 0;
+  return true;
 }
 
 template <install_fn fn>
-inline int InstallKeys(
+inline void InstallKeys(
     ngtcp2_conn* connection,
     const CryptoParams& params) {
-  return fn(connection,
+  fn(connection,
      params.key.data(),
      params.keylen,
      params.iv.data(),
@@ -863,10 +864,10 @@ inline int InstallKeys(
 }
 
 template <install_fn fn>
-inline int InstallKeys(
+inline void InstallKeys(
     ngtcp2_conn* connection,
     const CryptoInitialParams& params) {
-  return fn(connection,
+  fn(connection,
      params.key.data(),
      params.keylen,
      params.iv.data(),
@@ -1378,7 +1379,7 @@ inline int Server_Transport_Params_Parse_CB(
   return 1;
 }
 
-inline int GenerateRetryToken(
+inline bool GenerateRetryToken(
     uint8_t* token,
     size_t* tokenlen,
     const sockaddr* addr,
@@ -1399,15 +1400,17 @@ inline int GenerateRetryToken(
   std::array<uint8_t, TOKEN_RAND_DATALEN> rand_data;
   CryptoToken params;
 
-  RETURN_IF_FAIL(GenerateRandData(rand_data.data(), rand_data.size()), 0, -1);
+  if (!GenerateRandData(rand_data.data(), rand_data.size()))
+    return false;
 
-  RETURN_IF_FAIL(
-      DeriveTokenKey(
+  if (!DeriveTokenKey(
           &params,
           rand_data.data(),
           rand_data.size(),
           token_crypto_ctx,
-          token_secret), 0, -1);
+          token_secret)) {
+    return false;
+  }
 
   ssize_t n =
       Encrypt(
@@ -1421,14 +1424,14 @@ inline int GenerateRetryToken(
           reinterpret_cast<const uint8_t *>(addr), addrlen);
 
   if (n < 0)
-    return -1;
+    return false;
 
   memcpy(token + n, rand_data.data(), rand_data.size());
   *tokenlen = n + rand_data.size();
-  return 0;
+  return true;
 }
 
-inline int VerifyRetryToken(
+inline bool InvalidRetryToken(
     Environment* env,
     ngtcp2_cid* ocid,
     const ngtcp2_pkt_hd* hd,
@@ -1437,10 +1440,13 @@ inline int VerifyRetryToken(
     std::array<uint8_t, TOKEN_SECRETLEN>* token_secret,
     uint64_t verification_expiration) {
 
+  if (hd->tokenlen == 0)
+    return true;
+
   const size_t addrlen = SocketAddress::GetAddressLen(addr);
 
   if (hd->tokenlen < TOKEN_RAND_DATALEN)
-    return  -1;
+    return  true;
 
   uint8_t* rand_data = hd->token + hd->tokenlen - TOKEN_RAND_DATALEN;
   uint8_t* ciphertext = hd->token;
@@ -1448,13 +1454,14 @@ inline int VerifyRetryToken(
 
   CryptoToken params;
 
-  RETURN_IF_FAIL(
-      DeriveTokenKey(
+  if (!DeriveTokenKey(
           &params,
           rand_data,
           TOKEN_RAND_DATALEN,
           token_crypto_ctx,
-          token_secret), 0, -1);
+          token_secret)) {
+    return true;
+  }
 
   std::array<uint8_t, 4096> plaintext;
 
@@ -1468,18 +1475,17 @@ inline int VerifyRetryToken(
           params.iv.data(),
           params.ivlen,
           reinterpret_cast<const uint8_t*>(addr), addrlen);
-  if (n < 0)
-    return -1;
 
+  // Will also cover case where n is negative
   if (static_cast<size_t>(n) < addrlen + sizeof(uint64_t))
-    return -1;
+    return true;
 
   ssize_t cil = static_cast<size_t>(n) - addrlen - sizeof(uint64_t);
   if (cil != 0 && (cil < NGTCP2_MIN_CIDLEN || cil > NGTCP2_MAX_CIDLEN))
-    return -1;
+    return true;
 
   if (memcmp(plaintext.data(), addr, addrlen) != 0)
-    return -1;
+    return true;
 
 
   uint64_t t;
@@ -1491,11 +1497,11 @@ inline int VerifyRetryToken(
   // QuicSocket instance with a MIN_RETRYTOKEN_EXPIRATION second
   // minimum and a MAX_RETRYTOKEN_EXPIRATION second maximum.
   if (t + verification_expiration * NGTCP2_SECONDS < now)
-    return -1;
+    return true;
 
   ngtcp2_cid_init(ocid, plaintext.data() + addrlen + sizeof(uint64_t), cil);
 
-  return 0;
+  return false;
 }
 
 inline int VerifyPeerCertificate(SSL* ssl) {

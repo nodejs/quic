@@ -536,12 +536,12 @@ ssize_t QuicSocket::SendRetry(
   std::array<uint8_t, 256> token;
   size_t tokenlen = token.size();
 
-  if (GenerateRetryToken(
+  if (!GenerateRetryToken(
           token.data(), &tokenlen,
           addr,
           **dcid,
           &token_crypto_ctx_,
-          &token_secret_) != 0) {
+          &token_secret_)) {
     return -1;
   }
 
@@ -658,15 +658,14 @@ std::shared_ptr<QuicSession> QuicSocket::AcceptInitialPacket(
       // The VALIDATE_ADDRESS_LRU option is disable by default.
     if (!IsValidatedAddress(addr)) {
       Debug(this, "Performing explicit address validation.");
-      if (hd.tokenlen == 0 ||
-          VerifyRetryToken(
+      if (InvalidRetryToken(
               env(),
               &ocid,
               &hd,
               addr,
               &token_crypto_ctx_,
               &token_secret_,
-              retry_token_expiration_) != 0) {
+              retry_token_expiration_)) {
         Debug(this, "A valid retry token was not found. Sending retry.");
         SendRetry(version, dcid, scid, addr);
         return session;

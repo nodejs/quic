@@ -490,7 +490,7 @@ class QuicSession : public AsyncWrap,
   void HandshakeCompleted();
   void InitTLS();
   void Keylog(const char* line);
-  int PathValidation(
+  void PathValidation(
     const ngtcp2_path* path,
     ngtcp2_path_validation_result res);
   bool ReceiveClientInitial(const ngtcp2_cid* dcid);

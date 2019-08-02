@@ -166,10 +166,7 @@ inline int QuicSession::OnClientInitial(
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
   QuicSession::Ngtcp2CallbackScope callback_scope(session);
-  RETURN_IF_FAIL(
-      session->TLSHandshake(), 0,
-      NGTCP2_ERR_CALLBACK_FAILURE);
-  return 0;
+  return session->TLSHandshake() == 0 ? 0 : NGTCP2_ERR_CALLBACK_FAILURE;
 }
 
 // Called by ngtcp2 for a new server connection when the initial
@@ -575,7 +572,7 @@ inline int QuicSession::OnPathValidation(
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
   QuicSession::Ngtcp2CallbackScope callback_scope(session);
-  RETURN_IF_FAIL(session->PathValidation(path, res), 0, -1);
+  session->PathValidation(path, res);
   return 0;
 }
 

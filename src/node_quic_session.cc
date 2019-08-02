@@ -705,7 +705,7 @@ bool QuicSession::OpenUnidirectionalStream(int64_t* stream_id) {
   return true;
 }
 
-int QuicSession::PathValidation(
+void QuicSession::PathValidation(
     const ngtcp2_path* path,
     ngtcp2_path_validation_result res) {
   if (res == NGTCP2_PATH_VALIDATION_RESULT_SUCCESS) {
@@ -730,8 +730,6 @@ int QuicSession::PathValidation(
       env()->quic_on_session_path_validation_function(),
       arraysize(argv),
       argv);
-
-  return 0;
 }
 
 // Calling Ping will trigger the ngtcp2_conn to serialize any
@@ -877,19 +875,24 @@ bool QuicSession::ReceiveClientInitial(const ngtcp2_cid* dcid) {
 
   CryptoInitialParams params;
 
-  RETURN_IF_FAIL(
-      DeriveInitialSecret(
+  if (!DeriveInitialSecret(
           &params,
           dcid,
           reinterpret_cast<const uint8_t *>(NGTCP2_INITIAL_SALT),
-          strsize(NGTCP2_INITIAL_SALT)), 0, false);
+          strsize(NGTCP2_INITIAL_SALT))) {
+    return false;
+  }
 
   SetupTokenContext(&hs_crypto_ctx_);
 
-  RETURN_IF_FAIL(SetupServerSecret(&params, &hs_crypto_ctx_), 0, false);
+  if (!SetupServerSecret(&params, &hs_crypto_ctx_))
+    return false;
+
   InstallKeys<ngtcp2_conn_install_initial_tx_keys>(Connection(), params);
 
-  RETURN_IF_FAIL(SetupClientSecret(&params, &hs_crypto_ctx_), 0, false);
+  if (!SetupClientSecret(&params, &hs_crypto_ctx_))
+    return false;
+
   InstallKeys<ngtcp2_conn_install_initial_rx_keys>(Connection(), params);
 
   return true;
@@ -1566,98 +1569,25 @@ bool QuicSession::UpdateKey() {
   // run while UpdateKey is running, but we need to gate on
   // it just to be safe.
   OnScopeLeave leave([&]() { SetFlag(QUICSESSION_FLAG_KEYUPDATE, false); });
+  CHECK(!IsFlagSet(QUICSESSION_FLAG_KEYUPDATE));
   SetFlag(QUICSESSION_FLAG_KEYUPDATE);
   Debug(this, "Updating keys.");
 
-  std::array<uint8_t, 64> secret;
-  ssize_t secretlen;
-  CryptoParams params;
-
   IncrementStat(1, &session_stats_, &session_stats::keyupdate_count);
 
-  secretlen =
-      UpdateTrafficSecret(
-          secret.data(),
-          secret.size(),
-          tx_secret_.data(),
-          tx_secret_.size(),
-          &crypto_ctx_);
-  if (secretlen < 0)
-    return false;
-
-  tx_secret_.assign(
-      std::begin(secret),
-      std::end(secret));
-
-  params.keylen =
-      DerivePacketProtectionKey(
-          params.key.data(),
-          params.key.size(),
-          secret.data(),
-          secretlen,
-          &crypto_ctx_);
-  if (params.keylen < 0)
-    return false;
-
-  params.ivlen =
-      DerivePacketProtectionIV(
-          params.iv.data(),
-          params.iv.size(),
-          secret.data(),
-          secretlen,
-          &crypto_ctx_);
-  if (params.ivlen < 0)
-    return false;
-
-  RETURN_IF_FAIL(
-      ngtcp2_conn_update_tx_key(
+  if (!DoUpdateKey<ngtcp2_conn_update_tx_key>(
           Connection(),
-          params.key.data(),
-          params.keylen,
-          params.iv.data(),
-          params.ivlen), 0, false);
-
-  secretlen =
-      UpdateTrafficSecret(
-          secret.data(),
-          secret.size(),
-          rx_secret_.data(),
-          rx_secret_.size(),
-          &crypto_ctx_);
-  if (secretlen < 0)
+          &tx_secret_,
+          &crypto_ctx_)) {
     return false;
+  }
 
-  rx_secret_.assign(
-      std::begin(secret),
-      std::end(secret));
-
-  params.keylen =
-      DerivePacketProtectionKey(
-          params.key.data(),
-          params.key.size(),
-          secret.data(),
-          secretlen,
-          &crypto_ctx_);
-  if (params.keylen < 0)
-    return false;
-
-  params.ivlen =
-      DerivePacketProtectionIV(
-          params.iv.data(),
-          params.iv.size(),
-          secret.data(),
-          secretlen,
-          &crypto_ctx_);
-  if (params.ivlen < 0)
-    return false;
-
-  RETURN_IF_FAIL(
-      ngtcp2_conn_update_rx_key(
+  if (!DoUpdateKey<ngtcp2_conn_update_rx_key>(
           Connection(),
-          params.key.data(),
-          params.keylen,
-          params.iv.data(),
-          params.ivlen), 0, false);
+          &rx_secret_,
+          &crypto_ctx_)) {
+    return false;
+  }
 
   return true;
 }
@@ -2047,14 +1977,13 @@ int QuicServerSession::OnKey(
       return 0;
   }
 
-  if (Negotiated_PRF(&crypto_ctx_, ssl()) != 0 ||
-      Negotiated_AEAD(&crypto_ctx_, ssl()) != 0) {
-     return -1;
-  }
+  if (!Negotiated_PRF_AEAD(&crypto_ctx_, ssl()))
+    return -1;
 
   CryptoParams params;
 
-  RETURN_IF_FAIL(SetupKeys(secret, secretlen, &params, &crypto_ctx_), 0, -1);
+  if (!SetupKeys(secret, secretlen, &params, &crypto_ctx_))
+    return -1;
 
   ngtcp2_conn_set_aead_overhead(
       Connection(),
@@ -2532,9 +2461,12 @@ bool QuicClientSession::SetSocket(QuicSocket* socket, bool nat_rebinding) {
     ngtcp2_conn_set_local_addr(Connection(), &addr);
   } else {
     QuicPath path(local_address, &remote_address_);
-    RETURN_IF_FAIL(
-       ngtcp2_conn_initiate_migration(Connection(), *path, uv_hrtime()),
-       0, false);
+    if (ngtcp2_conn_initiate_migration(
+            Connection(),
+            *path,
+            uv_hrtime()) != 0) {
+      return false;
+    }
   }
 
   SendPendingData();
@@ -2594,14 +2526,13 @@ int QuicClientSession::OnKey(
       return 0;
   }
 
-  if (Negotiated_PRF(&crypto_ctx_, ssl()) != 0 ||
-      Negotiated_AEAD(&crypto_ctx_, ssl()) != 0) {
+  if (!Negotiated_PRF_AEAD(&crypto_ctx_, ssl()))
     return -1;
-  }
 
   CryptoParams params;
 
-  RETURN_IF_FAIL(SetupKeys(secret, secretlen, &params, &crypto_ctx_), 0, -1);
+  if (!SetupKeys(secret, secretlen, &params, &crypto_ctx_))
+    return -1;
 
   ngtcp2_conn_set_aead_overhead(
       Connection(),
@@ -2746,22 +2677,23 @@ bool QuicClientSession::SetupInitialCryptoContext() {
 
   SetupTokenContext(&hs_crypto_ctx_);
 
-  RETURN_IF_FAIL(
-      DeriveInitialSecret(
+  if (!DeriveInitialSecret(
           &params,
           dcid,
           reinterpret_cast<const uint8_t*>(NGTCP2_INITIAL_SALT),
-          strsize(NGTCP2_INITIAL_SALT)), 0, false);
+          strsize(NGTCP2_INITIAL_SALT))) {
+    return false;
+  }
 
-  RETURN_IF_FAIL(SetupClientSecret(&params, &hs_crypto_ctx_), 0, false);
-  InstallKeys<ngtcp2_conn_install_initial_tx_keys>(
-      Connection(),
-      params);
+  if (!SetupClientSecret(&params, &hs_crypto_ctx_))
+    return false;
 
-  RETURN_IF_FAIL(SetupServerSecret(&params, &hs_crypto_ctx_), 0, false);
-  InstallKeys<ngtcp2_conn_install_initial_rx_keys>(
-      Connection(),
-      params);
+  InstallKeys<ngtcp2_conn_install_initial_tx_keys>(Connection(), params);
+
+  if (!SetupServerSecret(&params, &hs_crypto_ctx_))
+    return false;
+
+  InstallKeys<ngtcp2_conn_install_initial_rx_keys>(Connection(), params);
 
   return true;
 }

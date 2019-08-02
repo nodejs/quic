@@ -405,6 +405,12 @@ void IncrementStat(
   access(a, mems...) += delta;
 }
 
+typedef int(*update_fn)(
+    ngtcp2_conn* conn,
+    const uint8_t* key,
+    size_t keylen,
+    const uint8_t* iv,
+    size_t ivlen);
 
 typedef int(*install_fn)(
     ngtcp2_conn* conn,
@@ -432,18 +438,18 @@ struct CryptoInitialParams {
   std::array<uint8_t, 16> key;
   std::array<uint8_t, 16> iv;
   std::array<uint8_t, 16> hp;
-  ssize_t keylen;
-  ssize_t ivlen;
-  ssize_t hplen;
+  size_t keylen;
+  size_t ivlen;
+  size_t hplen;
 };
 
 struct CryptoParams {
   std::array<uint8_t, 64> key;
   std::array<uint8_t, 64> iv;
   std::array<uint8_t, 64> hp;
-  ssize_t keylen;
-  ssize_t ivlen;
-  ssize_t hplen;
+  size_t keylen;
+  size_t ivlen;
+  size_t hplen;
 };
 
 struct CryptoToken {
