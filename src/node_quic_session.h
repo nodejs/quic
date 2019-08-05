@@ -502,7 +502,7 @@ class QuicSession : public AsyncWrap,
   bool ReceivePacket(QuicPath* path, const uint8_t* data, ssize_t nread);
   void RemoveConnectionID(const ngtcp2_cid* cid);
   void ScheduleRetransmit();
-  bool SendPacket();
+  bool SendPacket(const char* diagnostic_label = nullptr);
   void SetHandshakeCompleted();
   void SetLocalAddress(const ngtcp2_addr* addr);
   void StatelessReset();
@@ -514,7 +514,7 @@ class QuicSession : public AsyncWrap,
       uint64_t app_error_code);
   int TLSHandshake();
   bool UpdateKey();
-  bool WritePackets();
+  bool WritePackets(const char* diagnostic_label = nullptr);
   int WritePeerHandshake(
       ngtcp2_crypto_level crypto_level,
       const uint8_t* data,

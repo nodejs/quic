@@ -191,10 +191,22 @@ int QuicSocket::Bind(
   return 0;
 }
 
+// If there are no pending QuicSocket::SendWrap callbacks, the
+// QuicSocket instance will be closed immediately and the
+// close callback will be invoked. Otherwise, the QuicSocket
+// will be marked as pending close and will close as soon as
+// the final remaining QuicSocket::SendWrap callback is invoked.
+// This design ensures that packets that have been sent down to
+// the libuv level are processed even tho we are shutting down.
+//
+// TODO(@jasnell): We will want to implement an additional function
+// that will close things down immediately, canceling any still
+// pending operations.
 void QuicSocket::Close(Local<Value> close_callback) {
   if (!IsInitialized() || IsFlagSet(QUICSOCKET_FLAGS_PENDING_CLOSE))
     return;
   SetFlag(QUICSOCKET_FLAGS_PENDING_CLOSE);
+  Debug(this, "Closing");
 
   CHECK_EQ(false, persistent().IsEmpty());
   if (!close_callback.IsEmpty() && close_callback->IsFunction()) {
@@ -203,6 +215,7 @@ void QuicSocket::Close(Local<Value> close_callback) {
                   close_callback).Check();
   }
 
+  // Attempt to close immediately.
   MaybeClose();
 }
 
@@ -215,6 +228,13 @@ void QuicSocket::MaybeClose() {
     return;
 
   CHECK_EQ(false, persistent().IsEmpty());
+
+  Debug(this, "Closing the libuv handle");
+
+  // Close the libuv handle first. The OnClose handler
+  // will free the QuicSocket instance after it invokes
+  // the close callback, letting the JavaScript side know
+  // that the handle is being freed.
   uv_close(GetHandle(), OnClose);
   MarkAsClosing();
 }
@@ -241,6 +261,18 @@ void QuicSocket::Listen(
   SetFlag(QUICSOCKET_FLAGS_SERVER_LISTENING);
   socket_stats_.listen_at = uv_hrtime();
   ReceiveStart();
+}
+
+// StopListening is called when the QuicSocket is no longer
+// accepting new server connections. Typically, this is called
+// when the QuicSocket enters a graceful closing state where
+// existing sessions are allowed to close naturally but new
+// sessions are rejected.
+void QuicSocket::StopListening() {
+  if (!IsFlagSet(QUICSOCKET_FLAGS_SERVER_LISTENING))
+    return;
+  Debug(this, "Stop listening.");
+  SetFlag(QUICSOCKET_FLAGS_SERVER_LISTENING, false);
 }
 
 void QuicSocket::OnAlloc(
@@ -475,7 +507,12 @@ void QuicSocket::SendInitialConnectionClose(
     *allocator,
     nullptr);
 
-  SendWrapStack* req = new SendWrapStack(this, addr, NGTCP2_MAX_PKTLEN_IPV6);
+  SendWrapStack* req =
+      new SendWrapStack(
+          this,
+          addr,
+          NGTCP2_MAX_PKTLEN_IPV6,
+          "initial cc");
 
   ssize_t nwrite =
       ngtcp2_conn_write_connection_close(
@@ -501,7 +538,12 @@ void QuicSocket::SendVersionNegotiation(
       QuicCID* dcid,
       QuicCID* scid,
       const sockaddr* addr) {
-  SendWrapStack* req = new SendWrapStack(this, addr, NGTCP2_MAX_PKTLEN_IPV6);
+  SendWrapStack* req =
+      new SendWrapStack(
+          this,
+          addr,
+          NGTCP2_MAX_PKTLEN_IPV6,
+          "version negotiation");
 
   std::array<uint32_t, 2> sv;
   sv[0] = GenerateReservedVersion(addr, version);
@@ -531,7 +573,12 @@ ssize_t QuicSocket::SendRetry(
     QuicCID* dcid,
     QuicCID* scid,
     const sockaddr* addr) {
-  SendWrapStack* req = new SendWrapStack(this, addr, NGTCP2_MAX_PKTLEN_IPV6);
+  SendWrapStack* req =
+      new SendWrapStack(
+          this,
+          addr,
+          NGTCP2_MAX_PKTLEN_IPV6,
+          "retry");
 
   std::array<uint8_t, 256> token;
   size_t tokenlen = token.size();
@@ -769,67 +816,106 @@ int QuicSocket::DropMembership(const char* address, const char* iface) {
 int QuicSocket::SendPacket(
     const sockaddr* dest,
     QuicBuffer* buffer,
-    std::shared_ptr<QuicSession> session) {
-  if (buffer->Length() == 0 || buffer->ReadRemaining() == 0)
+    std::shared_ptr<QuicSession> session,
+    const char* diagnostic_label) {
+  // If there is no data in the buffer,
+  // or no data remaining to be read,
+  // do nothing to avoid allocating
+  // a SendWrap...
+  if (buffer->Length() == 0 || buffer->RemainingLength() == 0)
     return 0;
+
   char* host;
   SocketAddress::GetAddress(dest, &host);
   Debug(this, "Sending to %s at port %d", host, SocketAddress::GetPort(dest));
-  return (new QuicSocket::SendWrap(this, dest, buffer, session))->Send();
+
+  QuicSocket::SendWrap* wrap =
+      new QuicSocket::SendWrap(
+          this,
+          dest,
+          buffer,
+          session,
+          diagnostic_label);
+  return wrap->Send();
+}
+
+void QuicSocket::OnSend(
+    int status,
+    size_t length,
+    const char* diagnostic_label) {
+  IncrementSocketStat(
+    length,
+    &socket_stats_,
+    &QuicSocket::socket_stats::bytes_sent);
+  IncrementSocketStat(
+    1,
+    &socket_stats_,
+    &QuicSocket::socket_stats::packets_sent);
+
+  Debug(this, "Packet sent status: %d (label: %s)",
+        status,
+        diagnostic_label != nullptr ? diagnostic_label : "unspecified");
+
+  DecrementPendingCallbacks();
+  MaybeClose();
 }
 
 QuicSocket::SendWrapBase::SendWrapBase(
     QuicSocket* socket,
-    const sockaddr* dest) : socket_(socket) {
+    const sockaddr* dest,
+    const char* diagnostic_label) :
+    socket_(socket),
+    diagnostic_label_(diagnostic_label) {
   req_.data = this;
   address_.Copy(dest);
   socket->IncrementPendingCallbacks();
 }
 
+
 void QuicSocket::SendWrapBase::OnSend(uv_udp_send_t* req, int status) {
   std::unique_ptr<QuicSocket::SendWrapBase> wrap(
       static_cast<QuicSocket::SendWrapBase*>(req->data));
-
-  wrap->Socket()->IncrementSocketStat(
-    wrap->Length(),
-    &wrap->socket_->socket_stats_,
-    &QuicSocket::socket_stats::bytes_sent);
-  wrap->socket_->IncrementSocketStat(
-    1,
-    &wrap->socket_->socket_stats_,
-    &QuicSocket::socket_stats::packets_sent);
-
-  wrap->Socket()->DecrementPendingCallbacks();
-  wrap->Socket()->MaybeClose();
+  wrap->Done(status);
 }
 
 bool QuicSocket::SendWrapBase::IsDiagnosticPacketLoss() {
   if (Socket()->IsDiagnosticPacketLoss(Socket()->tx_loss_)) {
     Debug(Socket(), "Simulating transmitted packet loss.");
-    OnSend(req(), 0);
+    Done(0);
     return true;
   }
   return false;
 }
 
+void QuicSocket::SendWrapBase::Done(int status) {
+  socket_->OnSend(status, Length(), diagnostic_label());
+}
+
 QuicSocket::SendWrapStack::SendWrapStack(
     QuicSocket* socket,
     const sockaddr* dest,
-    size_t len) :
-    SendWrapBase(socket, dest) {
+    size_t len,
+    const char* diagnostic_label) :
+    SendWrapBase(socket, dest, diagnostic_label) {
   buf_.AllocateSufficientStorage(len);
 }
 
 int QuicSocket::SendWrapStack::Send() {
-  if (buf_.length() == 0)
-    return 0;
-  Debug(Socket(), "Sending %" PRIu64 " bytes", buf_.length());
+  Debug(Socket(), "Sending %" PRIu64 " bytes (label: %s)",
+        buf_.length(),
+        diagnostic_label());
+
+  CHECK_GT(buf_.length(), 0);
+
+  // If DiagnosticPacketLoss returns true, it will call Done() internally
   if (UNLIKELY(IsDiagnosticPacketLoss()))
     return 0;
+
   uv_buf_t buf =
       uv_buf_init(
           reinterpret_cast<char*>(*buf_),
           buf_.length());
+
   return uv_udp_send(
       req(),
       &Socket()->handle_,
@@ -844,8 +930,9 @@ QuicSocket::SendWrap::SendWrap(
     QuicSocket* socket,
     SocketAddress* dest,
     QuicBuffer* buffer,
-    std::shared_ptr<QuicSession> session) :
-    SendWrapBase(socket, **dest),
+    std::shared_ptr<QuicSession> session,
+    const char* diagnostic_label) :
+    SendWrapBase(socket, **dest, diagnostic_label),
     buffer_(buffer),
     session_(session) {}
 
@@ -853,30 +940,51 @@ QuicSocket::SendWrap::SendWrap(
     QuicSocket* socket,
     const sockaddr* dest,
     QuicBuffer* buffer,
-    std::shared_ptr<QuicSession> session) :
-    SendWrapBase(socket, dest),
+    std::shared_ptr<QuicSession> session,
+    const char* diagnostic_label) :
+    SendWrapBase(socket, dest, diagnostic_label),
     buffer_(buffer),
     session_(session) {}
 
 void QuicSocket::SendWrap::Done(int status) {
   // If the weak_ref to the QuicBuffer is still valid
   // consume the data, otherwise, do nothing
-  if (status == 0)
+  if (status == 0) {
+    Debug(Socket(), "Consuming %" PRId64 " bytes (label: %s)",
+          length_,
+          diagnostic_label());
     buffer_->Consume(length_);
-  else
+  } else {
+    Debug(Socket(), "Cancelling %" PRId64 " bytes (status: %d, label: %s)",
+          length_,
+          status,
+          diagnostic_label());
     buffer_->Cancel(status);
+  }
+  SendWrapBase::Done(status);
 }
 
 // Sending will take the current content of the QuicBuffer
 // and forward it off to the uv_udp_t handle.
 int QuicSocket::SendWrap::Send() {
+  // Remaining Length should never be zero at this point
+  CHECK_GT(buffer_->RemainingLength(), 0);
+
   std::vector<uv_buf_t> vec;
   size_t len = buffer_->DrainInto(&vec, &length_);
-  if (len == 0) return 0;
-  Debug(Socket(), "Sending %" PRIu64 " bytes (%d buffers of %d remaining)",
-        length_, len, buffer_->ReadRemaining());
+
+  // len should never be zero
+  CHECK_GT(len, 0);
+
+  Debug(Socket(),
+        "Sending %" PRIu64 " bytes (label: %s)",
+        length_,
+        diagnostic_label());
+
+  // If DiagnosticPacketLoss returns true, it will call Done() internally
   if (UNLIKELY(IsDiagnosticPacketLoss()))
     return 0;
+
   int err = uv_udp_send(
       req(),
       &(Socket()->handle_),
@@ -884,11 +992,15 @@ int QuicSocket::SendWrap::Send() {
       vec.size(),
       **Address(),
       OnSend);
-  // If sending was successful, advance the read head
-  if (err == 0)
-    buffer_->SeekHead(len);
+
+  if (err == 0) {
+    Debug(Socket(), "Advancing read head %" PRIu64, length_);
+    buffer_->SeekHeadOffset(length_);
+  }
   return err;
 }
+
+
 
 bool QuicSocket::IsDiagnosticPacketLoss(double prob) {
   if (LIKELY(prob == 0.0)) return false;
@@ -1057,6 +1169,12 @@ void QuicSocketListen(const FunctionCallbackInfo<Value>& args) {
   socket->Listen(sc, preferred_address, alpn, options);
 }
 
+void QuicSocketStopListening(const FunctionCallbackInfo<Value>& args) {
+  QuicSocket* socket;
+  ASSIGN_OR_RETURN_UNWRAP(&socket, args.Holder());
+  socket->StopListening();
+}
+
 void QuicSocketReceiveStart(const FunctionCallbackInfo<Value>& args) {
   QuicSocket* socket;
   ASSIGN_OR_RETURN_UNWRAP(&socket, args.Holder(),
@@ -1186,6 +1304,9 @@ void QuicSocket::Initialize(
   env->SetProtoMethod(socket,
                       "setServerBusy",
                       QuicSocketSetServerBusy);
+  env->SetProtoMethod(socket,
+                      "stopListening",
+                      QuicSocketStopListening);
   socket->Inherit(HandleWrap::GetConstructorTemplate(env));
   target->Set(context, class_name,
               socket->GetFunction(env->context()).ToLocalChecked()).FromJust();

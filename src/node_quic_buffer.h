@@ -135,19 +135,22 @@ class QuicBuffer : public MemoryRetainer {
     tail_(nullptr),
     size_(0),
     count_(0),
-    length_(0) {}
+    length_(0),
+    rlength_(0) {}
 
   inline QuicBuffer(QuicBuffer&& src) noexcept :
     head_(src.head_),
     tail_(src.tail_),
     size_(src.size_),
     count_(src.count_),
-    length_(src.length_) {
+    length_(src.length_),
+    rlength_(src.rlength_) {
     root_ = std::move(src.root_);
     src.head_ = nullptr;
     src.tail_ = nullptr;
     src.size_ = 0;
     src.length_ = 0;
+    src.rlength_ = 0;
   }
 
   QuicBuffer& operator=(QuicBuffer&& src) noexcept {
@@ -169,12 +172,14 @@ class QuicBuffer : public MemoryRetainer {
         head_ = tail_->next.get();
       tail_ = src.tail_;
       length_ += src.length_;
+      rlength_ += src.length_;
       size_ += src.size_;
       count_ += src.size_;
       src.head_ = nullptr;
       src.tail_ = nullptr;
       src.size_ = 0;
       src.length_ = 0;
+      src.rlength_ = 0;
       return *this;
     }
   }
@@ -222,12 +227,14 @@ class QuicBuffer : public MemoryRetainer {
       if (!EMPTY_BUF(bufs[n])) {
         Push(bufs[n]);
         length_ += bufs[n].len;
+        rlength_ += bufs[n].len;
         len += bufs[n].len;
       }
       n++;
       nbufs--;
     }
     length_ += bufs[n].len;
+    rlength_ += bufs[n].len;
     len += bufs[n].len;
     Push(bufs[n], done, user_data, keep_alive);
     return len;
@@ -249,6 +256,7 @@ class QuicBuffer : public MemoryRetainer {
       return 0;
     }
     length_ += buffer.size;
+    rlength_ += buffer.size;
     Push(new quic_buffer_chunk(std::move(buffer), done, user_data, keep_alive));
     return buffer.size;
   }
@@ -268,6 +276,10 @@ class QuicBuffer : public MemoryRetainer {
   // The total buffered bytes
   inline size_t Length() {
     return length_;
+  }
+
+  inline size_t RemainingLength() {
+    return rlength_;
   }
 
   // The total number of buffers
@@ -348,6 +360,7 @@ class QuicBuffer : public MemoryRetainer {
       n++;
       amt--;
       count_--;
+      rlength_ -= head_->buf.len;
     }
     return n;
   }
@@ -362,11 +375,13 @@ class QuicBuffer : public MemoryRetainer {
       // amount we're seeking, just adjust the roffset
       if (len > amt) {
         head_->roffset += amt;
+        rlength_ -= amt;
         break;
       }
       // Otherwise, decrement the amt and advance the read head
       // one space and iterate from there.
       amt -= len;
+      rlength_ -= len;
       head_ = head_->next.get();
     }
   }
@@ -446,6 +461,7 @@ class QuicBuffer : public MemoryRetainer {
   size_t size_;
   size_t count_;
   size_t length_;
+  size_t rlength_;
 };
 
 }  // namespace quic

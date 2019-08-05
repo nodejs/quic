@@ -110,9 +110,11 @@ class QuicSocket : public HandleWrap,
   int SendPacket(
       const sockaddr* dest,
       QuicBuffer* buf,
-      std::shared_ptr<QuicSession> session);
+      std::shared_ptr<QuicSession> session,
+      const char* diagnostic_label = nullptr);
   void SetServerBusy(bool on);
   void SetDiagnosticPacketLoss(double rx = 0.0, double tx = 0.0);
+  void StopListening();
 
   crypto::SecureContext* GetServerSecureContext() {
     return server_secure_context_;
@@ -160,6 +162,11 @@ class QuicSocket : public HandleWrap,
       QuicCID* scid,
       const sockaddr* addr);
 
+  void OnSend(
+      int status,
+      size_t length,
+      const char* diagnostic_label);
+
   void SetValidatedAddress(const sockaddr* addr);
 
   bool IsValidatedAddress(const sockaddr* addr);
@@ -200,9 +207,13 @@ class QuicSocket : public HandleWrap,
 
   typedef enum QuicSocketFlags : uint32_t {
     QUICSOCKET_FLAGS_NONE = 0x0,
-    QUICSOCKET_FLAGS_PENDING_CLOSE = 0x1,
-    QUICSOCKET_FLAGS_SERVER_LISTENING = 0x2,
-    QUICSOCKET_FLAGS_SERVER_BUSY = 0x4
+
+    // Indicates that the QuicSocket has entered a graceful
+    // closing phase, indicating that no additional
+    QUICSOCKET_FLAGS_GRACEFUL_CLOSE = 0x1,
+    QUICSOCKET_FLAGS_PENDING_CLOSE = 0x2,
+    QUICSOCKET_FLAGS_SERVER_LISTENING = 0x4,
+    QUICSOCKET_FLAGS_SERVER_BUSY = 0x8,
   } QuicSocketFlags;
 
   void SetFlag(QuicSocketFlags flag, bool on = true) {
@@ -322,9 +333,14 @@ class QuicSocket : public HandleWrap,
 
   class SendWrapBase {
    public:
-    SendWrapBase(QuicSocket* socket, const sockaddr* dest);
+    SendWrapBase(
+        QuicSocket* socket,
+        const sockaddr* dest,
+        const char* diagnostic_label = nullptr);
 
-    virtual void Done(int status) {}
+    virtual ~SendWrapBase() = default;
+
+    virtual void Done(int status);
 
     virtual int Send() = 0;
 
@@ -335,6 +351,8 @@ class QuicSocket : public HandleWrap,
     QuicSocket* Socket() { return socket_; }
 
     SocketAddress* Address() { return &address_; }
+
+    const char* diagnostic_label() const { return diagnostic_label_; }
 
     static void OnSend(
         uv_udp_send_t* req,
@@ -348,6 +366,7 @@ class QuicSocket : public HandleWrap,
     uv_udp_send_t req_;
     QuicSocket* socket_;
     SocketAddress address_;
+    const char* diagnostic_label_;
   };
 
   // The SendWrap drains the given QuicBuffer and sends it to the
@@ -359,13 +378,15 @@ class QuicSocket : public HandleWrap,
         QuicSocket* socket,
         SocketAddress* dest,
         QuicBuffer* buffer,
-        std::shared_ptr<QuicSession> session);
+        std::shared_ptr<QuicSession> session,
+        const char* diagnostic_label = nullptr);
 
     SendWrap(
         QuicSocket* socket,
         const sockaddr* dest,
         QuicBuffer* buffer,
-        std::shared_ptr<QuicSession> session);
+        std::shared_ptr<QuicSession> session,
+        const char* diagnostic_label = nullptr);
 
     void Done(int status) override;
 
@@ -384,7 +405,8 @@ class QuicSocket : public HandleWrap,
     SendWrapStack(
         QuicSocket* socket,
         const sockaddr* dest,
-        size_t len);
+        size_t len,
+        const char* diagnostic_label = nullptr);
 
     int Send() override;
 

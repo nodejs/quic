@@ -766,7 +766,7 @@ void QuicSession::Ping() {
   // TODO(@jasnell): We might want to revisit whether to handle
   // errors right here. For now, we're ignoring them with the
   // intent of capturing them elsewhere.
-  WritePackets();
+  WritePackets("ping");
   UpdateIdleTimer();
   ScheduleRetransmit();
 }
@@ -787,6 +787,7 @@ bool QuicSession::Receive(
   if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return false;
 
+  Debug(this, "Receiving QUIC packet.");
   IncrementStat(nread, &session_stats_, &session_stats::bytes_received);
 
   // Closing period starts once ngtcp2 has detected that the session
@@ -799,6 +800,7 @@ bool QuicSession::Receive(
   // at this point is either ignore the packet or send another
   // CONNECTION_CLOSE.
   if (IsInClosingPeriod()) {
+    Debug(this, "QUIC packet received while in closing period.");
     IncrementConnectionCloseAttempts();
     return ShouldAttemptConnectionClose() ?
         SendConnectionClose() : true;
@@ -809,8 +811,10 @@ bool QuicSession::Receive(
   // No outbound packets may be sent. Return true here because
   // the packet was correctly processed, even tho it is being
   // ignored.
-  if (IsInDrainingPeriod())
+  if (IsInDrainingPeriod()) {
+    Debug(this, "QUIC packet received while in draining period.");
     return true;
+  }
 
   // It's possible for the remote address to change from one
   // packet to the next so we have to look at the addr on
@@ -823,19 +827,24 @@ bool QuicSession::Receive(
     // and HandleScope are both exited before continuing on with the
     // function. This allows any nextTicks and queued tasks to be processed
     // before we continue.
+    Debug(this, "Processing received packet");
     HandleScope handle_scope(env()->isolate());
     InternalCallbackScope callback_scope(this);
     if (!ReceivePacket(&path, data, nread)) {
+      Debug(this, "Failure processing received packet (code %" PRIu64 ")",
+            GetLastError().code);
       HandleError();
       return false;
     }
   }
 
   if (IsFlagSet(QUICSESSION_FLAG_DESTROYED)) {
+    Debug(this, "Session was destroyed while processing the received packet");
     // If the QuicSession has been destroyed but it is not
     // in the closing period, a CONNECTION_CLOSE has not yet
     // been sent to the peer. Let's attempt to send one.
     if (!IsInClosingPeriod() && !IsInDrainingPeriod()) {
+      Debug(this, "Attempting to send connection close");
       SetLastError(QUIC_ERROR_SESSION, NGTCP2_NO_ERROR);
       SendConnectionClose();
     }
@@ -843,13 +852,21 @@ bool QuicSession::Receive(
   }
 
   // Only send pending data if we haven't entered draining mode.
-  if (IsInDrainingPeriod())
-    StopRetransmitTimer();
-  else
+  if (IsInDrainingPeriod()) {
+    Debug(this, "In draining period after processing packet");
+    // If processing the packet puts us into draining period, there's
+    // absolutely nothing left for us to do except silently close
+    // and destroy this QuicSession.
+    SilentClose();
+    return true;
+  } else {
+    Debug(this, "Sending pending data after processing packet");
     SendPendingData();
+  }
 
   UpdateIdleTimer();
   UpdateRecoveryStats();
+  Debug(this, "Successfully processed received packet");
   return true;
 }
 
@@ -923,7 +940,7 @@ bool QuicSession::ReceivePacket(
   // If the QuicSession has been destroyed, we're not going
   // to process any more packets for it.
   if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
-    return false;
+    return true;
   uint64_t now = uv_hrtime();
   session_stats_.session_received_at = now;
   int err = ngtcp2_conn_read_pkt(
@@ -932,9 +949,14 @@ bool QuicSession::ReceivePacket(
       data, nread,
       now);
   if (err < 0) {
-    if (err != NGTCP2_ERR_RECV_VERSION_NEGOTIATION)
-      SetLastError(QUIC_ERROR_SESSION, err);
-    return false;
+    switch (err) {
+      case NGTCP2_ERR_DRAINING:
+      case NGTCP2_ERR_RECV_VERSION_NEGOTIATION:
+        return true;
+      default:
+        SetLastError(QUIC_ERROR_SESSION, err);
+        return false;
+    }
   }
   return true;
 }
@@ -1185,7 +1207,7 @@ bool QuicSession::SendStreamData(QuicStream* stream) {
     sendbuf_.Push(std::move(dest));
     remote_address_.Update(&path.path.remote);
 
-    if (!SendPacket())
+    if (!SendPacket("stream data"))
       return false;
 
     if (Empty(v, c)) {
@@ -1203,7 +1225,7 @@ bool QuicSession::SendStreamData(QuicStream* stream) {
 }
 
 // Transmits the current contents of the internal sendbuf_ to the peer.
-bool QuicSession::SendPacket() {
+bool QuicSession::SendPacket(const char* diagnostic_label) {
   CHECK(!IsFlagSet(QUICSESSION_FLAG_DESTROYED));
   CHECK(!IsInDrainingPeriod());
   // Move the contents of sendbuf_ to the tail of txbuf_ and reset sendbuf_
@@ -1223,7 +1245,8 @@ bool QuicSession::SendPacket() {
   int err = Socket()->SendPacket(
       *remote_address_,
       &txbuf_,
-      this->shared_from_this());
+      this->shared_from_this(),
+      diagnostic_label);
   if (err != 0) {
     SetLastError(QUIC_ERROR_SESSION, err);
     return false;
@@ -1247,7 +1270,7 @@ void QuicSession::SendPendingData() {
 
   // If there's anything currently in the sendbuf_, send it before
   // serializing anything else.
-  if (!SendPacket())
+  if (!SendPacket("pending session data"))
     return HandleError();
 
   // Try purging any pending stream data
@@ -1266,7 +1289,7 @@ void QuicSession::SendPendingData() {
   }
 
   // Otherwise, serialize and send any packets waiting in the queue.
-  if (!WritePackets())
+  if (!WritePackets("pending session data - write packets"))
     HandleError();
 }
 
@@ -1509,7 +1532,7 @@ void QuicSession::WriteHandshake(const uint8_t* data, size_t datalen) {
 // If there are any acks or retransmissions pending, those will be
 // serialized at this point as well. However, WritePackets does not
 // serialize stream data that is being sent initially.
-bool QuicSession::WritePackets() {
+bool QuicSession::WritePackets(const char* diagnostic_label) {
   CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
   CHECK(!IsFlagSet(QUICSESSION_FLAG_DESTROYED));
 
@@ -1556,7 +1579,7 @@ bool QuicSession::WritePackets() {
     data.Realloc(nwrite);
     remote_address_.Update(&path.path.remote);
     sendbuf_.Push(std::move(data));
-    if (!SendPacket())
+    if (!SendPacket(diagnostic_label))
       return false;
   }
 }
@@ -2104,7 +2127,7 @@ bool QuicServerSession::SendConnectionClose() {
   if (IsInDrainingPeriod() || IsFlagSet(QUICSESSION_FLAG_SILENT_CLOSE))
     return true;
 
-  if (!WritePackets())
+  if (!WritePackets("server connection close - write packets"))
     return false;
 
   if (!StartClosingPeriod())
@@ -2121,7 +2144,7 @@ bool QuicServerSession::SendConnectionClose() {
           reinterpret_cast<char*>(conn_closebuf_.data),
           conn_closebuf_.size);
   sendbuf_.Push(&buf, 1);
-  return SendPacket();
+  return SendPacket("server connection close");
 }
 
 bool QuicServerSession::StartClosingPeriod() {
@@ -2638,7 +2661,7 @@ bool QuicClientSession::SendConnectionClose() {
   sendbuf_.Cancel();
   QuicError error = GetLastError();
 
-  if (!WritePackets())
+  if (!WritePackets("client connection close - write packets"))
     return false;
 
   ssize_t nwrite =
@@ -2656,7 +2679,7 @@ bool QuicClientSession::SendConnectionClose() {
   }
   data.Realloc(nwrite);
   sendbuf_.Push(std::move(data));
-  return SendPacket();
+  return SendPacket("client connection close");
 }
 
 // When resuming a client session, the serialized transport parameters from
