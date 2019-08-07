@@ -846,11 +846,11 @@ void QuicSocket::OnSend(
   IncrementSocketStat(
     length,
     &socket_stats_,
-    &QuicSocket::socket_stats::bytes_sent);
+    &socket_stats::bytes_sent);
   IncrementSocketStat(
     1,
     &socket_stats_,
-    &QuicSocket::socket_stats::packets_sent);
+    &socket_stats::packets_sent);
 
   Debug(this, "Packet sent status: %d (label: %s)",
         status,
