@@ -42,7 +42,7 @@ const countdown = new Countdown(4, () => {
 
 const closeHandler = common.mustCall(() => countdown.dec(), 4);
 
-server.listen({ key, cert });
+server.listen({ key, cert, alpn: 'zzz' });
 server.on('session', common.mustCall((session) => {
   debug('QuicServerSession created');
   session.on('secure', common.mustCall(() => {
@@ -101,6 +101,7 @@ server.on('ready', common.mustCall(() => {
     port: server.address.port,
     rejectUnauthorized: false,
     maxStreamsUni: 10,
+    alpn: 'zzz',
   });
 
   req.on('secure', common.mustCall(() => {
