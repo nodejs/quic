@@ -41,37 +41,16 @@ assert.strictEqual(socket.serverSessions, 0n);
 assert.strictEqual(socket.clientSessions, 0n);
 
 // Will throw because the QuicSocket is not bound
-assert.throws(() => socket.setTTL(1), {
-  code: 'EBADF',
-  errno: -4083
-});
-
-// Will throw because the QuicSocket is not bound
-assert.throws(() => socket.setMulticastTTL(1), {
-  code: 'EBADF',
-  errno: -4083
-});
-
-// Will throw because the QuicSocket is not bound
-assert.throws(() => socket.setBroadcast(), {
-  code: 'EBADF',
-  errno: -4083
-});
-
-// Will throw because the QuicSocket is not bound
-assert.throws(() => socket.setMulticastLoopback(), {
-  code: 'EBADF',
-  errno: -4083
-});
-
-// Will throw because the QuicSocket is not bound
-assert.throws(() => socket.setMulticastInterface('0.0.0.0'), {
-  code: 'EBADF',
-  errno: -4083
-});
-
-// assert.throws(() => socket.addMembership('127.0.0.1', '127.0.0.1'), {});
-// assert.throws(() => socket.dropMembership('127.0.0.1', '127.0.0.1'), {});
+{
+  const err = { code: 'EBADF' };
+  assert.throws(() => socket.setTTL(1), err);
+  assert.throws(() => socket.setMulticastTTL(1), err);
+  assert.throws(() => socket.setBroadcast(), err);
+  assert.throws(() => socket.setMulticastLoopback(), err);
+  assert.throws(() => socket.setMulticastInterface('0.0.0.0'), err);
+  // assert.throws(() => socket.addMembership('127.0.0.1', '127.0.0.1'), err);
+  // assert.throws(() => socket.dropMembership('127.0.0.1', '127.0.0.1'), err);
+}
 
 ['test', null, {}, [], 1n, false].forEach((rx) => {
   assert.throws(() => socket.setDiagnosticPacketLoss({ rx }), {
@@ -119,7 +98,7 @@ assert.throws(() => socket.setDiagnosticPacketLoss({ tx: 1.1 }), {
   });
 });
 
-socket.listen();
+socket.listen({ alpn: 'zzz' });
 assert(socket.pending);
 
 socket.on('ready', common.mustCall(() => {
@@ -133,6 +112,12 @@ socket.on('ready', common.mustCall(() => {
   assert.strictEqual(typeof socket.address.address, 'string');
   assert.strictEqual(typeof socket.address.port, 'number');
   assert.strictEqual(typeof socket.address.family, 'string');
+
+  // On Windows, fd will always be undefined.
+  if (common.isWindows)
+    assert.strictEqual(socket.fd, undefined);
+  else
+    assert.strictEqual(typeof socket.fd, 'number');
 
   socket.setTTL(1);
   socket.setMulticastTTL(1);

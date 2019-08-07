@@ -185,7 +185,9 @@ int QuicSocket::Bind(
 #if !defined(_WIN32)
   uv_fileno(reinterpret_cast<uv_handle_t*>(&handle_), &fd);
 #endif
-  arg = Integer::New(env()->isolate(), fd);
+  arg = fd == UV_EBADF ?
+      Undefined(env()->isolate()) :
+      Integer::New(env()->isolate(), fd);
   MakeCallback(env()->quic_on_socket_ready_function(), 1, &arg);
   socket_stats_.bound_at = uv_hrtime();
   return 0;
