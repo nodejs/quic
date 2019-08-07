@@ -32,12 +32,8 @@ const countdown = new Countdown(2, () => {
   client.close();
 });
 
-server.listen({
-  key,
-  cert,
-  ca,
-  alpn: kALPN,
-});
+server.listen({ key, cert, ca, alpn: kALPN });
+
 server.on('session', common.mustCall((session) => {
   debug('QuicServerSession Created');
 
@@ -52,25 +48,27 @@ server.on('session', common.mustCall((session) => {
     uni.close(3);
 
     uni.on('abort', common.mustCall((code, finalSize) => {
+      debug('Undirectional, Server-initiated stream %d aborted', uni.id);
       assert.strictEqual(code, 3);
       assert.strictEqual(finalSize, 2);
     }));
 
     uni.on('data', common.mustNotCall());
-    uni.on('end', common.mustCall());
-    uni.on('close', common.mustCall());
+
+    uni.on('end', common.mustCall(() => {
+      debug('Undirectional, Server-initiated stream %d ended on server',
+            uni.id);
+    }));
+    uni.on('close', common.mustCall(() => {
+      debug('Unidirectional, Server-initiated stream %d closed on server',
+            uni.id);
+    }));
+    uni.on('error', common.mustNotCall());
 
     debug('Unidirectional, Server-initiated stream %d opened', uni.id);
   }));
 
-  session.on('stream', common.mustCall((stream) => {
-    debug('Bidirectional, Client-initiated stream %d received', stream.id);
-    stream.write('hello there', common.mustCall());
-    stream.on('end', common.mustCall());
-    stream.on('finish', common.mustNotCall());
-    stream.on('close', common.mustCall());
-  }));
-
+  session.on('stream', common.mustNotCall());
   session.on('close', common.mustCall());
 }));
 
@@ -78,12 +76,7 @@ server.on('ready', common.mustCall(() => {
   debug('Server is listening on port %d', server.address.port);
   client = createSocket({
     port: kClientPort,
-    client: {
-      key,
-      cert,
-      ca,
-      alpn: kALPN,
-    }
+    client: { key, cert, ca, alpn: kALPN }
   });
 
   const req = client.connect({
@@ -97,6 +90,9 @@ server.on('ready', common.mustCall(() => {
 
     const stream = req.openStream();
 
+    // TODO(@jasnell): The close happens synchronously, before any
+    // data for the stream is actually flushed our to the connected
+    // peer.
     stream.write('hello', common.mustCall());
     stream.close(1);
 
@@ -104,15 +100,18 @@ server.on('ready', common.mustCall(() => {
     // before the stream was finished.
     stream.on('abort', common.mustCall((code, finalSize) => {
       debug('Bidirectional, Client-initated stream %d aborted', stream.id);
-      assert.strict(code, 1);
-      assert.strict(finalSize, 11); // The server sent 'hello there'
+      assert.strictEqual(code, 1);
+      countdown.dec();
     }));
 
-    stream.on('end', common.mustCall());
+    stream.on('end', common.mustCall(() => {
+      debug('Bidirectional, Client-initiated stream %d ended on client',
+            stream.id);
+    }));
 
     stream.on('close', common.mustCall(() => {
-      debug('Bidirectional, Client-initiated stream %d closed', stream.id);
-      countdown.dec();
+      debug('Bidirectional, Client-initiated stream %d closed on client',
+            stream.id);
     }));
 
     debug('Bidirectional, Client-initiated stream %d opened', stream.id);
@@ -121,10 +120,16 @@ server.on('ready', common.mustCall(() => {
   req.on('stream', common.mustCall((stream) => {
     debug('Unidirectional, Server-initiated stream %d received', stream.id);
     stream.on('abort', common.mustNotCall());
-    stream.on('data', common.mustCall());
-    stream.on('end', common.mustCall());
+    stream.on('data', common.mustCall((chunk) => {
+      assert.strictEqual(chunk.toString(), 'hi');
+    }));
+    stream.on('end', common.mustCall(() => {
+      debug('Unidirectional, Server-initiated stream %d ended on client',
+            stream.id);
+    }));
     stream.on('close', common.mustCall(() => {
-      debug('Unidirectional, Server-initiated stream %d closed', stream.id);
+      debug('Unidirectional, Server-initiated stream %d closed on client',
+            stream.id);
       countdown.dec();
     }));
   }));
