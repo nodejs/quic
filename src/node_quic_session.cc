@@ -1067,7 +1067,7 @@ void QuicSession::RemoveStream(int64_t stream_id) {
 void QuicSession::ScheduleRetransmit() {
   uint64_t now = uv_hrtime();
   uint64_t expiry = ngtcp2_conn_get_expiry(Connection());
-  uint64_t interval = (expiry < now) ? 1 : (expiry - now);
+  uint64_t interval = (expiry < now) ? 1 : ((expiry - now) / 1e6);
   Debug(this, "Scheduling the retransmit timer for %" PRIu64, interval);
   UpdateRetransmitTimer(interval);
 }
@@ -1503,7 +1503,9 @@ int QuicSession::TLSRead() {
 
 void QuicSession::UpdateIdleTimer() {
   CHECK_NOT_NULL(idle_);
-  idle_->Update(ngtcp2_conn_get_idle_timeout(Connection()));
+  uint64_t timeout = ngtcp2_conn_get_idle_timeout(Connection()) / 1e6;
+  Debug(this, "Updating idle timeout to %" PRIu64, timeout);
+  idle_->Update(timeout);
 }
 
 void QuicSession::WriteHandshake(const uint8_t* data, size_t datalen) {
