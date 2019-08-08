@@ -166,7 +166,7 @@ int QuicSocket::Bind(
   if (err != 0)
     return err;
 
-  Local<Value> arg;
+  Local<Value> arg = Undefined(env()->isolate());
 
   err =
       uv_udp_bind(
@@ -181,13 +181,14 @@ int QuicSocket::Bind(
   }
 
   local_address_.Set(&handle_);
-  int fd = UV_EBADF;
+
 #if !defined(_WIN32)
+  int fd = UV_EBADF;
   uv_fileno(reinterpret_cast<uv_handle_t*>(&handle_), &fd);
+  if (fd != UV_EBADF)
+    arg = Integer::New(env()->isolate(), fd);
 #endif
-  arg = fd == UV_EBADF ?
-      Undefined(env()->isolate()) :
-      Integer::New(env()->isolate(), fd);
+
   MakeCallback(env()->quic_on_socket_ready_function(), 1, &arg);
   socket_stats_.bound_at = uv_hrtime();
   return 0;
