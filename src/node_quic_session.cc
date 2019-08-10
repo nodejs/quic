@@ -548,10 +548,6 @@ int QuicSession::GetNewConnectionID(
   EntropySource(cid->data, cidlen);
   EntropySource(token, NGTCP2_STATELESS_RESET_TOKENLEN);
   AssociateCID(cid);
-
-  state_[IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT] =
-      state_[IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT] + 1;
-
   return 0;
 }
 
@@ -1019,9 +1015,6 @@ void QuicSession::ReceiveStreamData(
 void QuicSession::RemoveConnectionID(const ngtcp2_cid* cid) {
   if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return;
-  state_[IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT] =
-    state_[IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT] - 1;
-  CHECK_GE(state_[IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT], 0);
   DisassociateCID(cid);
 }
 

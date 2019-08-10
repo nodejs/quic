@@ -25,7 +25,6 @@ const kALPN = 'zzz';
 const countdown = new Countdown(2, () => {
   debug('Countdown expired. Destroying sockets');
   server.close();
-  client.close();
   client2.close();
 });
 
@@ -68,12 +67,20 @@ server.on('ready', common.mustCall(() => {
   req.on('secure', common.mustCall((servername, alpn, cipher) => {
     debug('QuicClientSession TLS Handshake Complete');
 
-    setImmediate(() => {
-      req.setSocket(client2, () => {
+    const stream = req.openStream();
+    // Send some data on one connection...
+    stream.write('Hello ');
+
+    // Wait just a bit, then migrate to a different
+    // QuicSocket and continue sending.
+    setTimeout(() => {
+      req.setSocket(client2, (err) => {
+        assert(!err);
         debug('Client 1 port is %d', client.address.port);
         debug('Client 2 port is %d', client2.address.port);
-        const stream = req.openStream();
-        stream.end('Hello from the client');
+        client.close();
+
+        stream.end('from the client');
         let data = '';
         stream.resume();
         stream.setEncoding('utf8');
@@ -88,7 +95,7 @@ server.on('ready', common.mustCall(() => {
         }));
         debug('Bidirectional, Client-initiated stream %d opened', stream.id);
       });
-    });
+    }, common.platformTimeout(100));
   }));
 
   req.on('stream', common.mustCall((stream) => {

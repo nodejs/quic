@@ -119,12 +119,6 @@ typedef enum QuicClientSessionOptions : uint32_t {
 // aliased buffer and is used to communicate various types of
 // state efficiently across the native/JS boundary.
 typedef enum QuicSessionState : int {
-  // Communicates the number of available connection ID's that
-  // have been created and associated with the session. This
-  // is used, for instance, to enable migration of a QuicSession
-  // from one QuicSocket to another (when count > 0).
-  IDX_QUIC_SESSION_STATE_CONNECTION_ID_COUNT,
-
   // Communicates whether a 'keylog' event listener has been
   // registered on the JavaScript QuicSession object. The
   // value will be either 1 or 0. When set to 1, the native
