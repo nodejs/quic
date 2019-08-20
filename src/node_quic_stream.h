@@ -392,7 +392,7 @@ class QuicStream : public AsyncWrap,
   // for the stream. Specifically, this can be used to detect
   // potentially bad acting peers that are sending many small chunks
   // of data too slowly in an attempt to DOS the peer.
-  Histogram data_rx_rate_;
+  std::unique_ptr<HistogramBase> data_rx_rate_;
 
   // data_rx_size_ measures the size of data packets for this stream
   // over time. When used in combination with the data_rx_rate_,
@@ -400,12 +400,12 @@ class QuicStream : public AsyncWrap,
   // for the stream. Specifically, this can be used to detect
   // potentially bad acting peers that are sending many small chunks
   // of data too slowly in an attempt to DOS the peer.
-  Histogram data_rx_size_;
+  std::unique_ptr<HistogramBase> data_rx_size_;
 
   // data_rx_ack_ measures the elapsed time between data acks
   // for this stream. This data can be used to detect peers that are
   // generally taking too long to acknowledge sent stream data.
-  Histogram data_rx_ack_;
+  std::unique_ptr<HistogramBase> data_rx_ack_;
 
   AliasedBigUint64Array stats_buffer_;
 };

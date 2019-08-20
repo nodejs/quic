@@ -130,6 +130,7 @@
       'lib/internal/fs/sync_write_stream.js',
       'lib/internal/fs/utils.js',
       'lib/internal/fs/watchers.js',
+      'lib/internal/histogram.js',
       'lib/internal/http.js',
       'lib/internal/idna.js',
       'lib/internal/inspector_async_hook.js',

@@ -78,8 +78,14 @@ QuicSession::QuicSession(
     state_(env()->isolate(), IDX_QUIC_SESSION_STATE_COUNT),
     alpn_(alpn),
     allocator_(this),
-    crypto_rx_ack_(1, std::numeric_limits<int64_t>::max()),
-    crypto_handshake_rate_(1, std::numeric_limits<int64_t>::max()),
+    crypto_rx_ack_(
+      HistogramBase::New(
+        socket->env(),
+        1, std::numeric_limits<int64_t>::max())),
+    crypto_handshake_rate_(
+      HistogramBase::New(
+        socket->env(),
+        1, std::numeric_limits<int64_t>::max())),
     stats_buffer_(
       socket->env()->isolate(),
       sizeof(session_stats_) / sizeof(uint64_t),
@@ -110,6 +116,18 @@ QuicSession::QuicSession(
       env()->context(),
       env()->recovery_stats_string(),
       recovery_stats_buffer_.GetJSArray(),
+      PropertyAttribute::ReadOnly));
+
+  USE(wrap->DefineOwnProperty(
+      env()->context(),
+      FIXED_ONE_BYTE_STRING(env()->isolate(), "crypto_rx_ack"),
+      crypto_rx_ack_->object(),
+      PropertyAttribute::ReadOnly));
+
+  USE(wrap->DefineOwnProperty(
+      env()->context(),
+      FIXED_ONE_BYTE_STRING(env()->isolate(), "crypto_handshake_rate"),
+      crypto_handshake_rate_->object(),
       PropertyAttribute::ReadOnly));
 
   // TODO(@jasnell): memory accounting
@@ -181,7 +199,7 @@ void QuicSession::AckedCryptoOffset(size_t datalen) {
   // acknowlegements.
   uint64_t now = uv_hrtime();
   if (session_stats_.handshake_acked_at > 0)
-    crypto_rx_ack_.Record(now - session_stats_.handshake_acked_at);
+    crypto_rx_ack_->Record(now - session_stats_.handshake_acked_at);
   session_stats_.handshake_acked_at = now;
 }
 
@@ -1467,7 +1485,7 @@ int QuicSession::TLSHandshake() {
         session_stats_.handshake_continue_at > 0 ?
             session_stats_.handshake_continue_at :
             session_stats_.handshake_start_at;
-    crypto_handshake_rate_.Record(now - ts);
+    crypto_handshake_rate_->Record(now - ts);
   }
   session_stats_.handshake_continue_at = now;
 

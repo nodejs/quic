@@ -1,6 +1,7 @@
 #include "debug_utils.h"
 #include "node.h"
 #include "env-inl.h"
+#include "histogram-inl.h"
 #include "node_crypto.h"  // SecureContext
 #include "node_process.h"
 #include "node_quic_crypto.h"
@@ -174,6 +175,8 @@ void Initialize(Local<Object> target,
   Environment* env = Environment::GetCurrent(context);
   Isolate* isolate = env->isolate();
   HandleScope scope(isolate);
+
+  HistogramBase::Initialize(env);
 
   std::unique_ptr<QuicState> state(new QuicState(isolate));
 #define SET_STATE_TYPEDARRAY(name, field)             \

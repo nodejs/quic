@@ -138,7 +138,6 @@ server.on('session', common.mustCall((session) => {
   }
 
   session.on('secure', common.mustCall((servername, alpn, cipher) => {
-
     // Should not error and should return true... also shouldn't
     // cause anything else to fail.
     assert(session.updateKey());
@@ -173,7 +172,23 @@ server.on('session', common.mustCall((session) => {
     let data = '';
     file.pipe(stream);
     stream.setEncoding('utf8');
-    stream.on('data', (chunk) => data += chunk);
+    stream.on('data', (chunk) => {
+      data += chunk;
+
+      debug('Server: min data rate: %f', stream.dataRateHistogram.min);
+      debug('Server: max data rate: %f', stream.dataRateHistogram.max);
+      debug('Server: data rate 50%: %f',
+            stream.dataRateHistogram.percentile(50));
+      debug('Server: data rate 99%: %f',
+            stream.dataRateHistogram.percentile(99));
+
+      debug('Server: min data size: %f', stream.dataSizeHistogram.min);
+      debug('Server: max data size: %f', stream.dataSizeHistogram.max);
+      debug('Server: data size 50%: %f',
+            stream.dataSizeHistogram.percentile(50));
+      debug('Server: data size 99%: %f',
+            stream.dataSizeHistogram.percentile(99));
+    });
     stream.on('end', common.mustCall(() => {
       assert.strictEqual(data, filedata);
       debug('Server received expected data for stream %d', stream.id);
@@ -253,6 +268,15 @@ server.on('ready', common.mustCall(() => {
     assert.strictEqual(req.alpnProtocol, kALPN);
     assert(req.ephemeralKeyInfo);
     assert(req.getPeerCertificate());
+
+    debug('Client, min handshake ack: %f',
+          req.handshakeAckHistogram.min);
+    debug('Client, max handshake ack: %f',
+          req.handshakeAckHistogram.max);
+    debug('Client, min handshake rate: %f',
+          req.handshakeContinuationHistogram.min);
+    debug('Client, max handshake rate: %f',
+          req.handshakeContinuationHistogram.max);
 
     // The server's identity won't be valid because the requested
     // SNI hostname does not match the certificate used.

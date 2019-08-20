@@ -63,9 +63,18 @@ QuicStream::QuicStream(
     flags_(QUICSTREAM_FLAG_INITIAL),
     available_outbound_length_(0),
     inbound_consumed_data_while_paused_(0),
-    data_rx_rate_(1, std::numeric_limits<int64_t>::max()),
-    data_rx_size_(1, NGTCP2_MAX_PKT_SIZE),
-    data_rx_ack_(1, std::numeric_limits<int64_t>::max()),
+    data_rx_rate_(
+      HistogramBase::New(
+        session->env(),
+        1, std::numeric_limits<int64_t>::max())),
+    data_rx_size_(
+      HistogramBase::New(
+        session->env(),
+        1, NGTCP2_MAX_PKT_SIZE)),
+    data_rx_ack_(
+      HistogramBase::New(
+        session->env(),
+        1, std::numeric_limits<int64_t>::max())),
     stats_buffer_(
       session->env()->isolate(),
       sizeof(stream_stats_) / sizeof(uint64_t),
@@ -81,6 +90,24 @@ QuicStream::QuicStream(
       env()->context(),
       env()->stats_string(),
       stats_buffer_.GetJSArray(),
+      PropertyAttribute::ReadOnly));
+
+  USE(wrap->DefineOwnProperty(
+      env()->context(),
+      FIXED_ONE_BYTE_STRING(env()->isolate(), "data_rx_rate"),
+      data_rx_rate_->object(),
+      PropertyAttribute::ReadOnly));
+
+  USE(wrap->DefineOwnProperty(
+      env()->context(),
+      FIXED_ONE_BYTE_STRING(env()->isolate(), "data_rx_size"),
+      data_rx_size_->object(),
+      PropertyAttribute::ReadOnly));
+
+  USE(wrap->DefineOwnProperty(
+      env()->context(),
+      FIXED_ONE_BYTE_STRING(env()->isolate(), "data_rx_ack"),
+      data_rx_ack_->object(),
       PropertyAttribute::ReadOnly));
 }
 
@@ -223,7 +250,7 @@ void QuicStream::AckedDataOffset(uint64_t offset, size_t datalen) {
 
   uint64_t now = uv_hrtime();
   if (stream_stats_.stream_acked_at > 0)
-    data_rx_ack_.Record(now - stream_stats_.stream_acked_at);
+    data_rx_ack_->Record(now - stream_stats_.stream_acked_at);
   stream_stats_.stream_acked_at = now;
 }
 
@@ -352,9 +379,9 @@ inline void QuicStream::IncrementStats(size_t datalen) {
 
   uint64_t now = uv_hrtime();
   if (stream_stats_.stream_received_at > 0)
-    data_rx_rate_.Record(now - stream_stats_.stream_received_at);
+    data_rx_rate_->Record(now - stream_stats_.stream_received_at);
   stream_stats_.stream_received_at = now;
-  data_rx_size_.Record(len);
+  data_rx_size_->Record(len);
 }
 
 void QuicStream::Shutdown(uint64_t app_error_code) {
