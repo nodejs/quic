@@ -1491,7 +1491,7 @@ int QuicSession::TLSHandshake() {
 // read it and throw it away, unless there's an error.
 int QuicSession::TLSRead() {
   ClearTLSError();
-  return ClearTLS(ssl(), !Type() == QUICSESSION_TYPE_SERVER);
+  return ClearTLS(ssl(), Type() != QUICSESSION_TYPE_SERVER);
 }
 
 void QuicSession::UpdateIdleTimer() {
