@@ -606,7 +606,7 @@ inline void Environment::set_http2_state(
   http2_state_ = std::move(buffer);
 }
 
-#if HAVE_OPENSSL
+#if HAVE_OPENSSL && defined(NODE_EXPERIMENTAL_QUIC)
 inline QuicState* Environment::quic_state() const {
   return quic_state_.get();
 }

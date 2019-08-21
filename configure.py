@@ -108,6 +108,11 @@ parser.add_option('--dest-os',
     choices=valid_os,
     help='operating system to build for ({0})'.format(', '.join(valid_os)))
 
+parser.add_option('--experimental-quic',
+    action='store_true',
+    dest='experimental_quic',
+    help='enable experimental quic support')
+
 parser.add_option('--gdb',
     action='store_true',
     dest='gdb',
@@ -1105,6 +1110,11 @@ def configure_node(o):
   else:
     o['variables']['debug_nghttp2'] = 'false'
 
+  if options.experimental_quic:
+    o['variables']['experimental_quic'] = 1
+  else:
+    o['variables']['experimental_quic'] = 'false'
+
   o['variables']['node_no_browser_globals'] = b(options.no_browser_globals)
   # TODO(refack): fix this when implementing embedded code-cache when cross-compiling.
   if o['variables']['want_separate_host_toolset'] == 0:
@@ -1225,6 +1235,8 @@ def configure_openssl(o):
       without_ssl_error('--openssl-no-asm')
     if options.openssl_fips:
       without_ssl_error('--openssl-fips')
+    if options.experimental_quic:
+      without_ssl_error('--experimental-quic')
     return
 
   if options.use_openssl_ca_store:

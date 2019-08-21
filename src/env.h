@@ -29,7 +29,7 @@
 #include "inspector_agent.h"
 #include "inspector_profiler.h"
 #endif
-#if HAVE_OPENSSL
+#if HAVE_OPENSSL && defined(NODE_EXPERIMENTAL_QUIC)
 #include "node_quic_state.h"
 #endif
 #include "handle_wrap.h"
@@ -381,6 +381,16 @@ constexpr size_t kFsStatsBufferLength =
   V(x_forwarded_string, "x-forwarded-for")                                     \
   V(zero_return_string, "ZERO_RETURN")
 
+#if HAVE_OPENSSL && defined(NODE_EXPERIMENTAL_QUIC)
+# define QUIC_ENVIRONMENT_STRONG_PERSISTENT_TEMPLATES(V)                       \
+  V(quicclientsession_constructor_template, v8::ObjectTemplate)                \
+  V(quicserversession_constructor_template, v8::ObjectTemplate)                \
+  V(quicserverstream_constructor_template, v8::ObjectTemplate)                 \
+  V(quicsocketsendwrap_constructor_template, v8::ObjectTemplate)
+#else
+# define QUIC_ENVIRONMENT_STRONG_PERSISTENT_TEMPLATES(V)
+#endif
+
 #define ENVIRONMENT_STRONG_PERSISTENT_TEMPLATES(V)                             \
   V(as_callback_data_template, v8::FunctionTemplate)                           \
   V(async_wrap_ctor_template, v8::FunctionTemplate)                            \
@@ -400,10 +410,6 @@ constexpr size_t kFsStatsBufferLength =
   V(message_port_constructor_template, v8::FunctionTemplate)                   \
   V(pipe_constructor_template, v8::FunctionTemplate)                           \
   V(promise_wrap_template, v8::ObjectTemplate)                                 \
-  V(quicclientsession_constructor_template, v8::ObjectTemplate)                \
-  V(quicserversession_constructor_template, v8::ObjectTemplate)                \
-  V(quicserverstream_constructor_template, v8::ObjectTemplate)                 \
-  V(quicsocketsendwrap_constructor_template, v8::ObjectTemplate)               \
   V(sab_lifetimepartner_constructor_template, v8::FunctionTemplate)            \
   V(script_context_constructor_template, v8::FunctionTemplate)                 \
   V(secure_context_constructor_template, v8::FunctionTemplate)                 \
@@ -411,7 +417,36 @@ constexpr size_t kFsStatsBufferLength =
   V(streambaseoutputstream_constructor_template, v8::ObjectTemplate)           \
   V(tcp_constructor_template, v8::FunctionTemplate)                            \
   V(tty_constructor_template, v8::FunctionTemplate)                            \
-  V(write_wrap_template, v8::ObjectTemplate)
+  V(write_wrap_template, v8::ObjectTemplate)                                   \
+  QUIC_ENVIRONMENT_STRONG_PERSISTENT_TEMPLATES(V)
+
+#if HAVE_OPENSSL && defined(NODE_EXPERIMENTAL_QUIC)
+# define QUIC_ENVIRONMENT_STRONG_PERSISTENT_VALUES(V)                          \
+  V(quic_on_socket_close_function, v8::Function)                               \
+  V(quic_on_socket_error_function, v8::Function)                               \
+  V(quic_on_socket_ready_function, v8::Function)                               \
+  V(quic_on_socket_server_busy_function, v8::Function)                         \
+  V(quic_on_session_cert_function, v8::Function)                               \
+  V(quic_on_session_client_hello_function, v8::Function)                       \
+  V(quic_on_session_close_function, v8::Function)                              \
+  V(quic_on_session_error_function, v8::Function)                              \
+  V(quic_on_session_extend_function, v8::Function)                             \
+  V(quic_on_session_handshake_function, v8::Function)                          \
+  V(quic_on_session_keylog_function, v8::Function)                             \
+  V(quic_on_session_path_validation_function, v8::Function)                    \
+  V(quic_on_session_ready_function, v8::Function)                              \
+  V(quic_on_session_silent_close_function, v8::Function)                       \
+  V(quic_on_session_stateless_reset_function, v8::Function)                    \
+  V(quic_on_session_status_function, v8::Function)                             \
+  V(quic_on_session_ticket_function, v8::Function)                             \
+  V(quic_on_session_version_negotiation_function, v8::Function)                \
+  V(quic_on_stream_close_function, v8::Function)                               \
+  V(quic_on_stream_error_function, v8::Function)                               \
+  V(quic_on_stream_ready_function, v8::Function)                               \
+  V(quic_on_stream_reset_function, v8::Function)
+#else
+# define QUIC_ENVIRONMENT_STRONG_PERSISTENT_VALUES(V)
+#endif
 
 #define ENVIRONMENT_STRONG_PERSISTENT_VALUES(V)                                \
   V(as_callback_data, v8::Object)                                              \
@@ -452,35 +487,14 @@ constexpr size_t kFsStatsBufferLength =
   V(process_object, v8::Object)                                                \
   V(primordials, v8::Object)                                                   \
   V(promise_reject_callback, v8::Function)                                     \
-  V(quic_on_socket_close_function, v8::Function)                               \
-  V(quic_on_socket_error_function, v8::Function)                               \
-  V(quic_on_socket_ready_function, v8::Function)                               \
-  V(quic_on_socket_server_busy_function, v8::Function)                         \
-  V(quic_on_session_cert_function, v8::Function)                               \
-  V(quic_on_session_client_hello_function, v8::Function)                       \
-  V(quic_on_session_close_function, v8::Function)                              \
-  V(quic_on_session_error_function, v8::Function)                              \
-  V(quic_on_session_extend_function, v8::Function)                             \
-  V(quic_on_session_handshake_function, v8::Function)                          \
-  V(quic_on_session_keylog_function, v8::Function)                             \
-  V(quic_on_session_path_validation_function, v8::Function)                    \
-  V(quic_on_session_ready_function, v8::Function)                              \
-  V(quic_on_session_silent_close_function, v8::Function)                       \
-  V(quic_on_session_stateless_reset_function, v8::Function)                    \
-  V(quic_on_session_status_function, v8::Function)                             \
-  V(quic_on_session_ticket_function, v8::Function)                             \
-  V(quic_on_session_version_negotiation_function, v8::Function)                \
-  V(quic_on_stream_close_function, v8::Function)                               \
-  V(quic_on_stream_error_function, v8::Function)                               \
-  V(quic_on_stream_ready_function, v8::Function)                               \
-  V(quic_on_stream_reset_function, v8::Function)                               \
   V(script_data_constructor_function, v8::Function)                            \
   V(tick_callback_function, v8::Function)                                      \
   V(timers_callback_function, v8::Function)                                    \
   V(tls_wrap_constructor_function, v8::Function)                               \
   V(trace_category_state_function, v8::Function)                               \
   V(udp_constructor_function, v8::Function)                                    \
-  V(url_constructor_function, v8::Function)
+  V(url_constructor_function, v8::Function)                                    \
+  QUIC_ENVIRONMENT_STRONG_PERSISTENT_VALUES(V)
 
 class Environment;
 
@@ -1070,7 +1084,7 @@ class Environment : public MemoryRetainer {
   inline http2::Http2State* http2_state() const;
   inline void set_http2_state(std::unique_ptr<http2::Http2State> state);
 
-#if HAVE_OPENSSL
+#if HAVE_OPENSSL && defined(NODE_EXPERIMENTAL_QUIC)
   inline QuicState* quic_state() const;
   inline void set_quic_state(std::unique_ptr<QuicState> state);
 #endif
@@ -1395,7 +1409,7 @@ class Environment : public MemoryRetainer {
   char* http_parser_buffer_ = nullptr;
   bool http_parser_buffer_in_use_ = false;
   std::unique_ptr<http2::Http2State> http2_state_;
-#if HAVE_OPENSSL
+#if HAVE_OPENSSL && defined(NODE_EXPERIMENTAL_QUIC)
   std::unique_ptr<QuicState> quic_state_;
 #endif
 

@@ -181,7 +181,7 @@
       'dependencies': [ 'deps/nghttp2/nghttp2.gyp:nghttp2' ],
     }],
 
-    [ 'node_shared_ngtcp2=="false"', {
+    [ 'node_use_openssl=="true" and experimental_quic==1 and node_shared_ngtcp2=="false"', {
       'dependencies': [ 'deps/ngtcp2/ngtcp2.gyp:ngtcp2' ],
     }],
 

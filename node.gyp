@@ -1,5 +1,6 @@
 {
   'variables': {
+    'experimental_quic': 'false',
     'v8_use_siphash%': 0,
     'v8_use_snapshot%': 0,
     'v8_trace_maps%': 0,
@@ -804,18 +805,6 @@
             'src/node_crypto_groups.h',
             'src/tls_wrap.cc',
             'src/tls_wrap.h',
-            'src/node_quic_buffer.h',
-            'src/node_quic_crypto.h',
-            'src/node_quic_session.h',
-            'src/node_quic_session-inl.h',
-            'src/node_quic_socket.h',
-            'src/node_quic_stream.h',
-            'src/node_quic_util.h',
-            'src/node_quic_state.h',
-            'src/node_quic_session.cc',
-            'src/node_quic_socket.cc',
-            'src/node_quic_stream.cc',
-            'src/node_quic.cc',
           ],
         }],
         [ 'node_report=="true"', {
@@ -835,6 +824,24 @@
             }],
           ],
         }],
+        [ 'node_use_openssl=="true" and experimental_quic==1', {
+          'defines': ['NODE_EXPERIMENTAL_QUIC=1'],
+          'sources': [
+            'src/node_quic_buffer.h',
+            'src/node_quic_crypto.h',
+            'src/node_quic_session.h',
+            'src/node_quic_session-inl.h',
+            'src/node_quic_socket.h',
+            'src/node_quic_stream.h',
+            'src/node_quic_util.h',
+            'src/node_quic_state.h',
+            'src/node_quic_session.cc',
+            'src/node_quic_socket.cc',
+            'src/node_quic_stream.cc',
+            'src/node_quic.cc',
+          ]
+        }
+        ],
         [ 'node_use_large_pages=="true" and OS in "linux freebsd"', {
           'defines': [ 'NODE_ENABLE_LARGE_CODE_PAGES=1' ],
           # The current implementation of Large Pages is under Linux.
@@ -1121,7 +1128,6 @@
         'test/cctest/test_linked_binding.cc',
         'test/cctest/test_per_process.cc',
         'test/cctest/test_platform.cc',
-        'test/cctest/test_quic_buffer.cc',
         'test/cctest/test_report_util.cc',
         'test/cctest/test_traced_value.cc',
         'test/cctest/test_util.cc',
@@ -1134,12 +1140,19 @@
             'HAVE_OPENSSL=1',
           ],
         }],
+        [ 'node_use_openssl=="true" and experimental_quic==1', {
+          'defines': [
+            'NODE_EXPERIMENTAL_QUIC=1',
+          ],
+          'sources': [
+            'test/cctest/test_quic_buffer.cc',
+            'test/cctest/test-quic-verifyhostnameidentity.cc'
+          ]
+        }],
         ['v8_enable_inspector==1', {
           'sources': [
             'test/cctest/test_inspector_socket.cc',
             'test/cctest/test_inspector_socket_server.cc',
-            'test/cctest/test_quic_buffer.cc',
-            'test/cctest/test-quic-verifyhostnameidentity.cc'
           ],
           'defines': [
             'HAVE_INSPECTOR=1',

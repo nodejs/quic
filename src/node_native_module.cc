@@ -87,7 +87,9 @@ void NativeModuleLoader::InitializeModuleCategories() {
       "crypto",
       "https",
       "http2",
+#if !defined(NODE_EXPERIMENTAL_QUIC)
       "quic",
+#endif
       "tls",
       "_tls_common",
       "_tls_wrap",

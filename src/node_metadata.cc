@@ -10,7 +10,9 @@
 
 #if HAVE_OPENSSL
 #include <openssl/opensslv.h>
-#include <ngtcp2/ngtcp2.h>
+#if defined(NODE_EXPERIMENTAL_QUIC)
+#include <ngtcp2/version.h>
+#endif
 #endif  // HAVE_OPENSSL
 
 #ifdef NODE_HAVE_I18N_SUPPORT
@@ -85,7 +87,9 @@ Metadata::Versions::Versions() {
 
 #if HAVE_OPENSSL
   openssl = GetOpenSSLVersion();
-  ngtcp2 = NODE_STRINGIFY(NGTCP2_VERSION);
+#if defined(NODE_EXPERIMENTAL_QUIC)
+  ngtcp2 = NGTCP2_VERSION;
+#endif
 #endif
 
 #ifdef NODE_HAVE_I18N_SUPPORT
