@@ -224,18 +224,14 @@ class SocketAddress {
       uint32_t port,
       sockaddr_storage* addr) {
     CHECK(family == AF_INET || family == AF_INET6);
-    int err = 0;
     switch (family) {
        case AF_INET:
-        err = uv_ip4_addr(host, port, reinterpret_cast<sockaddr_in*>(addr));
-        break;
+        return uv_ip4_addr(host, port, reinterpret_cast<sockaddr_in*>(addr));
       case AF_INET6:
-        err = uv_ip6_addr(host, port, reinterpret_cast<sockaddr_in6*>(addr));
-         break;
+        return uv_ip6_addr(host, port, reinterpret_cast<sockaddr_in6*>(addr));
        default:
         CHECK(0 && "unexpected address family");
     }
-    return err;
   }
 
   static int GetPort(const sockaddr* addr) {
