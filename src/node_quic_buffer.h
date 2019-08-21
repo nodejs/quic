@@ -360,7 +360,7 @@ class QuicBuffer : public MemoryRetainer {
       n++;
       amt--;
       count_--;
-      rlength_ -= head_->buf.len;
+      rlength_ -= !head_ ? 0 : head_->buf.len;
     }
     return n;
   }

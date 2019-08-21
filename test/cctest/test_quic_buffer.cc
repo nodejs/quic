@@ -50,8 +50,8 @@ TEST(QuicBuffer, Simple) {
   }, &test);
 
   buffer.Consume(100);
-  CHECK_EQ(100, buffer.Length());
-  CHECK_EQ(1, buffer.Size());
+  CHECK_EQ(0, buffer.Length());
+  CHECK_EQ(0, buffer.Size());
 
   // We have to move the read head forward in order to consume
   buffer.SeekHead(1);
@@ -353,7 +353,7 @@ TEST(QuicBuffer, Head) {
     CHECK_EQ(nullptr, buf.base);
   }
   // But the buffer will still have unconsumed data
-  CHECK_EQ(100, buffer.Length());
+  CHECK_EQ(50, buffer.Length());
   CHECK_EQ(1, buffer.Size());
 
   buffer.Consume(100);
