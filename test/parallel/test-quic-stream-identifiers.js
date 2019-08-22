@@ -18,8 +18,8 @@
 // +------+----------------------------------+
 
 const common = require('../common');
-if (!common.hasCrypto)
-  common.skip('missing crypto');
+if (!common.hasQuic)
+  common.skip('missing quic');
 
 const Countdown = require('../common/countdown');
 const assert = require('assert');

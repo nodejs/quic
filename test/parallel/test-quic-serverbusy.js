@@ -4,8 +4,8 @@
 // Tests QUIC server busy support
 
 const common = require('../common');
-if (!common.hasCrypto)
-  common.skip('missing crypto');
+if (!common.hasQuic)
+  common.skip('missing quic');
 
 // TODO(@jasnell): Marking a server as busy will cause all new
 // connection attempts to fail with a SERVER_BUSY CONNECTION_CLOSE.

@@ -5,8 +5,8 @@
 // abruptly on both ends of the connection.
 
 const common = require('../common');
-if (!common.hasCrypto)
-  common.skip('missing crypto');
+if (!common.hasQuic)
+  common.skip('missing quic');
 
 const assert = require('assert');
 const fs = require('fs');

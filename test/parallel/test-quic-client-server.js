@@ -4,8 +4,8 @@
 // Tests a simple QUIC client/server round-trip
 
 const common = require('../common');
-if (!common.hasCrypto)
-  common.skip('missing crypto');
+if (!common.hasQuic)
+  common.skip('missing quic');
 
 const { internalBinding } = require('internal/test/binding');
 const {

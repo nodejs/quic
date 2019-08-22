@@ -2,8 +2,9 @@
 'use strict';
 
 const common = require('../common');
-if (!common.hasCrypto)
-  common.skip('missing crypto');
+if (!common.hasQuic)
+  common.skip('missing quic');
+
 const assert = require('assert');
 const { internalBinding } = require('internal/test/binding');
 

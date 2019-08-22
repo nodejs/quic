@@ -4,8 +4,8 @@
 // Test QuicSocket constructor option errors.
 
 const common = require('../common');
-if (!common.hasCrypto)
-  common.skip('missing crypto');
+if (!common.hasQuic)
+  common.skip('missing quic');
 
 const assert = require('assert');
 
