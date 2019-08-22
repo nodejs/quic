@@ -190,7 +190,8 @@ class QuicSession : public AsyncWrap,
       // to the HTTP/3 identifier. For QUIC, the alpn identifier
       // is always required.
       const std::string& alpn,
-      uint32_t options = 0);
+      uint32_t options = 0,
+      uint64_t initial_connection_close = NGTCP2_NO_ERROR);
   ~QuicSession() override;
 
   std::string diagnostic_name() const override;
@@ -820,6 +821,7 @@ class QuicSession : public AsyncWrap,
 
   QuicSessionType type_;
 
+  uint64_t initial_connection_close_;
   ngtcp2_crypto_level rx_crypto_level_;
   ngtcp2_crypto_level tx_crypto_level_;
   QuicError last_error_;
@@ -1029,7 +1031,8 @@ class QuicServerSession : public QuicSession {
       const ngtcp2_cid* ocid,
       uint32_t version,
       const std::string& alpn = NGTCP2_ALPN_H3,
-      uint32_t options = 0);
+      uint32_t options = 0,
+      uint64_t initial_connection_close = NGTCP2_NO_ERROR);
 
   void AddToSocket(QuicSocket* socket) override;
   void Init(
@@ -1067,7 +1070,8 @@ class QuicServerSession : public QuicSession {
       const ngtcp2_cid* ocid,
       uint32_t version,
       const std::string& alpn,
-      uint32_t options);
+      uint32_t options,
+      uint64_t initial_connection_close);
 
   void DisassociateCID(const ngtcp2_cid* cid) override;
   void InitTLS_Post() override;

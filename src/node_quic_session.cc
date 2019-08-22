@@ -56,9 +56,11 @@ QuicSession::QuicSession(
     SecureContext* ctx,
     AsyncWrap::ProviderType provider_type,
     const std::string& alpn,
-    uint32_t options) :
+    uint32_t options,
+    uint64_t initial_connection_close) :
     AsyncWrap(socket->env(), wrap, provider_type),
     type_(type),
+    initial_connection_close_(initial_connection_close),
     rx_crypto_level_(NGTCP2_CRYPTO_LEVEL_INITIAL),
     tx_crypto_level_(NGTCP2_CRYPTO_LEVEL_INITIAL),
     last_error_(QUIC_ERROR_SESSION, NGTCP2_NO_ERROR),
@@ -816,8 +818,12 @@ bool QuicSession::Receive(
   if (IsInClosingPeriod()) {
     Debug(this, "QUIC packet received while in closing period.");
     IncrementConnectionCloseAttempts();
-    return ShouldAttemptConnectionClose() ?
-        SendConnectionClose() : true;
+    if (!ShouldAttemptConnectionClose()) {
+      Debug(this, "Not sending connection close");
+      return false;
+    }
+    Debug(this, "Sending connection close");
+    return SendConnectionClose();
   }
 
   // When IsInDrainingPeriod is true, ngtcp2 has received a
@@ -845,10 +851,22 @@ bool QuicSession::Receive(
     HandleScope handle_scope(env()->isolate());
     InternalCallbackScope callback_scope(this);
     if (!ReceivePacket(&path, data, nread)) {
-      Debug(this, "Failure processing received packet (code %" PRIu64 ")",
-            GetLastError().code);
-      HandleError();
-      return false;
+      if (initial_connection_close_ == NGTCP2_NO_ERROR) {
+        Debug(this, "Failure processing received packet (code %" PRIu64 ")",
+              GetLastError().code);
+        HandleError();
+        return false;
+      } else {
+        // When initial_connection_close_ is some value other than
+        // NGTCP2_NO_ERROR, then the QuicSession is going to be
+        // immediately responded to with a CONNECTION_CLOSE and
+        // no additional processing will be performed.
+        Debug(this, "Initial connection close with code %" PRIu64,
+              initial_connection_close_);
+        SetLastError(QUIC_ERROR_SESSION, initial_connection_close_);
+        SendConnectionClose();
+        return true;
+      }
     }
   }
 
@@ -942,7 +960,7 @@ bool QuicSession::ReceiveClientInitial(const ngtcp2_cid* dcid) {
 
   InstallKeys<ngtcp2_conn_install_initial_rx_keys>(Connection(), params);
 
-  return true;
+  return initial_connection_close_ == NGTCP2_NO_ERROR;
 }
 
 bool QuicSession::ReceivePacket(
@@ -1681,7 +1699,8 @@ QuicServerSession::QuicServerSession(
     const ngtcp2_cid* ocid,
     uint32_t version,
     const std::string& alpn,
-    uint32_t options) :
+    uint32_t options,
+    uint64_t initial_connection_close) :
     QuicSession(
         QUICSESSION_TYPE_SERVER,
         socket,
@@ -1689,7 +1708,8 @@ QuicServerSession::QuicServerSession(
         socket->GetServerSecureContext(),
         AsyncWrap::PROVIDER_QUICSERVERSESSION,
         alpn,
-        options),
+        options,
+        initial_connection_close),
     pscid_{},
     rcid_(*rcid) {
   Init(config, addr, dcid, ocid, version);
@@ -1704,7 +1724,8 @@ std::shared_ptr<QuicSession> QuicServerSession::New(
     const ngtcp2_cid* ocid,
     uint32_t version,
     const std::string& alpn,
-    uint32_t options) {
+    uint32_t options,
+    uint64_t initial_connection_close) {
   std::shared_ptr<QuicSession> session;
   Local<Object> obj;
   if (!socket->env()
@@ -1723,7 +1744,8 @@ std::shared_ptr<QuicSession> QuicServerSession::New(
           ocid,
           version,
           alpn,
-          options));
+          options,
+          initial_connection_close));
 
   session->AddToSocket(socket);
   return session;
@@ -2143,11 +2165,15 @@ bool QuicServerSession::SendConnectionClose() {
   if (IsInDrainingPeriod() || IsFlagSet(QUICSESSION_FLAG_SILENT_CLOSE))
     return true;
 
-  if (!WritePackets("server connection close - write packets"))
-    return false;
-
-  if (!StartClosingPeriod())
-    return false;
+  // If we're not already in the closing period,
+  // first attempt to write any pending packets, then
+  // start the closing period. If closing period has
+  // already started, skip this.
+  if (!IsInClosingPeriod() &&
+      (!WritePackets("server connection close - write packets") ||
+       !StartClosingPeriod())) {
+      return false;
+  }
 
   UpdateIdleTimer();
   CHECK_GT(conn_closebuf_.size, 0);

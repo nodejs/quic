@@ -660,17 +660,10 @@ std::shared_ptr<QuicSession> QuicSocket::AcceptInitialPacket(
   ngtcp2_pkt_hd hd;
   ngtcp2_cid ocid;
   ngtcp2_cid* ocid_ptr = nullptr;
+  uint64_t initial_connection_close = NGTCP2_NO_ERROR;
 
   if (!IsFlagSet(QUICSOCKET_FLAGS_SERVER_LISTENING)) {
     Debug(this, "QuicSocket is not listening");
-    return session;
-  }
-
-  // TODO(@jasnell): In the future, when the server is busy, handle by
-  // sending a CONNECTION_CLOSE in an initial packet. ngtcp2 currently
-  // does not support doing so.
-  if (IsFlagSet(QUICSOCKET_FLAGS_SERVER_BUSY)) {
-    Debug(this, "QuicSocket is busy");
     return session;
   }
 
@@ -687,12 +680,20 @@ std::shared_ptr<QuicSession> QuicSocket::AcceptInitialPacket(
       break;
   }
 
+  // If the server is busy, new connections will be shut down immediately
+  // after the initial keys are installed.
+  if (IsFlagSet(QUICSOCKET_FLAGS_SERVER_BUSY)) {
+    Debug(this, "QuicSocket is busy");
+    initial_connection_close = NGTCP2_SERVER_BUSY;
+  }
+
   // Check to see if the number of connections for this peer has been exceeded.
-  // TODO(@jasnell): In the future, we will handle this by sending a
-  // CONNECTION_CLOSE in an initial packet, but ngtcp2 currently does not
-  // support doing so.
-  if (GetCurrentSocketAddressCounter(addr) >= max_connections_per_host_)
-    return session;
+  // If the count has been exceeded, shutdown the connection immediately
+  // after the initial keys are installed.
+  if (GetCurrentSocketAddressCounter(addr) >= max_connections_per_host_) {
+    Debug(this, "Connection count for address exceeded");
+    initial_connection_close = NGTCP2_SERVER_BUSY;
+  }
 
   // QUIC has address validation built in to the handshake but allows for
   // an additional explicit validation request using RETRY frames. If we
@@ -700,7 +701,11 @@ std::shared_ptr<QuicSession> QuicSocket::AcceptInitialPacket(
   // retry token in the packet. If one does not exist, we send a retry with
   // a new token. If it does exist, and if it's valid, we grab the original
   // cid and continue.
-  if (IsOptionSet(QUICSOCKET_OPTIONS_VALIDATE_ADDRESS) &&
+  //
+  // If initial_connection_close is not NGTCP2_NO_ERROR, skip address
+  // validation since we're going to reject the connection anyway.
+  if (initial_connection_close == NGTCP2_NO_ERROR &&
+      IsOptionSet(QUICSOCKET_OPTIONS_VALIDATE_ADDRESS) &&
       hd.type == NGTCP2_PKT_INITIAL) {
       // If the VALIDATE_ADDRESS_LRU option is set, IsValidatedAddress
       // will check to see if the given address is in the validated_addrs_
@@ -738,7 +743,8 @@ std::shared_ptr<QuicSession> QuicSocket::AcceptInitialPacket(
           ocid_ptr,
           version,
           server_alpn_,
-          server_options_);
+          server_options_,
+          initial_connection_close);
   Local<Value> arg = session->object();
   MakeCallback(env()->quic_on_session_ready_function(), 1, &arg);
 
