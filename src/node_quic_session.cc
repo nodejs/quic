@@ -1295,8 +1295,11 @@ void QuicSession::SendPendingData() {
 
     // Check to make sure QuicSession state did not change in this
     // iteration
-    if (IsInDrainingPeriod() || IsInClosingPeriod() || IsFlagSet(QUICSESSION_FLAG_DESTROYED))
+    if (IsInDrainingPeriod() ||
+        IsInClosingPeriod() ||
+        IsFlagSet(QUICSESSION_FLAG_DESTROYED)) {
       return;
+    }
   }
 
   // Otherwise, serialize and send any packets waiting in the queue.
@@ -2931,7 +2934,8 @@ void QuicSessionGetPeerCertificate(const FunctionCallbackInfo<Value>& args) {
   // NOTE: This is because of the odd OpenSSL behavior. On client `cert_chain`
   // contains the `peer_certificate`, but on server it doesn't.
   crypto::X509Pointer cert(
-      session->Type() == QUICSESSION_TYPE_SERVER ? SSL_get_peer_certificate(session->ssl()) : nullptr);
+      session->Type() == QUICSESSION_TYPE_SERVER ?
+          SSL_get_peer_certificate(session->ssl()) : nullptr);
   STACK_OF(X509)* ssl_certs = SSL_get_peer_cert_chain(session->ssl());
   if (!cert && (ssl_certs == nullptr || sk_X509_num(ssl_certs) == 0))
     goto done;

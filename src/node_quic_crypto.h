@@ -551,16 +551,16 @@ inline bool DeriveTokenKey(
 }
 
 inline bool UpdateTrafficSecret(
-    std::array<uint8_t, 64>& dest,
+    std::array<uint8_t, 64>* dest,
     std::vector<uint8_t>* secret,
     const CryptoContext* ctx) {
 
   static constexpr uint8_t LABEL[] = "traffic upd";
 
-  CHECK_GE(dest.size(), secret->size());
+  CHECK_GE(dest->size(), secret->size());
 
   return HKDF_Expand_Label(
-    dest.data(), secret->size(),
+    dest->data(), secret->size(),
     secret->data(), secret->size(),
     LABEL, strsize(LABEL), ctx);
 }
@@ -574,7 +574,7 @@ inline bool DoUpdateKey(
   CryptoParams params;
 
   size_t secretlen = s->size();
-  if (!UpdateTrafficSecret(secret, s, ctx))
+  if (!UpdateTrafficSecret(&secret, s, ctx))
     return false;
 
   s->assign(std::begin(secret), std::end(secret));
@@ -645,11 +645,10 @@ inline const char* TLSErrorString(int code) {
 }
 
 inline bool SetupKeys(
-  const uint8_t* secret,
-  size_t secretlen,
-  CryptoParams* params,
-  const CryptoContext* context) {
-
+    const uint8_t* secret,
+    size_t secretlen,
+    CryptoParams* params,
+    const CryptoContext* context) {
   if (!DerivePacketProtectionKey(
           params->key.data(),
           params->key.size(),

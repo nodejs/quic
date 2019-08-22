@@ -42,7 +42,7 @@ class QuicSessionConfig {
  public:
   inline QuicSessionConfig() {
     ResetToDefaults();
-  };
+  }
 
   inline explicit QuicSessionConfig(Environment* env) {
     ResetToDefaults();
