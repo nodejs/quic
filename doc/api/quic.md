@@ -1015,6 +1015,19 @@ decremented to `0` by a router, it will not be forwarded.
 The argument passed to `socket.setMulticastTTL()` is a number of hops between
 `0` and `255`. The default on most systems is `1` but can vary.
 
+### quicsocket.setServerBusy([on = true])
+<!-- YAML
+added: REPLACEME
+-->
+
+* `on` {boolean} When `true`, the `QuicSocket` will reject new connections.
+  **Defaults**: `true`.
+
+Calling `setServerBusy()` or `setServerBusy(true)` will tell the `QuicSocket`
+to reject all new incoming connection requests using the `SERVER_BUSY` QUIC
+error code. To begin receiving connections again, disable busy mode by calling
+`setServerBusy(false)`.
+
 ### quicsocket.setTTL(ttl)
 <!-- YAML
 added: REPLACEME
