@@ -7,15 +7,6 @@ const common = require('../common');
 if (!common.hasQuic)
   common.skip('missing quic');
 
-// TODO(@jasnell): Marking a server as busy will cause all new
-// connection attempts to fail with a SERVER_BUSY CONNECTION_CLOSE.
-// Unfortunately, however, ngtcp2 does not yet support writing a
-// CONNECTION_CLOSE in an initial packet as required by the
-// specification so we can't enable this yet. The basic mechanism
-// has been implemented but we can't expose it yet.
-
-common.skip('setServerBusy is not yet fully implemented.');
-
 const assert = require('assert');
 const fixtures = require('../common/fixtures');
 const key = fixtures.readKey('agent1-key.pem', 'binary');
@@ -48,7 +39,10 @@ server.on('busy', common.mustCall((busy) => {
 server.setServerBusy();
 server.listen();
 
-server.on('session', common.mustNotCall());
+server.on('session', common.mustCall((session) => {
+  session.on('stream', common.mustNotCall());
+  session.on('close', common.mustCall());
+}));
 
 server.on('ready', common.mustCall(() => {
   debug('Server is listening on port %d', server.address.port);
@@ -57,26 +51,24 @@ server.on('ready', common.mustCall(() => {
     client: { key, cert, ca, alpn: kALPN }
   });
 
-  client.connect({
+  client.on('close', common.mustCall());
+
+  const req = client.connect({
     address: 'localhost',
     port: server.address.port,
   });
 
+  // The client session is going to be destroyed before
+  // the handshake can complete so the secure event will
+  // never emit.
+  req.on('secure', common.mustNotCall());
+
+  req.on('close', common.mustCall(() => {
+    server.close();
+    client.close();
+  }));
 }));
 
 server.on('listening', common.mustCall());
 
-server.on('close', () => {
-  debug('Server closing. Duration', server.duration);
-  debug('  Bound duration:',
-        server.boundDuration);
-  debug('  Listen duration:',
-        server.listenDuration);
-  debug('  Bytes Sent/Received: %d/%d',
-        server.bytesSent,
-        server.bytesReceived);
-  debug('  Packets Sent/Received: %d/%d',
-        server.packetsSent,
-        server.packetsReceived);
-  debug('  Sessions:', server.serverSessions);
-});
+server.on('close', common.mustCall());
