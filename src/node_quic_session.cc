@@ -884,6 +884,8 @@ bool QuicSession::Receive(
   }
 
   // Only send pending data if we haven't entered draining mode.
+  // We enter the draining period when a CONNECTION_CLOSE has been
+  // received from the remote peer.
   if (IsInDrainingPeriod()) {
     Debug(this, "In draining period after processing packet");
     // If processing the packet puts us into draining period, there's
@@ -1371,15 +1373,26 @@ void QuicSession::SilentClose() {
   SetFlag(QUICSESSION_FLAG_SILENT_CLOSE);
   SetFlag(QUICSESSION_FLAG_CLOSING);
 
-  Debug(this, "Silent close");
+  QuicError last_error = GetLastError();
+  Debug(this, "Silent close with code %" PRIu64 " (%s)",
+        last_error.code,
+        ErrorFamilyName(last_error.family));
 
   HandleScope scope(env()->isolate());
   Context::Scope context_scope(env()->context());
 
+  Local<Value> argv[] = {
+    Number::New(env()->isolate(), static_cast<double>(last_error.code)),
+    Integer::New(env()->isolate(), last_error.family)
+  };
+
   // Grab a shared pointer to this to prevent the QuicSession
   // from being freed while the MakeCallback is running.
   std::shared_ptr<QuicSession> ptr(this->shared_from_this());
-  MakeCallback(env()->quic_on_session_silent_close_function(), 0, nullptr);
+  MakeCallback(
+      env()->quic_on_session_silent_close_function(),
+      arraysize(argv),
+      argv);
 }
 
 // Called by ngtcp2 when a stream has been closed. If the stream does
