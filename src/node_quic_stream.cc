@@ -455,7 +455,9 @@ void QuicStreamShutdown(const FunctionCallbackInfo<Value>& args) {
   uint64_t code = ExtractErrorCode(env, args[0]);
   USE(args[1]->Uint32Value(env->context()).To(&family));
 
-  stream->Shutdown(family == QUIC_ERROR_APPLICATION ? code : NGTCP2_NO_ERROR);
+  stream->Shutdown(
+      family == QUIC_ERROR_APPLICATION ?
+          code : static_cast<uint64_t>(NGTCP2_NO_ERROR));
 }
 }  // namespace
 
