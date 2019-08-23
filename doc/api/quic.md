@@ -173,8 +173,8 @@ The callback will be invoked with three arguments:
 
 * `result` {string} Either `'failure'` or `'success'`, denoting the status
   of the path challenge.
-* `local` {Address} The local address component of the tested path.
-* `remote` {Address} The remote address component of the tested path.
+* `local` {Object} The local address component of the tested path.
+* `remote` {Object} The remote address component of the tested path.
 
 ### Event: `'secure'`
 <!-- YAML
@@ -216,7 +216,7 @@ The ALPN protocol identifier negotiated for this session.
 added: REPLACEME
 -->
 
-* Type: {object}
+* Type: {Object}
   * `name` {string} The cipher algorithm name.
   * `type` {string} The TLS version (currently always `'TLSv1.3'`).
 
@@ -511,7 +511,7 @@ request as part of the TLS handshake.
 The callback is invoked with three arguments:
 
 * `servername` {string}
-* `context` {ServerContext}
+* `context` {tls.SecureContext}
 * `callback` {Function}
 
 ## Class: QuicSocket
@@ -1054,6 +1054,7 @@ added: REPLACEME
 <!-- YAML
 added: REPLACEME
 -->
+
 * Extends: {stream.Duplex}
 
 ### Event: `'abort'`
