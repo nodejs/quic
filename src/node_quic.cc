@@ -53,12 +53,10 @@ void QuicSetCallbacks(const FunctionCallbackInfo<Value>& args) {
   SETFUNCTION("onSessionClientHello", session_client_hello);
   SETFUNCTION("onSessionClose", session_close);
   SETFUNCTION("onSessionError", session_error);
-  SETFUNCTION("onSessionExtend", session_extend);
   SETFUNCTION("onSessionHandshake", session_handshake);
   SETFUNCTION("onSessionKeylog", session_keylog);
   SETFUNCTION("onSessionPathValidation", session_path_validation);
   SETFUNCTION("onSessionSilentClose", session_silent_close);
-  SETFUNCTION("onSessionStatelessReset", session_stateless_reset);
   SETFUNCTION("onSessionStatus", session_status);
   SETFUNCTION("onSessionTicket", session_ticket);
   SETFUNCTION("onSessionVersionNegotiation", session_version_negotiation);
@@ -218,7 +216,11 @@ void Initialize(Local<Object> target,
   NODE_DEFINE_CONSTANT(constants, DEFAULT_MAX_CONNECTIONS_PER_HOST);
   NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_STATE_CERT_ENABLED);
   NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_STATE_CLIENT_HELLO_ENABLED);
+  NODE_DEFINE_CONSTANT(constants,
+                       IDX_QUIC_SESSION_STATE_PATH_VALIDATED_ENABLED);
   NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_STATE_KEYLOG_ENABLED);
+  NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_STATE_MAX_STREAMS_BIDI);
+  NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_STATE_MAX_STREAMS_UNI);
   NODE_DEFINE_CONSTANT(constants, MAX_RETRYTOKEN_EXPIRATION);
   NODE_DEFINE_CONSTANT(constants, MIN_RETRYTOKEN_EXPIRATION);
   NODE_DEFINE_CONSTANT(constants, NGTCP2_MAX_CIDLEN);

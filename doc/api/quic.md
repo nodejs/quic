@@ -305,6 +305,20 @@ added: REPLACEME
 
 True if the TLS handshake has completed.
 
+### quicsession.maxStreams
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {Object}
+  * `uni` {number} The maximum number of unidirectional streams.
+  * `bidi` {numbe} The maximum number of bidirectional streams.
+
+The highest cumulative number of bidirectional and unidirectional streams
+that can currently be opened. The values are set initially by configuration
+parameters when the `QuicSession` is created, then updated over the lifespan
+of the `QuicSession` as the connected peer allows new streams to be created.
+
 ### quicsession.openStream([options])
 <!-- YAML
 added: REPLACEME

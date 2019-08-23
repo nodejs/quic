@@ -573,7 +573,7 @@ inline int QuicSession::OnStatelessReset(
     const ngtcp2_pkt_stateless_reset* sr,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
-  session->StatelessReset();
+  session->SilentClose(true);
   return 0;
 }
 

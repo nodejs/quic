@@ -80,6 +80,9 @@ server.listen({
 server.on('session', common.mustCall((session) => {
   debug('QuicServerSession Created');
 
+  assert.strictEqual(session.maxStreams.bidi, 100);
+  assert.strictEqual(session.maxStreams.uni, 3);
+
   {
     const {
       address,

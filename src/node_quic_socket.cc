@@ -430,14 +430,6 @@ void QuicSocket::Receive(
 
   CHECK_NOT_NULL(session);
 
-  // If the session has been destroyed already, there's nothing to do
-  // and we simply fall-through and do nothing.
-  if (session->IsDestroyed()) {
-    Debug(this, "Ignoring packet because session is destroyed");
-    IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
-    return;
-  }
-
   // If the packet could not successfully processed for any reason (possibly
   // due to being malformed or malicious in some way) we ignore it completely.
   if (!session->Receive(nread, data, addr, flags)) {

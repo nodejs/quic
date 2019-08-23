@@ -55,6 +55,14 @@ class QuicSessionConfig {
     settings_.initial_ts = uv_hrtime();
   }
 
+  inline uint64_t max_streams_bidi() const {
+    return settings_.max_streams_bidi;
+  }
+
+  inline uint64_t max_streams_uni() const {
+    return settings_.max_streams_uni;
+  }
+
   inline void ResetToDefaults();
 
   // QuicSessionConfig::Set() pulls values out of the AliasedBuffer
@@ -136,10 +144,22 @@ typedef enum QuicSessionState : int {
 
   // Communicates whether a 'cert' event listener has been
   // registered on the JavaScript QuicSession. The value will
-  // be either 1 or 0. When set to 1, then native code will
+  // be either 1 or 0. When set to 1, the native code will
   // callout to the JavaScript side causing the 'cert' event
   // to be emitted.
   IDX_QUIC_SESSION_STATE_CERT_ENABLED,
+
+  // Communicates whether a 'pathValidation' event listener
+  // has been registered on the JavaScript QuicSession. The
+  // value will be either 1 or 0. When set to 1, the native
+  // code will callout to the JavaScript side causing the
+  // 'pathValidation' event to be emitted
+  IDX_QUIC_SESSION_STATE_PATH_VALIDATED_ENABLED,
+
+  // Communicates the current max cumulative number of
+  // bidi and uni streams that may be opened on the session
+  IDX_QUIC_SESSION_STATE_MAX_STREAMS_BIDI,
+  IDX_QUIC_SESSION_STATE_MAX_STREAMS_UNI,
 
   // Just the number of session state enums for use when
   // creating the AliasedBuffer.
@@ -417,7 +437,7 @@ class QuicSession : public AsyncWrap,
   // code requests to forcefully terminate a QuicSession
   // without transmitting any additional frames to the
   // peer.
-  void SilentClose();
+  void SilentClose(bool stateless_reset = false);
   QuicStream* CreateStream(int64_t stream_id);
   ssize_t DoHSEncrypt(
       uint8_t* dest,
@@ -500,7 +520,6 @@ class QuicSession : public AsyncWrap,
   bool SendPacket(const char* diagnostic_label = nullptr);
   void SetHandshakeCompleted();
   void SetLocalAddress(const ngtcp2_addr* addr);
-  void StatelessReset();
   void StreamClose(int64_t stream_id, uint64_t app_error_code);
   void StreamOpen(int64_t stream_id);
   void StreamReset(
@@ -820,31 +839,32 @@ class QuicSession : public AsyncWrap,
   }
 
   QuicSessionType type_;
+  QuicSocket* socket_;
+  std::string alpn_;
 
-  uint64_t initial_connection_close_;
-  ngtcp2_crypto_level rx_crypto_level_;
-  ngtcp2_crypto_level tx_crypto_level_;
-  QuicError last_error_;
+  ngtcp2_crypto_level rx_crypto_level_ = NGTCP2_CRYPTO_LEVEL_INITIAL;
+  ngtcp2_crypto_level tx_crypto_level_ = NGTCP2_CRYPTO_LEVEL_INITIAL;
+  QuicError last_error_ = { QUIC_ERROR_SESSION, NGTCP2_NO_ERROR };
 
   crypto::SSLPointer ssl_;
   ConnectionPointer connection_;
   SocketAddress remote_address_;
 
-  uint32_t flags_;
+  uint32_t flags_ = 0;
   uint32_t options_;
-  size_t max_pktlen_;
-  size_t ncread_;
-  size_t max_crypto_buffer_;
-  size_t current_ngtcp2_memory_;
-  size_t connection_close_attempts_;
-  size_t connection_close_limit_;
+  uint64_t initial_connection_close_;
+  size_t max_pktlen_ = 0;
+  size_t ncread_ = 0;
+  size_t max_crypto_buffer_ = DEFAULT_MAX_CRYPTO_BUFFER;
+  size_t current_ngtcp2_memory_ = 0;
+  size_t connection_close_attempts_ = 0;
+  size_t connection_close_limit_ = 1;
 
   Timer* idle_;
   Timer* retransmit_;
 
-  QuicSocket* socket_;
-  CryptoContext hs_crypto_ctx_;
-  CryptoContext crypto_ctx_;
+  CryptoContext hs_crypto_ctx_{};
+  CryptoContext crypto_ctx_{};
   std::vector<uint8_t> tx_secret_;
   std::vector<uint8_t> rx_secret_;
   ngtcp2_cid scid_;
@@ -870,8 +890,6 @@ class QuicSession : public AsyncWrap,
   std::map<int64_t, std::shared_ptr<QuicStream>> streams_;
 
   AliasedFloat64Array state_;
-
-  std::string alpn_;
 
   mem::Allocator<ngtcp2_mem> allocator_;
 
@@ -915,10 +933,16 @@ class QuicSession : public AsyncWrap,
     uint64_t keyupdate_count;
     // The total number of retries received
     uint64_t retry_count;
+    // The total number of loss detection retransmissions
+    uint64_t loss_retransmit_count;
+    // The total number of ack delay retransmissions
+    uint64_t ack_delay_retransmit_count;
+    // The total number of successful path validations
+    uint64_t path_validation_success_count;
+    // The total number of failed path validations
+    uint64_t path_validation_failure_count;
   };
-  session_stats session_stats_{
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-  };
+  session_stats session_stats_{};
 
   // crypto_rx_ack_ measures the elapsed time between crypto acks
   // for this stream. This data can be used to detect peers that are
@@ -936,7 +960,7 @@ class QuicSession : public AsyncWrap,
     double latest_rtt;
     double smoothed_rtt;
   };
-  recovery_stats recovery_stats_{0, 0, 0};
+  recovery_stats recovery_stats_{};
 
   AliasedBigUint64Array stats_buffer_;
   AliasedFloat64Array recovery_stats_buffer_;
@@ -1106,7 +1130,7 @@ class QuicServerSession : public QuicSession {
     SetServerCryptoLevel(level);
   }
 
-  ngtcp2_cid pscid_;
+  ngtcp2_cid pscid_{};
   ngtcp2_cid rcid_;
 
   MallocedBuffer<uint8_t> conn_closebuf_;
