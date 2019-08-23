@@ -1,7 +1,8 @@
 /*
- * ngtcp2
+ * nghttp3
  *
- * Copyright (c) 2016 ngtcp2 contributors
+ * Copyright (c) 2019 nghttp3 contributors
+ * Copyright (c) 2017 ngtcp2 contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -22,24 +23,25 @@
  * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#ifndef VERSION_H
-#define VERSION_H
+#ifndef NGHTTP3_MACRO_H
+#define NGHTTP3_MACRO_H
 
-/**
- * @macro
- *
- * Version number of the ngtcp2 library release.
- */
-#define NGTCP2_VERSION "0.1.90"
+#ifdef HAVE_CONFIG_H
+#  include <config.h>
+#endif /* HAVE_CONFIG_H */
 
-/**
- * @macro
- *
- * Numerical representation of the version number of the ngtcp2
- * library release. This is a 24 bit number with 8 bits for major
- * number, 8 bits for minor and 8 bits for patch. Version 1.2.3
- * becomes 0x010203.
- */
-#define NGTCP2_VERSION_NUM 0x00015a
+#include <stddef.h>
 
-#endif /* VERSION_H */
+#include <nghttp3/nghttp3.h>
+
+#define nghttp3_min(A, B) ((A) < (B) ? (A) : (B))
+#define nghttp3_max(A, B) ((A) > (B) ? (A) : (B))
+
+#define nghttp3_struct_of(ptr, type, member)                                   \
+  ((type *)(void *)((char *)(ptr)-offsetof(type, member)))
+
+#define nghttp3_arraylen(A) (sizeof(A) / sizeof(*(A)))
+
+#define lstreq(A, B, N) ((sizeof((A)) - 1) == (N) && memcmp((A), (B), (N)) == 0)
+
+#endif /* NGHTTP3_MACRO_H */

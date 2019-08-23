@@ -1,6 +1,7 @@
 /*
- * ngtcp2
+ * nghttp3
  *
+ * Copyright (c) 2019 nghttp3 contributors
  * Copyright (c) 2016 ngtcp2 contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining
@@ -22,24 +23,24 @@
  * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#ifndef VERSION_H
-#define VERSION_H
+#ifndef NGHTTP3_VERSION_H
+#define NGHTTP3_VERSION_H
 
 /**
  * @macro
  *
- * Version number of the ngtcp2 library release.
+ * Version number of the nghttp3 library release.
  */
-#define NGTCP2_VERSION "0.1.90"
+#define NGHTTP3_VERSION "0.1.90"
 
 /**
  * @macro
  *
- * Numerical representation of the version number of the ngtcp2
+ * Numerical representation of the version number of the nghttp3
  * library release. This is a 24 bit number with 8 bits for major
  * number, 8 bits for minor and 8 bits for patch. Version 1.2.3
  * becomes 0x010203.
  */
-#define NGTCP2_VERSION_NUM 0x00015a
+#define NGHTTP3_VERSION_NUM 0x00015a
 
-#endif /* VERSION_H */
+#endif /* NGHTTP3_VERSION_H */

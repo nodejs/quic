@@ -1,7 +1,8 @@
 /*
- * ngtcp2
+ * nghttp3
  *
- * Copyright (c) 2016 ngtcp2 contributors
+ * Copyright (c) 2019 nghttp3 contributors
+ * Copyright (c) 2016 nghttp2 contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -22,24 +23,39 @@
  * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#ifndef VERSION_H
-#define VERSION_H
+#include "nghttp3_debug.h"
 
-/**
- * @macro
- *
- * Version number of the ngtcp2 library release.
- */
-#define NGTCP2_VERSION "0.1.90"
+#include <stdio.h>
 
-/**
- * @macro
- *
- * Numerical representation of the version number of the ngtcp2
- * library release. This is a 24 bit number with 8 bits for major
- * number, 8 bits for minor and 8 bits for patch. Version 1.2.3
- * becomes 0x010203.
- */
-#define NGTCP2_VERSION_NUM 0x00015a
+#ifdef DEBUGBUILD
 
-#endif /* VERSION_H */
+static void nghttp3_default_debug_vfprintf_callback(const char *fmt,
+                                                    va_list args) {
+  vfprintf(stderr, fmt, args);
+}
+
+static nghttp3_debug_vprintf_callback static_debug_vprintf_callback =
+    nghttp3_default_debug_vfprintf_callback;
+
+void nghttp3_debug_vprintf(const char *format, ...) {
+  if (static_debug_vprintf_callback) {
+    va_list args;
+    va_start(args, format);
+    static_debug_vprintf_callback(format, args);
+    va_end(args);
+  }
+}
+
+void nghttp3_set_debug_vprintf_callback(
+    nghttp3_debug_vprintf_callback debug_vprintf_callback) {
+  static_debug_vprintf_callback = debug_vprintf_callback;
+}
+
+#else /* !DEBUGBUILD */
+
+void nghttp3_set_debug_vprintf_callback(
+    nghttp3_debug_vprintf_callback debug_vprintf_callback) {
+  (void)debug_vprintf_callback;
+}
+
+#endif /* !DEBUGBUILD */

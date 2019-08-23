@@ -1,7 +1,8 @@
 /*
- * ngtcp2
+ * nghttp3
  *
- * Copyright (c) 2016 ngtcp2 contributors
+ * Copyright (c) 2019 nghttp3 contributors
+ * Copyright (c) 2018 ngtcp2 contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -22,24 +23,42 @@
  * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#ifndef VERSION_H
-#define VERSION_H
+#include "nghttp3_vec.h"
+#include "nghttp3_macro.h"
 
-/**
- * @macro
- *
- * Version number of the ngtcp2 library release.
- */
-#define NGTCP2_VERSION "0.1.90"
+size_t nghttp3_vec_len(const nghttp3_vec *vec, size_t n) {
+  size_t i;
+  size_t res = 0;
 
-/**
- * @macro
- *
- * Numerical representation of the version number of the ngtcp2
- * library release. This is a 24 bit number with 8 bits for major
- * number, 8 bits for minor and 8 bits for patch. Version 1.2.3
- * becomes 0x010203.
- */
-#define NGTCP2_VERSION_NUM 0x00015a
+  for (i = 0; i < n; ++i) {
+    res += vec[i].len;
+  }
 
-#endif /* VERSION_H */
+  return res;
+}
+
+int nghttp3_vec_empty(const nghttp3_vec *vec, size_t cnt) {
+  size_t i;
+
+  for (i = 0; i < cnt && vec[i].len == 0; ++i)
+    ;
+
+  return i == cnt;
+}
+
+void nghttp3_vec_consume(nghttp3_vec **pvec, size_t *pcnt, size_t len) {
+  nghttp3_vec *v = *pvec;
+  size_t cnt = *pcnt;
+
+  for (; cnt > 0; --cnt, ++v) {
+    if (v->len > len) {
+      v->len -= len;
+      v->base += len;
+      break;
+    }
+    len -= v->len;
+  }
+
+  *pvec = v;
+  *pcnt = cnt;
+}
