@@ -55,6 +55,7 @@ const { getSystemErrorName } = require('util');
     delete providers.KEYPAIRGENREQUEST;
     delete providers.HTTPCLIENTREQUEST;
     delete providers.HTTPINCOMINGMESSAGE;
+    delete providers.ELDHISTOGRAM;
 
     const objKeys = Object.keys(providers);
     if (objKeys.length > 0)
