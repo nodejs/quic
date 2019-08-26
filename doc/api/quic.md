@@ -1015,7 +1015,7 @@ decremented to `0` by a router, it will not be forwarded.
 The argument passed to `socket.setMulticastTTL()` is a number of hops between
 `0` and `255`. The default on most systems is `1` but can vary.
 
-### quicsocket.setServerBusy([on = true])
+### quicsocket.setServerBusy([on])
 <!-- YAML
 added: REPLACEME
 -->
