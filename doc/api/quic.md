@@ -394,22 +394,6 @@ three arguments:
 The `sessionTicket` and `remoteTransportParams` are useful when creating a new
 `QuicClientSession` to more quickly resume an existing session.
 
-### Event: `'versionNegotiation'`
-<!-- YAML
-added: REPLACEME
--->
-
-Emitted when the `QuicSession` has received a version negotiation response from
-a server. The `QuicSession` will be immediately destroyed after the
-`'versionNegotiation'` event has been emitted.
-
-The callback will be invoked with three arguments:
-
-* `version` { number } The QUIC protocol version used by the `QuicClientSession`.
-* `requestedVersions` { number[] } The QUIC protocol versions supported by the
-  QUIC server.
-* `supportedVersions` { number[] } The QUIC protocol versions supposed by the
-  current Node.js implementation.
 
 ### quicclientsession.ephemeralKeyInfo
 <!-- YAML
