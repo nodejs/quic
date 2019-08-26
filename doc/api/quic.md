@@ -21,10 +21,11 @@ const cert = getTLSCertSomehow();
 
 const { createSocket } = require('quic');
 
-// Create the local QUIC UDP IPv4 socket...
+// Create the QUIC UDP IPv4 socket bound to local IP port 1234
 const socket = createSocket({ port: 1234 });
 
-// Tell the socket to operate as a server...
+// Tell the socket to operate as a server using the given
+// key and certificate to secure new connections.
 socket.listen({ key, cert });
 
 socket.on('session', (session) => {
@@ -50,11 +51,6 @@ socket.on('session', (session) => {
   });
 });
 
-// The socket is ready to be used... we can create new sessions
-socket.on('ready', () => {
-  console.log(socket.address);
-});
-
 socket.on('listening', () => {
   // The socket is listening for sessions!
 });
@@ -76,7 +72,7 @@ added: REPLACEME
     per remote host. Default: `100`.
   * `port` {number} The local port to bind to.
   * `retryTokenTimeout` {number} The maximum number of *seconds* for retry token
-    validation. Default: `10`.
+    validation. Default: `10` seconds.
   * `server` {Object} A default configuration for QUIC server sessions.
   * `type` {string} Either `'udp4'` or `'upd6'` to use either IPv4 or IPv6,
      respectively.
@@ -114,30 +110,9 @@ Emiitted after the `QuicSession` has been destroyed.
 added: REPLACEME
 -->
 
-Emitted before the `'close'` event if the `QuicSession` was destroyed with
-an error.
+Emitted immediately before the `'close'` event if the `QuicSession` was
+destroyed with an error.
 
-### Event: `'extendMaxBidiStreams'`
-<!-- YAML
-added: REPLACEME
--->
-
-Emitted when the maximum number of bidirectional streams has been extended.
-
-The callback will be invoked with a single argument:
-
-* `maxStreams` {number} The new maximum number of bidirectional streams
-
-### Event: `'extendMaxUniStreams'`
-<!-- YAML
-added: REPLACEME
--->
-
-Emitted when the maximum number of unidirectional streams has been extended.
-
-The callback will be invoked with a single argument:
-
-* `maxStreams` {number} The new maximum number of unidirectional streams
 
 ### Event: `'keylog'`
 <!-- YAML
@@ -167,7 +142,9 @@ session.on('keylog', (line) => log.write(line));
 added: REPLACEME
 -->
 
-Emitted when a path validation result as been determined.
+Emitted when a path validation result as been determined. This event
+is strictly informational. When path validation is successful, the
+`QuicSession` will automatically update to use the new validated path.
 
 The callback will be invoked with three arguments:
 
@@ -242,7 +219,7 @@ added: REPLACEME
 
 * Type: {boolean}
 
-Set the `true` if the `QuicSession` is in the process of a graceful shutdown.
+Set to `true` if the `QuicSession` is in the process of a graceful shutdown.
 
 ### quicsession.destroy([error])
 <!-- YAML
@@ -252,8 +229,8 @@ added: REPLACEME
 * `error` {any}
 
 Destroys the `QuicSession` immediately causing the `close` event to be emitted.
-If `error` is not `undefined`, the `error` event will be emitted following the
-`close` event.
+If `error` is not `undefined`, the `error` event will be emitted immediately before
+the `close` event.
 
 Any `QuicStream` instances that are still opened will be abruptly closed.
 
@@ -273,7 +250,7 @@ added: REPLACEME
 
 * Returns: {Object} A [Certificate Object][].
 
-Returns an object representing the local certificate. The returned object has
+Returns an object representing the *local* certificate. The returned object has
 some properties corresponding to the fields of the certificate.
 
 If there is no local certificate, or if the `QuicSession` has been destroyed,
@@ -285,16 +262,16 @@ added: REPLACEME
 -->
 
 * `detailed` {boolean} Include the full certificate chain if `true`, otherwise
-  include just the peer's certificate.
+  include just the peer's certificate. **Defaults**: `false`.
 * Returns: {Object} A [Certificate Object][].
 
 Returns an object representing the peer's certificate. If the peer does not
 provide a certificate, or if the `QuicSession` has been destroyed, an empty
 object will be returned.
 
-If the full certificate chain was requested, each certificate will include an
-`issuerCertificate` property containing an object representing its issuer's
-certificate.
+If the full certificate chain was requested (`details` equals `true`), each
+certificate will include an `issuerCertificate` property containing an object
+representing the issuer's certificate.
 
 ### quicsession.handshakeComplete
 <!-- YAML
@@ -303,7 +280,7 @@ added: REPLACEME
 
 * Type: {boolean}
 
-True if the TLS handshake has completed.
+Set to `true` if the TLS handshake has completed.
 
 ### quicsession.maxStreams
 <!-- YAML
@@ -325,7 +302,7 @@ added: REPLACEME
 -->
 * `options` {Object}
   * `halfOpen` {boolean} Set to `true` to open a unidirectional stream, `false`
-    to open a bidirectional stream. Defaults to `true`.
+    to open a bidirectional stream. **Defaults**: `true`.
   * `highWaterMark` {number}
 * Returns: {QuicStream}
 
@@ -396,6 +373,9 @@ status response from the QUIC server peer.
 The callback is invoked with a single argument:
 
 * `response` {Buffer}
+
+Node.js does not perform any automatic validation or processing of the
+response.
 
 ### Event: `'sessionTicket'`
 <!-- YAML
