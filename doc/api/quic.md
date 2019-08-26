@@ -142,7 +142,7 @@ session.on('keylog', (line) => log.write(line));
 added: REPLACEME
 -->
 
-Emitted when a path validation result as been determined. This event
+Emitted when a path validation result has been determined. This event
 is strictly informational. When path validation is successful, the
 `QuicSession` will automatically update to use the new validated path.
 
@@ -229,8 +229,8 @@ added: REPLACEME
 * `error` {any}
 
 Destroys the `QuicSession` immediately causing the `close` event to be emitted.
-If `error` is not `undefined`, the `error` event will be emitted immediately before
-the `close` event.
+If `error` is not `undefined`, the `error` event will be emitted immediately
+before the `close` event.
 
 Any `QuicStream` instances that are still opened will be abruptly closed.
 
@@ -262,7 +262,7 @@ added: REPLACEME
 -->
 
 * `detailed` {boolean} Include the full certificate chain if `true`, otherwise
-  include just the peer's certificate. **Defaults**: `false`.
+  include just the peer's certificate. **Default**: `false`.
 * Returns: {Object} A [Certificate Object][].
 
 Returns an object representing the peer's certificate. If the peer does not
@@ -289,7 +289,7 @@ added: REPLACEME
 
 * Type: {Object}
   * `uni` {number} The maximum number of unidirectional streams.
-  * `bidi` {numbe} The maximum number of bidirectional streams.
+  * `bidi` {number} The maximum number of bidirectional streams.
 
 The highest cumulative number of bidirectional and unidirectional streams
 that can currently be opened. The values are set initially by configuration
@@ -302,7 +302,7 @@ added: REPLACEME
 -->
 * `options` {Object}
   * `halfOpen` {boolean} Set to `true` to open a unidirectional stream, `false`
-    to open a bidirectional stream. **Defaults**: `true`.
+    to open a bidirectional stream. **Default**: `true`.
   * `highWaterMark` {number}
 * Returns: {QuicStream}
 
@@ -417,21 +417,8 @@ added: REPLACEME
 
 * Type: {boolean}
 
-True if the `QuicClientSession` is ready for use. False if the `QuicSocket` has
-not yet been bound.
-
-### quicclientsession.readyToMigrate
-<!-- YAML
-added: REPLACEME
--->
-
-* Type: {boolean}
-
-Once established, a `QuicClientSession` can be migrated from one `QuicSocket`
-instance to another, without requiring the TLS handshake to be reestablished.
-Migration, however, can only occur once the TLS handshake is complete and the
-underlying session has had an opportunity to generate a pool of extra
-connection identifiers.
+Set to `true` if the `QuicClientSession` is ready for use. False if the
+`QuicSocket` has not yet been bound.
 
 ### quicclientsession.setSocket(socket, callback])
 <!-- YAML
@@ -444,8 +431,9 @@ added: REPLACEME
 
 Migrates the `QuicClientSession` to the given `QuicSocket` instance. If the new
 `QuicSocket` has not yet been bound to a local UDP port, it will be bound prior
-to attempting the migration. If `quicclientsession.readyToMigrate` is `false`,
-an error will be thrown.
+to attempting the migration. If the `QuicClientSession` is not yet ready to
+migrate, the callback will be invoked with an `Error` using the code
+`ERR_QUICCLIENTSESSION_FAILED_SETSOCKET`.
 
 ## Class: QuicServerSession extends QuicSession
 <!-- YAML
@@ -491,6 +479,8 @@ The callback is invoked with three arguments:
 * `servername` {string}
 * `context` {tls.SecureContext}
 * `callback` {Function}
+
+The callback *must* be invoked in order for the TLS handshake to continue.
 
 ## Class: QuicSocket
 <!-- YAML
@@ -746,7 +736,8 @@ added: REPLACEME
 
 * Type: {integer}
 
-The system file descriptor the `QuicSocket` is bound to.
+The system file descriptor the `QuicSocket` is bound to. This property
+is not set on Windows.
 
 ### quicsocket.listen([options][, callback])
 <!-- YAML
@@ -866,7 +857,7 @@ added: REPLACEME
 
 * Type: {boolean}
 
-Will be `true` if the socket is not yet bound to the local UDP port.
+Set to `true` if the socket is not yet bound to the local UDP port.
 
 ### quicsocket.ref()
 <!-- YAML
@@ -1081,7 +1072,7 @@ added: REPLACEME
 
 * Type: {boolean}
 
-True if the `QuicStream` is bidirectional.
+Set to `true` if the `QuicStream` is bidirectional.
 
 ### quicstream.clientInitiated
 <!-- YAML
@@ -1090,7 +1081,8 @@ added: REPLACEME
 
 * Type: {boolean}
 
-True if the `QuicStream` was initiated by a `QuicClientSession` instance.
+Set to `true` if the `QuicStream` was initiated by a `QuicClientSession`
+instance.
 
 ### quicstream.id
 <!-- YAML
@@ -1108,7 +1100,8 @@ added: REPLACEME
 
 * Type: {boolean}
 
-True if the `QuicStream` was initiated by a `QuicServerSession` instance.
+Set to `true` if the `QuicStream` was initiated by a `QuicServerSession`
+instance.
 
 ### quicstream.session
 <!-- YAML
@@ -1126,7 +1119,7 @@ added: REPLACEME
 
 * Type: {boolean}
 
-True if the `QuicStream` is unidirectional.
+Set to `true` if the `QuicStream` is unidirectional.
 
 
 
