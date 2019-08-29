@@ -860,8 +860,8 @@ class QuicSession : public AsyncWrap,
   size_t connection_close_attempts_ = 0;
   size_t connection_close_limit_ = 1;
 
-  Timer* idle_;
-  Timer* retransmit_;
+  TimerPointer idle_;
+  TimerPointer retransmit_;
 
   CryptoContext hs_crypto_ctx_{};
   CryptoContext crypto_ctx_{};

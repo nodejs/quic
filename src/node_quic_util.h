@@ -472,11 +472,8 @@ class Timer {
     env_->RemoveCleanupHook(CleanupHook, this);
 
     if (timer_.data == this) {
-      timer_.data = nullptr;
       uv_timer_stop(&timer_);
-      env_->CloseHandle(
-          reinterpret_cast<uv_handle_t*>(&timer_),
-          TimerClosedCb);
+      timer_.data = nullptr;
     }
   }
 
@@ -487,6 +484,17 @@ class Timer {
       return;
     uv_timer_start(&timer_, OnTimeout, interval, interval);
     uv_unref(reinterpret_cast<uv_handle_t*>(&timer_));
+  }
+
+  static void Free(Timer* timer) {
+    timer->env_->CloseHandle(
+        reinterpret_cast<uv_handle_t*>(&timer->timer_),
+        [&](uv_handle_t* timer) {
+          Timer* t = ContainerOf(
+              &Timer::timer_,
+              reinterpret_cast<uv_timer_t*>(timer));
+          delete t;
+        });
   }
 
  private:
@@ -506,19 +514,14 @@ class Timer {
     static_cast<Timer*>(data)->Stop();
   }
 
-  static void TimerClosedCb(uv_handle_t* timer) {
-    std::unique_ptr<Timer> t(
-        ContainerOf(
-            &Timer::timer_,
-            reinterpret_cast<uv_timer_t*>(timer)));
-  }
-
   bool stopped_;
   Environment* env_;
   std::function<void(void* data)> fn_;
   uv_timer_t timer_;
   void* data_;
 };
+
+using TimerPointer = DeleteFnPtr<Timer, Timer::Free>;
 
 }  // namespace quic
 }  // namespace node
