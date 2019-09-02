@@ -18,12 +18,14 @@ namespace node {
 
 using crypto::SecureContext;
 using v8::Context;
+using v8::DontDelete;
 using v8::Function;
 using v8::FunctionCallbackInfo;
 using v8::HandleScope;
 using v8::Isolate;
 using v8::Local;
 using v8::Object;
+using v8::ReadOnly;
 using v8::Value;
 
 namespace quic {
@@ -71,11 +73,6 @@ void QuicSetCallbacks(const FunctionCallbackInfo<Value>& args) {
 
 void QuicProtocolVersion(const FunctionCallbackInfo<Value>& args) {
   args.GetReturnValue().Set(NGTCP2_PROTO_VER);
-}
-
-void QuicALPNVersion(const FunctionCallbackInfo<Value>& args) {
-  Environment* env = Environment::GetCurrent(args);
-  args.GetReturnValue().Set(OneByteString(env->isolate(), NGTCP2_ALPN_H3));
 }
 
 // Sets QUIC specific configuration options for the SecureContext.
@@ -199,9 +196,6 @@ void Initialize(Local<Object> target,
                  "protocolVersion",
                  QuicProtocolVersion);
   env->SetMethod(target,
-                 "alpnVersion",
-                 QuicALPNVersion);
-  env->SetMethod(target,
                  "initSecureContext",
                  QuicInitSecureContext);
   env->SetMethod(target,
@@ -283,6 +277,11 @@ void Initialize(Local<Object> target,
   target->Set(context,
               env->constants_string(),
               constants).FromJust();
+
+  constants->DefineOwnProperty(context,
+      FIXED_ONE_BYTE_STRING(isolate, NODE_STRINGIFY_HELPER(NGTCP2_ALPN_H3)),
+      FIXED_ONE_BYTE_STRING(isolate, NGTCP2_ALPN_H3),
+      static_cast<PropertyAttribute>(ReadOnly | DontDelete)).Check();
 }
 
 }  // namespace quic
