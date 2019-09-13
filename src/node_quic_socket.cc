@@ -80,7 +80,6 @@ QuicSocket::QuicSocket(
     tx_loss_(0.0),
     server_secure_context_(nullptr),
     server_alpn_(NGTCP2_ALPN_H3),
-    token_crypto_ctx_{},
     stats_buffer_(
       env->isolate(),
       sizeof(socket_stats_) / sizeof(uint64_t),
@@ -88,7 +87,6 @@ QuicSocket::QuicSocket(
   CHECK_EQ(uv_udp_init(env->event_loop(), &handle_), 0);
   Debug(this, "New QuicSocket created.");
 
-  SetupTokenContext(&token_crypto_ctx_);
   EntropySource(token_secret_.data(), token_secret_.size());
   socket_stats_.created_at = uv_hrtime();
 
@@ -138,7 +136,7 @@ void QuicSocket::AddSession(
   IncrementSocketAddressCounter(**session->GetRemoteAddress());
   IncrementSocketStat(
       1, &socket_stats_,
-      session->Type() == QUICSESSION_TYPE_SERVER ?
+      session->Side() == NGTCP2_CRYPTO_SIDE_SERVER ?
           &socket_stats::server_sessions :
           &socket_stats::client_sessions);
 }
@@ -582,7 +580,6 @@ ssize_t QuicSocket::SendRetry(
           token.data(), &tokenlen,
           addr,
           **dcid,
-          &token_crypto_ctx_,
           &token_secret_)) {
     return -1;
   }
@@ -710,7 +707,6 @@ std::shared_ptr<QuicSession> QuicSocket::AcceptInitialPacket(
               &ocid,
               &hd,
               addr,
-              &token_crypto_ctx_,
               &token_secret_,
               retry_token_expiration_)) {
         Debug(this, "A valid retry token was not found. Sending retry.");

@@ -29,6 +29,8 @@
 #include "v8.h"
 #include "env.h"
 
+#include <string>
+
 namespace node {
 
 class StringBytes {
@@ -101,6 +103,8 @@ class StringBytes {
                            size_t slen,
                            char* dst,
                            size_t dlen);
+
+  static std::string hex_encode(const char* src, size_t slen);
 
  private:
   static size_t WriteUCS2(v8::Isolate* isolate,

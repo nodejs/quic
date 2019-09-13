@@ -50,7 +50,7 @@ namespace quic {
 // QuicSession is an abstract base class that defines the code used by both
 // server and client sessions.
 QuicSession::QuicSession(
-    QuicSessionType type,
+    ngtcp2_crypto_side side,
     QuicSocket* socket,
     Local<Object> wrap,
     SecureContext* ctx,
@@ -59,7 +59,7 @@ QuicSession::QuicSession(
     uint32_t options,
     uint64_t initial_connection_close) :
     AsyncWrap(socket->env(), wrap, provider_type),
-    type_(type),
+    side_(side),
     socket_(socket),
     alpn_(alpn),
     options_(options),
@@ -165,7 +165,7 @@ QuicSession::~QuicSession() {
 
 std::string QuicSession::diagnostic_name() const {
   return std::string("QuicSession ") +
-      (Type() == QUICSESSION_TYPE_SERVER ? "Server" : "Client") +
+      (Side() == NGTCP2_CRYPTO_SIDE_SERVER ? "Server" : "Client") +
       " (" + std::to_string(static_cast<int64_t>(get_async_id())) + ")";
 }
 
@@ -225,13 +225,13 @@ void QuicSession::AddStream(QuicStream* stream) {
   // this session.
   switch (stream->GetOrigin()) {
     case QuicStream::QuicStreamOrigin::QUIC_STREAM_CLIENT:
-      if (Type() == QUICSESSION_TYPE_SERVER)
+      if (Side() == NGTCP2_CRYPTO_SIDE_SERVER)
         IncrementStat(1, &session_stats_, &session_stats::streams_in_count);
       else
         IncrementStat(1, &session_stats_, &session_stats::streams_out_count);
       break;
     case QuicStream::QuicStreamOrigin::QUIC_STREAM_SERVER:
-      if (Type() == QUICSESSION_TYPE_SERVER)
+      if (Side() == NGTCP2_CRYPTO_SIDE_SERVER)
         IncrementStat(1, &session_stats_, &session_stats::streams_out_count);
       else
         IncrementStat(1, &session_stats_, &session_stats::streams_in_count);
@@ -417,7 +417,7 @@ ssize_t QuicSession::DoHPMask(
     return NGTCP2_ERR_CALLBACK_FAILURE;
   ssize_t nwrite = HP_Mask(
       dest, destlen,
-      crypto_ctx_,
+      &crypto_ctx_,
       key, keylen,
       sample, samplelen);
   return nwrite >= 0 ?
@@ -438,10 +438,12 @@ ssize_t QuicSession::DoHSDecrypt(
     size_t adlen) {
   if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return NGTCP2_ERR_CALLBACK_FAILURE;
+  CryptoContext ctx;
+  SetupInitialCryptoContext(&ctx);
   ssize_t nwrite = Decrypt(
       dest, destlen,
       ciphertext, ciphertextlen,
-      &hs_crypto_ctx_,
+      &ctx,
       key, keylen,
       nonce, noncelen,
       ad, adlen);
@@ -463,10 +465,12 @@ ssize_t QuicSession::DoHSEncrypt(
     size_t adlen) {
   if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return NGTCP2_ERR_CALLBACK_FAILURE;
+  CryptoContext ctx;
+  SetupInitialCryptoContext(&ctx);
   ssize_t nwrite = Encrypt(
       dest, destlen,
       plaintext, plaintextlen,
-      &hs_crypto_ctx_,
+      &ctx,
       key, keylen,
       nonce, noncelen,
       ad, adlen);
@@ -484,9 +488,11 @@ ssize_t QuicSession::DoInHPMask(
     size_t samplelen) {
   if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return NGTCP2_ERR_CALLBACK_FAILURE;
+  CryptoContext ctx;
+  SetupInitialCryptoContext(&ctx);
   ssize_t nwrite = HP_Mask(
       dest, destlen,
-      hs_crypto_ctx_,
+      &ctx,
       key, keylen,
       sample, samplelen);
   return nwrite >= 0 ?
@@ -681,6 +687,93 @@ void QuicSession::OnIdleTimeout() {
   Debug(this, "Idle timeout");
   return SilentClose();
 }
+
+// Once OpenSSL adopts the BoringSSL QUIC apis (and we're able to pick those
+// up) then we will get rx and tx keys in a single callback and this entire
+// method will change. For now, we have to handle the keys one at a time,
+// which is going to make working with the ngtcp2 api a bit more difficult
+// since it's moving to a model where it assumes both rx and tx keys are
+// available at the same time.
+bool QuicSession::OnKey(int name, const uint8_t* secret, size_t secretlen) {
+  typedef void (*install_fn)(ngtcp2_conn* conn,
+                             size_t keylen,
+                             size_t ivlen,
+                             const SessionKey& key,
+                             const SessionIV& iv,
+                             const SessionKey& hp);
+  std::vector<uint8_t>* client_secret;
+  std::vector<uint8_t>* server_secret;
+  install_fn install_server_handshake_key;
+  install_fn install_client_handshake_key;
+  install_fn install_server_key;
+  install_fn install_client_key;
+  SessionKey key;
+  SessionIV iv;
+  SessionKey hp;
+
+  SetupCryptoContext(&crypto_ctx_, ssl());
+  size_t keylen = aead_key_length(&crypto_ctx_);
+  size_t ivlen = packet_protection_ivlen(&crypto_ctx_);
+
+  switch (Side()) {
+    case NGTCP2_CRYPTO_SIDE_SERVER:
+      client_secret = &rx_secret_;
+      server_secret = &tx_secret_;
+      install_server_handshake_key = InstallHandshakeTXKeys;
+      install_client_handshake_key = InstallHandshakeRXKeys;
+      install_server_key = InstallTXKeys;
+      install_client_key = InstallRXKeys;
+      break;
+    case NGTCP2_CRYPTO_SIDE_CLIENT:
+      client_secret = &tx_secret_;
+      server_secret = &rx_secret_;
+      install_server_handshake_key = InstallHandshakeRXKeys;
+      install_client_handshake_key = InstallHandshakeTXKeys;
+      install_server_key = InstallRXKeys;
+      install_client_key = InstallTXKeys;
+      break;
+    default:
+      UNREACHABLE();
+  }
+
+  if (!DerivePacketProtectionKey(
+          key.data(),
+          iv.data(),
+          hp.data(),
+          &crypto_ctx_,
+          secret,
+          secretlen)) {
+    return false;
+  }
+  ngtcp2_conn_set_aead_overhead(Connection(), aead_tag_length(&crypto_ctx_));
+
+  switch (name) {
+    case SSL_KEY_CLIENT_EARLY_TRAFFIC:
+      InstallEarlyKeys(Connection(), keylen, ivlen, key, iv, hp);
+      break;
+    case SSL_KEY_CLIENT_HANDSHAKE_TRAFFIC:
+      install_client_handshake_key(Connection(), keylen, ivlen, key, iv, hp);
+      SetClientCryptoLevel(NGTCP2_CRYPTO_LEVEL_HANDSHAKE);
+      break;
+    case SSL_KEY_CLIENT_APPLICATION_TRAFFIC:
+      client_secret->assign(secret, secret + secretlen);
+      install_client_key(Connection(), keylen, ivlen, key, iv, hp);
+      SetClientCryptoLevel(NGTCP2_CRYPTO_LEVEL_APP);
+      break;
+    case SSL_KEY_SERVER_HANDSHAKE_TRAFFIC:
+      install_server_handshake_key(Connection(), keylen, ivlen, key, iv, hp);
+      SetServerCryptoLevel(NGTCP2_CRYPTO_LEVEL_HANDSHAKE);
+      break;
+    case SSL_KEY_SERVER_APPLICATION_TRAFFIC:
+      server_secret->assign(secret, secret + secretlen);
+      install_server_key(Connection(), keylen, ivlen, key, iv, hp);
+      SetServerCryptoLevel(NGTCP2_CRYPTO_LEVEL_APP);
+    break;
+  }
+
+  return true;
+}
+
 
 void QuicSession::MaybeTimeout() {
   if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
@@ -940,33 +1033,12 @@ int QuicSession::ReceiveCryptoData(
 bool QuicSession::ReceiveClientInitial(const ngtcp2_cid* dcid) {
   if (UNLIKELY(IsFlagSet(QUICSESSION_FLAG_DESTROYED)))
     return false;
-
-  DCHECK(Type() == QUICSESSION_TYPE_SERVER);
   Debug(this, "Receiving client initial parameters.");
-
-  CryptoInitialParams params;
-
-  if (!DeriveInitialSecret(
-          &params,
-          dcid,
-          reinterpret_cast<const uint8_t *>(NGTCP2_INITIAL_SALT),
-          strsize(NGTCP2_INITIAL_SALT))) {
-    return false;
-  }
-
-  SetupTokenContext(&hs_crypto_ctx_);
-
-  if (!SetupServerSecret(&params, &hs_crypto_ctx_))
-    return false;
-
-  InstallKeys<ngtcp2_conn_install_initial_tx_keys>(Connection(), params);
-
-  if (!SetupClientSecret(&params, &hs_crypto_ctx_))
-    return false;
-
-  InstallKeys<ngtcp2_conn_install_initial_rx_keys>(Connection(), params);
-
-  return initial_connection_close_ == NGTCP2_NO_ERROR;
+  return DeriveAndInstallInitialKey(
+    Connection(),
+    dcid,
+    NGTCP2_CRYPTO_SIDE_SERVER) &&
+    initial_connection_close_ == NGTCP2_NO_ERROR;
 }
 
 bool QuicSession::ReceivePacket(
@@ -1279,7 +1351,7 @@ void QuicSession::SendPendingData() {
   if (Ngtcp2CallbackScope::InNgtcp2CallbackScope(this) ||
       IsFlagSet(QUICSESSION_FLAG_DESTROYED) ||
       IsInDrainingPeriod() ||
-      (Type() == QUICSESSION_TYPE_SERVER && IsInClosingPeriod())) {
+      (Side() == NGTCP2_CRYPTO_SIDE_SERVER && IsInClosingPeriod())) {
     return;
   }
 
@@ -1538,7 +1610,7 @@ int QuicSession::TLSHandshake() {
 // read it and throw it away, unless there's an error.
 int QuicSession::TLSRead() {
   ClearTLSError();
-  return ClearTLS(ssl(), Type() != QUICSESSION_TYPE_SERVER);
+  return ClearTLS(ssl(), Side() != NGTCP2_CRYPTO_SIDE_SERVER);
 }
 
 void QuicSession::UpdateIdleTimer() {
@@ -1655,21 +1727,12 @@ bool QuicSession::UpdateKey() {
 
   IncrementStat(1, &session_stats_, &session_stats::keyupdate_count);
 
-  if (!DoUpdateKey<ngtcp2_conn_update_tx_key>(
-          Connection(),
-          &tx_secret_,
-          &crypto_ctx_)) {
-    return false;
-  }
-
-  if (!DoUpdateKey<ngtcp2_conn_update_rx_key>(
-          Connection(),
-          &rx_secret_,
-          &crypto_ctx_)) {
-    return false;
-  }
-
-  return true;
+  return UpdateAndInstallKey(
+      Connection(),
+      &rx_secret_,
+      &tx_secret_,
+      rx_secret_.size(),
+      &crypto_ctx_);
 }
 
 
@@ -1709,7 +1772,7 @@ QuicServerSession::QuicServerSession(
     uint32_t options,
     uint64_t initial_connection_close) :
     QuicSession(
-        QUICSESSION_TYPE_SERVER,
+        NGTCP2_CRYPTO_SIDE_SERVER,
         socket,
         wrap,
         socket->GetServerSecureContext(),
@@ -2044,71 +2107,6 @@ int QuicServerSession::OnCert() {
   return IsFlagSet(QUICSESSION_FLAG_CERT_CB_RUNNING) ? -1 : 1;
 }
 
-int QuicServerSession::OnKey(
-    int name,
-    const uint8_t* secret,
-    size_t secretlen) {
-  switch (name) {
-    case SSL_KEY_CLIENT_EARLY_TRAFFIC:
-    case SSL_KEY_CLIENT_HANDSHAKE_TRAFFIC:
-    case SSL_KEY_SERVER_HANDSHAKE_TRAFFIC:
-      break;
-    case SSL_KEY_CLIENT_APPLICATION_TRAFFIC:
-      rx_secret_.assign(secret, secret + secretlen);
-      break;
-    case SSL_KEY_SERVER_APPLICATION_TRAFFIC:
-      tx_secret_.assign(secret, secret + secretlen);
-      break;
-    default:
-      return 0;
-  }
-
-  if (!Negotiated_PRF_AEAD(&crypto_ctx_, ssl()))
-    return -1;
-
-  CryptoParams params;
-
-  if (!SetupKeys(secret, secretlen, &params, &crypto_ctx_))
-    return -1;
-
-  ngtcp2_conn_set_aead_overhead(
-      Connection(),
-      aead_tag_length(&crypto_ctx_));
-
-  switch (name) {
-    case SSL_KEY_CLIENT_EARLY_TRAFFIC:
-      InstallKeys<ngtcp2_conn_install_early_keys>(
-          Connection(),
-          params);
-      break;
-    case SSL_KEY_CLIENT_HANDSHAKE_TRAFFIC:
-      InstallKeys<ngtcp2_conn_install_handshake_rx_keys>(
-          Connection(),
-          params);
-      SetClientCryptoLevel(NGTCP2_CRYPTO_LEVEL_HANDSHAKE);
-      break;
-    case SSL_KEY_CLIENT_APPLICATION_TRAFFIC:
-      InstallKeys<ngtcp2_conn_install_rx_keys>(
-          Connection(),
-          params);
-      break;
-    case SSL_KEY_SERVER_HANDSHAKE_TRAFFIC:
-      InstallKeys<ngtcp2_conn_install_handshake_tx_keys>(
-          Connection(),
-          params);
-      SetServerCryptoLevel(NGTCP2_CRYPTO_LEVEL_HANDSHAKE);
-      break;
-    case SSL_KEY_SERVER_APPLICATION_TRAFFIC:
-      InstallKeys<ngtcp2_conn_install_tx_keys>(
-          Connection(),
-          params);
-      SetServerCryptoLevel(NGTCP2_CRYPTO_LEVEL_APP);
-    break;
-  }
-
-  return 0;
-}
-
 // When the client has requested OSCP, this function will be called to provide
 // the OSCP response. The OnCert() callback should have already been called
 // by this point if any data is to be provided. If it hasn't, and ocsp_response_
@@ -2268,7 +2266,7 @@ QuicClientSession::QuicClientSession(
     const std::string& alpn,
     uint32_t options) :
     QuicSession(
-        QUICSESSION_TYPE_CLIENT,
+        NGTCP2_CRYPTO_SIDE_CLIENT,
         socket,
         wrap,
         context,
@@ -2599,70 +2597,6 @@ void QuicClientSession::InitTLS_Post() {
   }
 }
 
-int QuicClientSession::OnKey(
-    int name,
-    const uint8_t* secret,
-    size_t secretlen) {
-  switch (name) {
-    case SSL_KEY_CLIENT_EARLY_TRAFFIC:
-    case SSL_KEY_CLIENT_HANDSHAKE_TRAFFIC:
-    case SSL_KEY_SERVER_HANDSHAKE_TRAFFIC:
-      break;
-    case SSL_KEY_CLIENT_APPLICATION_TRAFFIC:
-      tx_secret_.assign(secret, secret + secretlen);
-      break;
-    case SSL_KEY_SERVER_APPLICATION_TRAFFIC:
-      rx_secret_.assign(secret, secret + secretlen);
-      break;
-    default:
-      return 0;
-  }
-
-  if (!Negotiated_PRF_AEAD(&crypto_ctx_, ssl()))
-    return -1;
-
-  CryptoParams params;
-
-  if (!SetupKeys(secret, secretlen, &params, &crypto_ctx_))
-    return -1;
-
-  ngtcp2_conn_set_aead_overhead(
-      Connection(),
-      aead_tag_length(&crypto_ctx_));
-
-  switch (name) {
-    case SSL_KEY_CLIENT_EARLY_TRAFFIC:
-      InstallKeys<ngtcp2_conn_install_early_keys>(
-          Connection(),
-          params);
-      break;
-    case SSL_KEY_CLIENT_HANDSHAKE_TRAFFIC:
-      InstallKeys<ngtcp2_conn_install_handshake_tx_keys>(
-          Connection(),
-          params);
-      SetClientCryptoLevel(NGTCP2_CRYPTO_LEVEL_HANDSHAKE);
-      break;
-    case SSL_KEY_CLIENT_APPLICATION_TRAFFIC:
-      InstallKeys<ngtcp2_conn_install_tx_keys>(
-          Connection(),
-          params);
-      break;
-    case SSL_KEY_SERVER_HANDSHAKE_TRAFFIC:
-      InstallKeys<ngtcp2_conn_install_handshake_rx_keys>(
-          Connection(),
-          params);
-      SetServerCryptoLevel(NGTCP2_CRYPTO_LEVEL_HANDSHAKE);
-      break;
-    case SSL_KEY_SERVER_APPLICATION_TRAFFIC:
-      InstallKeys<ngtcp2_conn_install_rx_keys>(
-          Connection(),
-          params);
-      SetServerCryptoLevel(NGTCP2_CRYPTO_LEVEL_APP);
-    break;
-  }
-
-  return 0;
-}
 
 // During TLS handshake, if the client has requested OCSP status, this
 // function will be invoked when the response has been received from
@@ -2763,31 +2697,10 @@ bool QuicClientSession::SetSession(Local<Value> buffer) {
 // client side by creating the initial keying material.
 bool QuicClientSession::SetupInitialCryptoContext() {
   Debug(this, "Setting up initial crypto context");
-
-  CryptoInitialParams params;
-  const ngtcp2_cid* dcid = ngtcp2_conn_get_dcid(Connection());
-
-  SetupTokenContext(&hs_crypto_ctx_);
-
-  if (!DeriveInitialSecret(
-          &params,
-          dcid,
-          reinterpret_cast<const uint8_t*>(NGTCP2_INITIAL_SALT),
-          strsize(NGTCP2_INITIAL_SALT))) {
-    return false;
-  }
-
-  if (!SetupClientSecret(&params, &hs_crypto_ctx_))
-    return false;
-
-  InstallKeys<ngtcp2_conn_install_initial_tx_keys>(Connection(), params);
-
-  if (!SetupServerSecret(&params, &hs_crypto_ctx_))
-    return false;
-
-  InstallKeys<ngtcp2_conn_install_initial_rx_keys>(Connection(), params);
-
-  return true;
+  return DeriveAndInstallInitialKey(
+      Connection(),
+      ngtcp2_conn_get_dcid(Connection()),
+      NGTCP2_CRYPTO_SIDE_CLIENT);
 }
 
 int QuicClientSession::TLSHandshake_Complete() {
@@ -2971,7 +2884,7 @@ void QuicSessionGetPeerCertificate(const FunctionCallbackInfo<Value>& args) {
   // NOTE: This is because of the odd OpenSSL behavior. On client `cert_chain`
   // contains the `peer_certificate`, but on server it doesn't.
   crypto::X509Pointer cert(
-      session->Type() == QUICSESSION_TYPE_SERVER ?
+      session->Side() == NGTCP2_CRYPTO_SIDE_SERVER ?
           SSL_get_peer_certificate(session->ssl()) : nullptr);
   STACK_OF(X509)* ssl_certs = SSL_get_peer_cert_chain(session->ssl());
   if (!cert && (ssl_certs == nullptr || sk_X509_num(ssl_certs) == 0))

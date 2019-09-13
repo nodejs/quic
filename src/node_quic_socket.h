@@ -259,7 +259,6 @@ class QuicSocket : public HandleWrap,
   std::string server_alpn_;
   std::unordered_map<std::string, std::shared_ptr<QuicSession>> sessions_;
   std::unordered_map<std::string, std::string> dcid_to_scid_;
-  CryptoContext token_crypto_ctx_;
   std::array<uint8_t, TOKEN_SECRETLEN> token_secret_;
 
   // Counts the number of active connections per remote

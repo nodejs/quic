@@ -31,6 +31,7 @@
 #include <cstring>  // memcpy
 
 #include <algorithm>
+#include <string>
 #include <vector>
 
 // When creating strings >= this length v8's gc spins up and consumes
@@ -607,6 +608,12 @@ size_t StringBytes::hex_encode(
   return dlen;
 }
 
+std::string StringBytes::hex_encode(const char* src, size_t slen) {
+  size_t dlen = slen * 2;
+  std::string dst(dlen, '\0');
+  hex_encode(src, slen, &dst[0], dlen);
+  return dst;
+}
 
 #define CHECK_BUFLEN_IN_RANGE(len)                                    \
   do {                                                                \

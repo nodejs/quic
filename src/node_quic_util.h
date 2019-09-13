@@ -388,64 +388,9 @@ void IncrementStat(
   access(a, mems...) += delta;
 }
 
-typedef int(*update_fn)(
-    ngtcp2_conn* conn,
-    const uint8_t* key,
-    size_t keylen,
-    const uint8_t* iv,
-    size_t ivlen);
-
-typedef int(*install_fn)(
-    ngtcp2_conn* conn,
-    const uint8_t* key,
-    size_t keylen,
-    const uint8_t* iv,
-    size_t ivlen,
-    const uint8_t* pn,
-    size_t pnlen);
-
-typedef void(*set_ssl_state_fn)(SSL* ssl);
-
-struct CryptoContext {
-  const EVP_CIPHER* aead;
-  const EVP_CIPHER* hp;
-  const EVP_MD* prf;
-  std::array<uint8_t, 64> tx_secret;
-  std::array<uint8_t, 64> rx_secret;
-  size_t secretlen;
-};
-
-struct CryptoInitialParams {
-  std::array<uint8_t, 32> initial_secret;
-  std::array<uint8_t, 32> secret;
-  std::array<uint8_t, 16> key;
-  std::array<uint8_t, 16> iv;
-  std::array<uint8_t, 16> hp;
-  size_t keylen;
-  size_t ivlen;
-  size_t hplen;
-};
-
-struct CryptoParams {
-  std::array<uint8_t, 64> key;
-  std::array<uint8_t, 64> iv;
-  std::array<uint8_t, 64> hp;
-  size_t keylen;
-  size_t ivlen;
-  size_t hplen;
-};
-
-struct CryptoToken {
-  std::array<uint8_t, 32> key;
-  std::array<uint8_t, 32> iv;
-  size_t keylen;
-  size_t ivlen;
-  CryptoToken() : keylen(key.size()), ivlen(iv.size()) {}
-};
-
-  // Simple timer wrapper that is used to implement the internals
-  // for idle and retransmission timeouts. Call Update to start or
-  // reset the timer; Stop to halt the timer.
+// Simple timer wrapper that is used to implement the internals
+// for idle and retransmission timeouts. Call Update to start or
+// reset the timer; Stop to halt the timer.
 class Timer {
  public:
   inline explicit Timer(

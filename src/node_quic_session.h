@@ -11,6 +11,7 @@
 #include "node.h"
 #include "node_crypto.h"
 #include "node_mem.h"
+#include "node_quic_crypto.h"
 #include "node_quic_util.h"
 #include "v8.h"
 #include "uv.h"
@@ -166,11 +167,6 @@ typedef enum QuicSessionState : int {
   IDX_QUIC_SESSION_STATE_COUNT
 } QuicSessionState;
 
-typedef enum QuicSessionType : int {
-  QUICSESSION_TYPE_SERVER,
-  QUICSESSION_TYPE_CLIENT
-} QuicSessionType;
-
 // The QuicSession class is an virtual class that serves as
 // the basis for both QuicServerSession and QuicClientSession.
 // It implements the functionality that is shared for both
@@ -199,7 +195,7 @@ class QuicSession : public AsyncWrap,
       // the TLS handshake has completed. The QuicSession
       // should never assume that the socket will always
       // remain the same.
-      QuicSessionType type,
+      ngtcp2_crypto_side side,
       QuicSocket* socket,
       v8::Local<v8::Object> wrap,
       crypto::SecureContext* ctx,
@@ -265,6 +261,7 @@ class QuicSession : public AsyncWrap,
   bool IsHandshakeCompleted();
   void MaybeTimeout();
   void OnIdleTimeout();
+  bool OnKey(int name, const uint8_t* secret, size_t secretlen);
   bool OpenBidirectionalStream(int64_t* stream_id);
   bool OpenUnidirectionalStream(int64_t* stream_id);
   void Ping();
@@ -323,7 +320,7 @@ class QuicSession : public AsyncWrap,
       int64_t stream_id,
       uint64_t error_code = NGTCP2_APP_NOERROR);
   int TLSRead();
-  QuicSessionType Type() const { return type_; }
+  ngtcp2_crypto_side Side() const { return side_; }
   void WriteHandshake(const uint8_t* data, size_t datalen);
 
   // These may be implemented by QuicSession types
@@ -339,10 +336,6 @@ class QuicSession : public AsyncWrap,
 
   // These must be implemented by QuicSession types
   virtual void AddToSocket(QuicSocket* socket) = 0;
-  virtual int OnKey(
-      int name,
-      const uint8_t* secret,
-      size_t secretlen) = 0;
   virtual int OnTLSStatus() = 0;
   virtual bool SendConnectionClose() = 0;
   virtual int TLSHandshake_Initial() = 0;
@@ -838,7 +831,7 @@ class QuicSession : public AsyncWrap,
     return ngtcp2_conn_write_connection_close;
   }
 
-  QuicSessionType type_;
+  ngtcp2_crypto_side side_;
   QuicSocket* socket_;
   std::string alpn_;
 
@@ -863,7 +856,6 @@ class QuicSession : public AsyncWrap,
   TimerPointer idle_;
   TimerPointer retransmit_;
 
-  CryptoContext hs_crypto_ctx_{};
   CryptoContext crypto_ctx_{};
   std::vector<uint8_t> tx_secret_;
   std::vector<uint8_t> rx_secret_;
@@ -1099,10 +1091,6 @@ class QuicServerSession : public QuicSession {
 
   void DisassociateCID(const ngtcp2_cid* cid) override;
   void InitTLS_Post() override;
-  int OnKey(
-      int name,
-      const uint8_t* secret,
-      size_t secretlen) override;
   void RemoveFromSocket() override;
 
   int TLSHandshake_Initial() override;
@@ -1226,7 +1214,6 @@ class QuicClientSession : public QuicSession {
  private:
   void HandleError() override;
   void InitTLS_Post() override;
-  int OnKey(int name, const uint8_t* secret, size_t secretlen) override;
   bool ReceiveRetry() override;
   bool SelectPreferredAddress(
     ngtcp2_addr* dest,
