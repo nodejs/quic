@@ -408,8 +408,8 @@ static void pktns_free(ngtcp2_pktns *pktns, const ngtcp2_mem *mem) {
 
   ngtcp2_frame_chain_list_del(pktns->tx.frq, mem);
 
-  ngtcp2_vec_del(pktns->crypto.rx.hp, mem);
-  ngtcp2_vec_del(pktns->crypto.tx.hp, mem);
+  ngtcp2_vec_del(pktns->crypto.rx.hp_key, mem);
+  ngtcp2_vec_del(pktns->crypto.tx.hp_key, mem);
 
   ngtcp2_crypto_km_del(pktns->crypto.rx.ckm, mem);
   ngtcp2_crypto_km_del(pktns->crypto.tx.ckm, mem);
@@ -600,6 +600,7 @@ static int conn_new(ngtcp2_conn **pconn, const ngtcp2_cid *dcid,
   (*pconn)->user_data = user_data;
   (*pconn)->local.settings = *settings;
   (*pconn)->rx.unsent_max_offset = (*pconn)->rx.max_offset = settings->max_data;
+  (*pconn)->idle_ts = settings->initial_ts;
 
   rcvry_stat_reset(&(*pconn)->rcs);
   cc_stat_reset(&(*pconn)->ccs);
@@ -728,7 +729,7 @@ void ngtcp2_conn_del(ngtcp2_conn *conn) {
   ngtcp2_crypto_km_del(conn->crypto.key_update.old_rx_ckm, conn->mem);
   ngtcp2_crypto_km_del(conn->crypto.key_update.new_rx_ckm, conn->mem);
   ngtcp2_crypto_km_del(conn->crypto.key_update.new_tx_ckm, conn->mem);
-  ngtcp2_vec_del(conn->early.hp, conn->mem);
+  ngtcp2_vec_del(conn->early.hp_key, conn->mem);
   ngtcp2_crypto_km_del(conn->early.ckm, conn->mem);
 
   pktns_free(&conn->pktns, conn->mem);
@@ -743,6 +744,7 @@ void ngtcp2_conn_del(ngtcp2_conn *conn) {
 
   ngtcp2_idtr_free(&conn->remote.uni.idtr);
   ngtcp2_idtr_free(&conn->remote.bidi.idtr);
+  ngtcp2_mem_free(conn->mem, conn->tx.ack);
   ngtcp2_pq_free(&conn->tx.strmq);
   ngtcp2_map_each_free(&conn->strms, delete_strms_each, (void *)conn->mem);
   ngtcp2_map_free(&conn->strms);
@@ -757,10 +759,8 @@ void ngtcp2_conn_del(ngtcp2_conn *conn) {
 }
 
 /*
- * conn_ensure_ack_blks makes sure that |(*pfr)->ack.blks| can contain
- * at least |n| ngtcp2_ack_blk.  |*pfr| points to the ngtcp2_frame
- * object.  |*pnum_blks_max| is the number of ngtpc2_ack_blk which
- * |*pfr| can contain.
+ * conn_ensure_ack_blks makes sure that conn->tx.ack->ack.blks can
+ * contain at least |n| additional ngtcp2_ack_blk.
  *
  * This function returns 0 if it succeeds, or one of the following
  * negative error codes:
@@ -768,23 +768,26 @@ void ngtcp2_conn_del(ngtcp2_conn *conn) {
  * NGTCP2_ERR_NOMEM
  *     Out of memory.
  */
-static int conn_ensure_ack_blks(ngtcp2_conn *conn, ngtcp2_frame **pfr,
-                                size_t *pnum_blks_max, size_t n) {
+static int conn_ensure_ack_blks(ngtcp2_conn *conn, size_t n) {
   ngtcp2_frame *fr;
+  size_t max = conn->tx.max_ack_blks;
 
-  if (n <= *pnum_blks_max) {
+  if (n <= max) {
     return 0;
   }
 
-  *pnum_blks_max *= 2;
-  fr = ngtcp2_mem_realloc(conn->mem, *pfr,
-                          sizeof(ngtcp2_ack) +
-                              sizeof(ngtcp2_ack_blk) * (*pnum_blks_max - 1));
+  max *= 2;
+
+  assert(max >= n);
+
+  fr = ngtcp2_mem_realloc(conn->mem, conn->tx.ack,
+                          sizeof(ngtcp2_ack) + sizeof(ngtcp2_ack_blk) * max);
   if (fr == NULL) {
     return NGTCP2_ERR_NOMEM;
   }
 
-  *pfr = fr;
+  conn->tx.ack = fr;
+  conn->tx.max_ack_blks = max;
 
   return 0;
 }
@@ -828,15 +831,14 @@ static int conn_create_ack_frame(ngtcp2_conn *conn, ngtcp2_frame **pfr,
                                  ngtcp2_acktr *acktr, uint8_t type,
                                  ngtcp2_tstamp ts, uint64_t ack_delay,
                                  uint64_t ack_delay_exponent) {
+  /* TODO Measure an actual size of ACK bloks to find the best default
+     value. */
+  const size_t initial_max_ack_blks = 8;
   int64_t last_pkt_num;
   ngtcp2_ack_blk *blk;
   ngtcp2_ksl_it it;
   ngtcp2_acktr_entry *rpkt;
-  ngtcp2_frame *fr;
   ngtcp2_ack *ack;
-  /* TODO Measure an actual size of ACK bloks to find the best default
-     value. */
-  size_t num_blks_max = 8;
   size_t blk_idx;
   int rv;
 
@@ -854,13 +856,17 @@ static int conn_create_ack_frame(ngtcp2_conn *conn, ngtcp2_frame **pfr,
     return 0;
   }
 
-  fr = ngtcp2_mem_malloc(conn->mem, sizeof(ngtcp2_ack) +
-                                        sizeof(ngtcp2_ack_blk) * num_blks_max);
-  if (fr == NULL) {
-    return NGTCP2_ERR_NOMEM;
+  if (conn->tx.ack == NULL) {
+    conn->tx.ack = ngtcp2_mem_malloc(
+        conn->mem,
+        sizeof(ngtcp2_ack) + sizeof(ngtcp2_ack_blk) * initial_max_ack_blks);
+    if (conn->tx.ack == NULL) {
+      return NGTCP2_ERR_NOMEM;
+    }
+    conn->tx.max_ack_blks = initial_max_ack_blks;
   }
 
-  ack = &fr->ack;
+  ack = &conn->tx.ack->ack;
 
   rpkt = ngtcp2_ksl_it_get(&it);
   last_pkt_num = rpkt->pkt_num - (int64_t)(rpkt->len - 1);
@@ -881,24 +887,23 @@ static int conn_create_ack_frame(ngtcp2_conn *conn, ngtcp2_frame **pfr,
   ngtcp2_ksl_it_next(&it);
 
   for (; !ngtcp2_ksl_it_end(&it); ngtcp2_ksl_it_next(&it)) {
+    if (ack->num_blks == NGTCP2_MAX_ACK_BLKS) {
+      break;
+    }
+
     rpkt = ngtcp2_ksl_it_get(&it);
 
     blk_idx = ack->num_blks++;
-    rv = conn_ensure_ack_blks(conn, &fr, &num_blks_max, ack->num_blks);
+    rv = conn_ensure_ack_blks(conn, ack->num_blks);
     if (rv != 0) {
-      ngtcp2_mem_free(conn->mem, fr);
       return rv;
     }
-    ack = &fr->ack;
+    ack = &conn->tx.ack->ack;
     blk = &ack->blks[blk_idx];
     blk->gap = (uint64_t)(last_pkt_num - rpkt->pkt_num - 2);
     blk->blklen = rpkt->len - 1;
 
     last_pkt_num = rpkt->pkt_num - (int64_t)(rpkt->len - 1);
-
-    if (ack->num_blks == NGTCP2_MAX_ACK_BLKS) {
-      break;
-    }
   }
 
   /* TODO Just remove entries which cannot fit into a single ACK frame
@@ -907,7 +912,7 @@ static int conn_create_ack_frame(ngtcp2_conn *conn, ngtcp2_frame **pfr,
     ngtcp2_acktr_forget(acktr, ngtcp2_ksl_it_get(&it));
   }
 
-  *pfr = fr;
+  *pfr = conn->tx.ack;
 
   return 0;
 }
@@ -1230,7 +1235,7 @@ static int conn_cryptofrq_pop(ngtcp2_conn *conn, ngtcp2_frame_chain **pfrc,
   datalen = ngtcp2_vec_len(fr->data, fr->datacnt);
 
   if (datalen > left) {
-    ngtcp2_vec_clone(a, fr->data, fr->datacnt);
+    ngtcp2_vec_copy(a, fr->data, fr->datacnt);
     acnt = fr->datacnt;
 
     bcnt = 0;
@@ -1250,7 +1255,7 @@ static int conn_cryptofrq_pop(ngtcp2_conn *conn, ngtcp2_frame_chain **pfrc,
     nfr->type = NGTCP2_FRAME_CRYPTO;
     nfr->offset = fr->offset + left;
     nfr->datacnt = bcnt;
-    ngtcp2_vec_clone(nfr->data, b, bcnt);
+    ngtcp2_vec_copy(nfr->data, b, bcnt);
 
     rv = ngtcp2_ksl_insert(&pktns->crypto.tx.frq, NULL,
                            ngtcp2_ksl_key_ptr(&key, &nfr->offset), nfrc);
@@ -1271,7 +1276,7 @@ static int conn_cryptofrq_pop(ngtcp2_conn *conn, ngtcp2_frame_chain **pfrc,
     nfr = &nfrc->fr.crypto;
     *nfr = *fr;
     nfr->datacnt = acnt;
-    ngtcp2_vec_clone(nfr->data, a, acnt);
+    ngtcp2_vec_copy(nfr->data, a, acnt);
 
     ngtcp2_frame_chain_del(frc, conn->mem);
 
@@ -1282,7 +1287,7 @@ static int conn_cryptofrq_pop(ngtcp2_conn *conn, ngtcp2_frame_chain **pfrc,
 
   left -= datalen;
 
-  ngtcp2_vec_clone(a, fr->data, fr->datacnt);
+  ngtcp2_vec_copy(a, fr->data, fr->datacnt);
   acnt = fr->datacnt;
 
   for (; left && ngtcp2_ksl_len(&pktns->crypto.tx.frq);) {
@@ -1357,7 +1362,7 @@ static int conn_cryptofrq_pop(ngtcp2_conn *conn, ngtcp2_frame_chain **pfrc,
   nfr = &nfrc->fr.crypto;
   *nfr = *fr;
   nfr->datacnt = acnt;
-  ngtcp2_vec_clone(nfr->data, a, acnt);
+  ngtcp2_vec_copy(nfr->data, a, acnt);
 
   ngtcp2_frame_chain_del(frc, conn->mem);
 
@@ -1439,6 +1444,16 @@ static int conn_should_pad_pkt(ngtcp2_conn *conn, uint8_t type, size_t left,
              min_payloadlen + NGTCP2_MAX_AEAD_OVERHEAD;
 }
 
+static void conn_restart_timer_on_write(ngtcp2_conn *conn, ngtcp2_tstamp ts) {
+  conn->idle_ts = ts;
+  conn->flags &= (uint16_t)~NGTCP2_CONN_FLAG_RESTART_IDLE_TIMER_ON_WRITE;
+}
+
+static void conn_restart_timer_on_read(ngtcp2_conn *conn, ngtcp2_tstamp ts) {
+  conn->idle_ts = ts;
+  conn->flags |= NGTCP2_CONN_FLAG_RESTART_IDLE_TIMER_ON_WRITE;
+}
+
 /*
  * conn_write_handshake_pkt writes handshake packet in the buffer
  * pointed by |dest| whose length is |destlen|.  |type| specifies long
@@ -1464,7 +1479,7 @@ static ssize_t conn_write_handshake_pkt(ngtcp2_conn *conn, uint8_t *dest,
   ngtcp2_frame_chain *nfrc;
   ngtcp2_frame *ackfr = NULL, lfr;
   ssize_t spktlen;
-  ngtcp2_crypto_ctx ctx;
+  ngtcp2_crypto_cc cc;
   ngtcp2_rtb_entry *rtbent;
   ngtcp2_pktns *pktns;
   size_t left;
@@ -1479,27 +1494,27 @@ static ssize_t conn_write_handshake_pkt(ngtcp2_conn *conn, uint8_t *dest,
       return 0;
     }
     pktns = &conn->in_pktns;
-    ctx.ckm = pktns->crypto.tx.ckm;
-    ctx.hp = pktns->crypto.tx.hp;
-    ctx.aead_overhead = NGTCP2_INITIAL_AEAD_OVERHEAD;
-    ctx.encrypt = conn->callbacks.in_encrypt;
-    ctx.hp_mask = conn->callbacks.in_hp_mask;
+    cc.aead_overhead = NGTCP2_INITIAL_AEAD_OVERHEAD;
+    cc.user_data = NULL;
     break;
   case NGTCP2_PKT_HANDSHAKE:
     if (!conn->hs_pktns.crypto.tx.ckm) {
       return 0;
     }
     pktns = &conn->hs_pktns;
-    ctx.ckm = pktns->crypto.tx.ckm;
-    ctx.hp = pktns->crypto.tx.hp;
-    ctx.aead_overhead = conn->crypto.aead_overhead;
-    ctx.encrypt = conn->callbacks.encrypt;
-    ctx.hp_mask = conn->callbacks.hp_mask;
-    ctx.user_data = conn;
+    cc.aead_overhead = conn->crypto.aead_overhead;
+    cc.user_data = conn;
     break;
   default:
     assert(0);
   }
+
+  cc.aead = pktns->crypto.ctx.aead;
+  cc.hp = pktns->crypto.ctx.hp;
+  cc.ckm = pktns->crypto.tx.ckm;
+  cc.hp_key = pktns->crypto.tx.hp_key;
+  cc.encrypt = conn->callbacks.encrypt;
+  cc.hp_mask = conn->callbacks.hp_mask;
 
   ngtcp2_pkt_hd_init(&hd, NGTCP2_PKT_FLAG_LONG_FORM, type,
                      &conn->dcid.current.cid, &conn->oscid,
@@ -1511,13 +1526,13 @@ static ssize_t conn_write_handshake_pkt(ngtcp2_conn *conn, uint8_t *dest,
     hd.tokenlen = ngtcp2_buf_len(&conn->token);
   }
 
-  ctx.user_data = conn;
+  cc.user_data = conn;
 
   if (ngtcp2_ksl_len(&pktns->crypto.tx.frq) == 0) {
     return 0;
   }
 
-  ngtcp2_ppe_init(&ppe, dest, destlen, &ctx);
+  ngtcp2_ppe_init(&ppe, dest, destlen, &cc);
 
   rv = ngtcp2_ppe_encode_hd(&ppe, &hd);
   if (rv != 0) {
@@ -1583,8 +1598,6 @@ static ssize_t conn_write_handshake_pkt(ngtcp2_conn *conn, uint8_t *dest,
       ngtcp2_acktr_add_ack(&pktns->acktr, hd.pkt_num, ackfr->ack.largest_ack);
       pkt_empty = 0;
     }
-    ngtcp2_mem_free(conn->mem, ackfr);
-    ackfr = NULL;
   }
 
   /* If we cannot write another packet, then we need to add padding to
@@ -1625,6 +1638,11 @@ static ssize_t conn_write_handshake_pkt(ngtcp2_conn *conn, uint8_t *dest,
       ngtcp2_rtb_entry_del(rtbent, conn->mem);
       return rv;
     }
+
+    if ((flags & NGTCP2_RTB_FLAG_ACK_ELICITING) &&
+        (conn->flags & NGTCP2_CONN_FLAG_RESTART_IDLE_TIMER_ON_WRITE)) {
+      conn_restart_timer_on_write(conn, ts);
+    }
   }
 
   ++pktns->tx.last_pkt_num;
@@ -1656,7 +1674,7 @@ static ssize_t conn_write_handshake_ack_pkt(ngtcp2_conn *conn, uint8_t *dest,
   ngtcp2_ppe ppe;
   ngtcp2_pkt_hd hd;
   ngtcp2_frame *ackfr, lfr;
-  ngtcp2_crypto_ctx ctx;
+  ngtcp2_crypto_cc cc;
   ngtcp2_pktns *pktns;
   ngtcp2_rtb_entry *rtbent;
   ssize_t spktlen;
@@ -1666,16 +1684,12 @@ static ssize_t conn_write_handshake_ack_pkt(ngtcp2_conn *conn, uint8_t *dest,
   switch (type) {
   case NGTCP2_PKT_INITIAL:
     pktns = &conn->in_pktns;
-    ctx.aead_overhead = NGTCP2_INITIAL_AEAD_OVERHEAD;
-    ctx.encrypt = conn->callbacks.in_encrypt;
-    ctx.hp_mask = conn->callbacks.in_hp_mask;
+    cc.aead_overhead = NGTCP2_INITIAL_AEAD_OVERHEAD;
     immediate_ack = conn->hs_pktns.crypto.tx.ckm != NULL;
     break;
   case NGTCP2_PKT_HANDSHAKE:
     pktns = &conn->hs_pktns;
-    ctx.aead_overhead = conn->crypto.aead_overhead;
-    ctx.encrypt = conn->callbacks.encrypt;
-    ctx.hp_mask = conn->callbacks.hp_mask;
+    cc.aead_overhead = conn->crypto.aead_overhead;
     immediate_ack = conn->pktns.crypto.tx.ckm != NULL;
     break;
   default:
@@ -1708,21 +1722,23 @@ static ssize_t conn_write_handshake_ack_pkt(ngtcp2_conn *conn, uint8_t *dest,
                      pktns->tx.last_pkt_num + 1, pktns_select_pkt_numlen(pktns),
                      conn->version, 0);
 
-  ctx.ckm = pktns->crypto.tx.ckm;
-  ctx.hp = pktns->crypto.tx.hp;
-  ctx.user_data = conn;
+  cc.aead = pktns->crypto.ctx.aead;
+  cc.hp = pktns->crypto.ctx.hp;
+  cc.ckm = pktns->crypto.tx.ckm;
+  cc.hp_key = pktns->crypto.tx.hp_key;
+  cc.encrypt = conn->callbacks.encrypt;
+  cc.hp_mask = conn->callbacks.hp_mask;
+  cc.user_data = conn;
 
-  ngtcp2_ppe_init(&ppe, dest, destlen, &ctx);
+  ngtcp2_ppe_init(&ppe, dest, destlen, &cc);
 
   rv = ngtcp2_ppe_encode_hd(&ppe, &hd);
   if (rv != 0) {
     assert(NGTCP2_ERR_NOBUF == rv);
-    ngtcp2_mem_free(conn->mem, ackfr);
     return 0;
   }
 
   if (!ngtcp2_ppe_ensure_hp_sample(&ppe)) {
-    ngtcp2_mem_free(conn->mem, ackfr);
     return 0;
   }
 
@@ -1736,8 +1752,6 @@ static ssize_t conn_write_handshake_ack_pkt(ngtcp2_conn *conn, uint8_t *dest,
       ngtcp2_acktr_commit_ack(&pktns->acktr);
       ngtcp2_acktr_add_ack(&pktns->acktr, hd.pkt_num, ackfr->ack.largest_ack);
     }
-    ngtcp2_mem_free(conn->mem, ackfr);
-    ackfr = NULL;
   }
 
   if (require_padding || force_send) {
@@ -2191,7 +2205,7 @@ static ssize_t conn_write_pkt(ngtcp2_conn *conn, uint8_t *dest, size_t destlen,
                               const ngtcp2_vec *datav, size_t datavcnt,
                               uint8_t flags, ngtcp2_tstamp ts) {
   int rv;
-  ngtcp2_crypto_ctx *ctx = &conn->pkt.ctx;
+  ngtcp2_crypto_cc *cc = &conn->pkt.cc;
   ngtcp2_ppe *ppe = &conn->pkt.ppe;
   ngtcp2_pkt_hd *hd = &conn->pkt.hd;
   ngtcp2_frame *ackfr = NULL, lfr;
@@ -2240,8 +2254,8 @@ static ssize_t conn_write_pkt(ngtcp2_conn *conn, uint8_t *dest, size_t destlen,
           (pktns->crypto.tx.ckm->flags & NGTCP2_CRYPTO_KM_FLAG_KEY_PHASE_ONE)
               ? NGTCP2_PKT_FLAG_KEY_PHASE
               : NGTCP2_PKT_FLAG_NONE;
-      ctx->ckm = pktns->crypto.tx.ckm;
-      ctx->hp = pktns->crypto.tx.hp;
+      cc->ckm = pktns->crypto.tx.ckm;
+      cc->hp_key = pktns->crypto.tx.hp_key;
       break;
     case NGTCP2_PKT_0RTT:
       assert(!conn->server);
@@ -2249,18 +2263,20 @@ static ssize_t conn_write_pkt(ngtcp2_conn *conn, uint8_t *dest, size_t destlen,
         return 0;
       }
       hd_flags = NGTCP2_PKT_FLAG_LONG_FORM;
-      ctx->ckm = conn->early.ckm;
-      ctx->hp = conn->early.hp;
+      cc->ckm = conn->early.ckm;
+      cc->hp_key = conn->early.hp_key;
       break;
     default:
       /* Unreachable */
       assert(0);
     }
 
-    ctx->aead_overhead = conn->crypto.aead_overhead;
-    ctx->encrypt = conn->callbacks.encrypt;
-    ctx->hp_mask = conn->callbacks.hp_mask;
-    ctx->user_data = conn;
+    cc->aead = pktns->crypto.ctx.aead;
+    cc->hp = pktns->crypto.ctx.hp;
+    cc->aead_overhead = conn->crypto.aead_overhead;
+    cc->encrypt = conn->callbacks.encrypt;
+    cc->hp_mask = conn->callbacks.hp_mask;
+    cc->user_data = conn;
 
     /* TODO Take into account stream frames */
     if ((pktns->tx.frq || send_stream ||
@@ -2283,7 +2299,7 @@ static ssize_t conn_write_pkt(ngtcp2_conn *conn, uint8_t *dest, size_t destlen,
                        &conn->oscid, pktns->tx.last_pkt_num + 1,
                        pktns_select_pkt_numlen(pktns), conn->version, 0);
 
-    ngtcp2_ppe_init(ppe, dest, destlen, ctx);
+    ngtcp2_ppe_init(ppe, dest, destlen, cc);
 
     rv = ngtcp2_ppe_encode_hd(ppe, hd);
     if (rv != 0) {
@@ -2334,8 +2350,6 @@ static ssize_t conn_write_pkt(ngtcp2_conn *conn, uint8_t *dest, size_t destlen,
                              ackfr->ack.largest_ack);
         pkt_empty = 0;
       }
-      ngtcp2_mem_free(conn->mem, ackfr);
-      ackfr = NULL;
     }
 
     for (pfrc = &pktns->tx.frq; *pfrc;) {
@@ -2588,6 +2602,7 @@ static ssize_t conn_write_pkt(ngtcp2_conn *conn, uint8_t *dest, size_t destlen,
     pfrc = conn->pkt.pfrc;
     rtb_entry_flags |= conn->pkt.rtb_entry_flags;
     pkt_empty = conn->pkt.pkt_empty;
+    hd_logged = conn->pkt.hd_logged;
   }
 
   left = ngtcp2_ppe_left(ppe);
@@ -2597,8 +2612,8 @@ static ssize_t conn_write_pkt(ngtcp2_conn *conn, uint8_t *dest, size_t destlen,
                                                 data_strm->tx.offset, ndatalen,
                                                 left)) != (size_t)-1 &&
       (ndatalen || datalen == 0)) {
-    datacnt = ngtcp2_vec_copy(data, &ndatalen, NGTCP2_MAX_STREAM_DATACNT, datav,
-                              datavcnt, ndatalen);
+    datacnt = ngtcp2_vec_copy_at_most(
+        data, &ndatalen, NGTCP2_MAX_STREAM_DATACNT, datav, datavcnt, ndatalen);
 
     rv = ngtcp2_frame_chain_stream_datacnt_new(&nfrc, datacnt, conn->mem);
     if (rv != 0) {
@@ -2611,7 +2626,7 @@ static ssize_t conn_write_pkt(ngtcp2_conn *conn, uint8_t *dest, size_t destlen,
     nfrc->fr.stream.stream_id = data_strm->stream_id;
     nfrc->fr.stream.offset = data_strm->tx.offset;
     nfrc->fr.stream.datacnt = datacnt;
-    ngtcp2_vec_clone(nfrc->fr.stream.data, data, datacnt);
+    ngtcp2_vec_copy(nfrc->fr.stream.data, data, datacnt);
 
     fin = fin && ndatalen == datalen;
     nfrc->fr.stream.fin = (uint8_t)fin;
@@ -2653,6 +2668,7 @@ static ssize_t conn_write_pkt(ngtcp2_conn *conn, uint8_t *dest, size_t destlen,
     conn->pkt.pfrc = pfrc;
     conn->pkt.pkt_empty = pkt_empty;
     conn->pkt.rtb_entry_flags = rtb_entry_flags;
+    conn->pkt.hd_logged = hd_logged;
     conn->flags |= NGTCP2_CONN_FLAG_PPE_PENDING;
 
     if (stream_blocked) {
@@ -2703,6 +2719,11 @@ static ssize_t conn_write_pkt(ngtcp2_conn *conn, uint8_t *dest, size_t destlen,
       ngtcp2_rtb_entry_del(ent, conn->mem);
       return rv;
     }
+
+    if ((rtb_entry_flags & NGTCP2_RTB_FLAG_ACK_ELICITING) &&
+        (conn->flags & NGTCP2_CONN_FLAG_RESTART_IDLE_TIMER_ON_WRITE)) {
+      conn_restart_timer_on_write(conn, ts);
+    }
   }
 
   conn->flags &= (uint16_t)~NGTCP2_CONN_FLAG_PPE_PENDING;
@@ -2737,7 +2758,7 @@ static ssize_t conn_write_single_frame_pkt(ngtcp2_conn *conn, uint8_t *dest,
   ngtcp2_pkt_hd hd;
   ngtcp2_frame lfr;
   ssize_t nwrite;
-  ngtcp2_crypto_ctx ctx;
+  ngtcp2_crypto_cc cc;
   ngtcp2_pktns *pktns;
   uint8_t flags;
   ngtcp2_rtb_entry *rtbent;
@@ -2745,24 +2766,18 @@ static ssize_t conn_write_single_frame_pkt(ngtcp2_conn *conn, uint8_t *dest,
   switch (type) {
   case NGTCP2_PKT_INITIAL:
     pktns = &conn->in_pktns;
-    ctx.aead_overhead = NGTCP2_INITIAL_AEAD_OVERHEAD;
-    ctx.encrypt = conn->callbacks.in_encrypt;
-    ctx.hp_mask = conn->callbacks.in_hp_mask;
+    cc.aead_overhead = NGTCP2_INITIAL_AEAD_OVERHEAD;
     flags = NGTCP2_PKT_FLAG_LONG_FORM;
     break;
   case NGTCP2_PKT_HANDSHAKE:
     pktns = &conn->hs_pktns;
-    ctx.aead_overhead = conn->crypto.aead_overhead;
-    ctx.encrypt = conn->callbacks.encrypt;
-    ctx.hp_mask = conn->callbacks.hp_mask;
+    cc.aead_overhead = conn->crypto.aead_overhead;
     flags = NGTCP2_PKT_FLAG_LONG_FORM;
     break;
   case NGTCP2_PKT_SHORT:
     /* 0 means Short packet. */
     pktns = &conn->pktns;
-    ctx.aead_overhead = conn->crypto.aead_overhead;
-    ctx.encrypt = conn->callbacks.encrypt;
-    ctx.hp_mask = conn->callbacks.hp_mask;
+    cc.aead_overhead = conn->crypto.aead_overhead;
     flags = (pktns->crypto.tx.ckm->flags & NGTCP2_CRYPTO_KM_FLAG_KEY_PHASE_ONE)
                 ? NGTCP2_PKT_FLAG_KEY_PHASE
                 : NGTCP2_PKT_FLAG_NONE;
@@ -2772,15 +2787,19 @@ static ssize_t conn_write_single_frame_pkt(ngtcp2_conn *conn, uint8_t *dest,
     assert(0);
   }
 
-  ctx.ckm = pktns->crypto.tx.ckm;
-  ctx.hp = pktns->crypto.tx.hp;
-  ctx.user_data = conn;
+  cc.encrypt = conn->callbacks.encrypt;
+  cc.hp_mask = conn->callbacks.hp_mask;
+  cc.aead = pktns->crypto.ctx.aead;
+  cc.hp = pktns->crypto.ctx.hp;
+  cc.ckm = pktns->crypto.tx.ckm;
+  cc.hp_key = pktns->crypto.tx.hp_key;
+  cc.user_data = conn;
 
   ngtcp2_pkt_hd_init(&hd, flags, type, dcid, &conn->oscid,
                      pktns->tx.last_pkt_num + 1, pktns_select_pkt_numlen(pktns),
                      conn->version, 0);
 
-  ngtcp2_ppe_init(&ppe, dest, destlen, &ctx);
+  ngtcp2_ppe_init(&ppe, dest, destlen, &cc);
 
   rv = ngtcp2_ppe_encode_hd(&ppe, &hd);
   if (rv != 0) {
@@ -2829,6 +2848,11 @@ static ssize_t conn_write_single_frame_pkt(ngtcp2_conn *conn, uint8_t *dest,
       ngtcp2_rtb_entry_del(rtbent, conn->mem);
       return rv;
     }
+
+    if ((rtb_flags & NGTCP2_RTB_FLAG_ACK_ELICITING) &&
+        (conn->flags & NGTCP2_CONN_FLAG_RESTART_IDLE_TIMER_ON_WRITE)) {
+      conn_restart_timer_on_write(conn, ts);
+    }
   }
 
   ++pktns->tx.last_pkt_num;
@@ -2873,7 +2897,6 @@ static ssize_t conn_write_protected_ack_pkt(ngtcp2_conn *conn, uint8_t *dest,
   spktlen = conn_write_single_frame_pkt(conn, dest, destlen, NGTCP2_PKT_SHORT,
                                         &conn->dcid.current.cid, ackfr,
                                         NGTCP2_RTB_FLAG_NONE, ts);
-  ngtcp2_mem_free(conn->mem, ackfr);
   if (spktlen < 0) {
     return spktlen;
   }
@@ -2924,7 +2947,7 @@ static ssize_t conn_write_probe_ping(ngtcp2_conn *conn, uint8_t *dest,
   ngtcp2_ppe ppe;
   ngtcp2_pkt_hd hd;
   ngtcp2_pktns *pktns = &conn->pktns;
-  ngtcp2_crypto_ctx ctx;
+  ngtcp2_crypto_cc cc;
   ngtcp2_frame_chain *frc = NULL;
   ngtcp2_rtb_entry *ent;
   ngtcp2_frame *ackfr = NULL, lfr;
@@ -2933,12 +2956,14 @@ static ssize_t conn_write_probe_ping(ngtcp2_conn *conn, uint8_t *dest,
 
   assert(pktns->crypto.tx.ckm);
 
-  ctx.aead_overhead = conn->crypto.aead_overhead;
-  ctx.encrypt = conn->callbacks.encrypt;
-  ctx.hp_mask = conn->callbacks.hp_mask;
-  ctx.ckm = pktns->crypto.tx.ckm;
-  ctx.hp = pktns->crypto.tx.hp;
-  ctx.user_data = conn;
+  cc.aead_overhead = conn->crypto.aead_overhead;
+  cc.encrypt = conn->callbacks.encrypt;
+  cc.hp_mask = conn->callbacks.hp_mask;
+  cc.aead = pktns->crypto.ctx.aead;
+  cc.hp = pktns->crypto.ctx.hp;
+  cc.ckm = pktns->crypto.tx.ckm;
+  cc.hp_key = pktns->crypto.tx.hp_key;
+  cc.user_data = conn;
 
   ngtcp2_pkt_hd_init(
       &hd,
@@ -2949,7 +2974,7 @@ static ssize_t conn_write_probe_ping(ngtcp2_conn *conn, uint8_t *dest,
       pktns->tx.last_pkt_num + 1, pktns_select_pkt_numlen(pktns), conn->version,
       0);
 
-  ngtcp2_ppe_init(&ppe, dest, destlen, &ctx);
+  ngtcp2_ppe_init(&ppe, dest, destlen, &cc);
 
   rv = ngtcp2_ppe_encode_hd(&ppe, &hd);
   if (rv != 0) {
@@ -2992,8 +3017,6 @@ static ssize_t conn_write_probe_ping(ngtcp2_conn *conn, uint8_t *dest,
       ngtcp2_acktr_commit_ack(&pktns->acktr);
       ngtcp2_acktr_add_ack(&pktns->acktr, hd.pkt_num, ackfr->ack.largest_ack);
     }
-    ngtcp2_mem_free(conn->mem, ackfr);
-    ackfr = NULL;
   }
 
   lfr.type = NGTCP2_FRAME_PADDING;
@@ -3019,6 +3042,10 @@ static ssize_t conn_write_probe_ping(ngtcp2_conn *conn, uint8_t *dest,
   if (rv != 0) {
     ngtcp2_rtb_entry_del(ent, conn->mem);
     return rv;
+  }
+
+  if (conn->flags & NGTCP2_CONN_FLAG_RESTART_IDLE_TIMER_ON_WRITE) {
+    conn_restart_timer_on_write(conn, ts);
   }
 
   ++pktns->tx.last_pkt_num;
@@ -3721,7 +3748,7 @@ static int conn_buffer_pkt(ngtcp2_conn *conn, ngtcp2_pktns *pktns,
 static int conn_ensure_decrypt_buffer(ngtcp2_conn *conn, size_t n) {
   uint8_t *nbuf;
   size_t len;
-  ngtcp2_array *decrypt_buf = &conn->crypto.decrypt_buf;
+  ngtcp2_vec *decrypt_buf = &conn->crypto.decrypt_buf;
 
   if (decrypt_buf->len >= n) {
     return 0;
@@ -3743,11 +3770,10 @@ static int conn_ensure_decrypt_buffer(ngtcp2_conn *conn, size_t n) {
 /*
  * conn_decrypt_pkt decrypts the data pointed by |payload| whose
  * length is |payloadlen|, and writes plaintext data to the buffer
- * pointed by |dest| whose capacity is |destlen|.  The buffer pointed
- * by |ad| is the Additional Data, and its length is |adlen|.
- * |pkt_num| is used to create a nonce.  |ckm| is the cryptographic
- * key, and iv to use.  |decrypt| is a callback function which
- * actually decrypts a packet.
+ * pointed by |dest|.  The buffer pointed by |ad| is the Additional
+ * Data, and its length is |adlen|.  |pkt_num| is used to create a
+ * nonce.  |ckm| is the cryptographic key, and iv to use.  |decrypt|
+ * is a callback function which actually decrypts a packet.
  *
  * This function returns the number of bytes written in |dest| if it
  * succeeds, or one of the following negative error codes:
@@ -3758,30 +3784,32 @@ static int conn_ensure_decrypt_buffer(ngtcp2_conn *conn, size_t n) {
  *     TLS backend failed to decrypt data.
  */
 static ssize_t conn_decrypt_pkt(ngtcp2_conn *conn, uint8_t *dest,
-                                size_t destlen, const uint8_t *payload,
-                                size_t payloadlen, const uint8_t *ad,
-                                size_t adlen, int64_t pkt_num,
-                                ngtcp2_crypto_km *ckm, ngtcp2_decrypt decrypt) {
+                                const ngtcp2_crypto_aead *aead,
+                                const uint8_t *payload, size_t payloadlen,
+                                const uint8_t *ad, size_t adlen,
+                                int64_t pkt_num, ngtcp2_crypto_km *ckm,
+                                ngtcp2_decrypt decrypt, size_t aead_overhead) {
   /* TODO nonce is limited to 64 bytes. */
   uint8_t nonce[64];
-  ssize_t nwrite;
+  int rv;
 
   assert(sizeof(nonce) >= ckm->iv.len);
 
   ngtcp2_crypto_create_nonce(nonce, ckm->iv.base, ckm->iv.len, pkt_num);
 
-  nwrite =
-      decrypt(conn, dest, destlen, payload, payloadlen, ckm->key.base,
-              ckm->key.len, nonce, ckm->iv.len, ad, adlen, conn->user_data);
+  rv = decrypt(conn, dest, aead, payload, payloadlen, ckm->key.base, nonce,
+               ckm->iv.len, ad, adlen, conn->user_data);
 
-  if (nwrite < 0) {
-    if (nwrite == NGTCP2_ERR_TLS_DECRYPT) {
-      return nwrite;
+  if (rv != 0) {
+    if (rv == NGTCP2_ERR_TLS_DECRYPT) {
+      return rv;
     }
     return NGTCP2_ERR_CALLBACK_FAILURE;
   }
 
-  return nwrite;
+  assert(payloadlen >= aead_overhead);
+
+  return (ssize_t)(payloadlen - aead_overhead);
 }
 
 /*
@@ -3801,15 +3829,16 @@ static ssize_t conn_decrypt_pkt(ngtcp2_conn *conn, uint8_t *dest,
  */
 static ssize_t conn_decrypt_hp(ngtcp2_conn *conn, ngtcp2_pkt_hd *hd,
                                uint8_t *dest, size_t destlen,
+                               const ngtcp2_crypto_cipher *hp,
                                const uint8_t *pkt, size_t pktlen,
                                size_t pkt_num_offset, ngtcp2_crypto_km *ckm,
-                               const ngtcp2_vec *hp, ngtcp2_hp_mask hp_mask,
+                               const ngtcp2_vec *hp_key, ngtcp2_hp_mask hp_mask,
                                size_t aead_overhead) {
-  ssize_t nwrite;
   size_t sample_offset;
   uint8_t *p = dest;
-  uint8_t mask[NGTCP2_HP_SAMPLELEN];
+  uint8_t mask[NGTCP2_HP_MASKLEN];
   size_t i;
+  int rv;
 
   assert(hp_mask);
   assert(ckm);
@@ -3824,9 +3853,9 @@ static ssize_t conn_decrypt_hp(ngtcp2_conn *conn, ngtcp2_pkt_hd *hd,
 
   sample_offset = pkt_num_offset + 4;
 
-  nwrite = hp_mask(conn, mask, sizeof(mask), hp->base, hp->len,
-                   pkt + sample_offset, NGTCP2_HP_SAMPLELEN, conn->user_data);
-  if (nwrite < NGTCP2_HP_MASKLEN) {
+  rv = hp_mask(conn, mask, hp, hp_key->base, pkt + sample_offset,
+               conn->user_data);
+  if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
   }
 
@@ -3894,8 +3923,15 @@ static int conn_emit_pending_crypto_data(ngtcp2_conn *conn,
  * conn_recv_connection_close is called when CONNECTION_CLOSE or
  * APPLICATION_CLOSE frame is received.
  */
-static void conn_recv_connection_close(ngtcp2_conn *conn) {
+static void conn_recv_connection_close(ngtcp2_conn *conn,
+                                       ngtcp2_connection_close *fr) {
   conn->state = NGTCP2_CS_DRAINING;
+  if (fr->type == NGTCP2_FRAME_CONNECTION_CLOSE) {
+    conn->rx.ccec.type = NGTCP2_CONNECTION_CLOSE_ERROR_CODE_TYPE_TRANSPORT;
+  } else {
+    conn->rx.ccec.type = NGTCP2_CONNECTION_CLOSE_ERROR_CODE_TYPE_APPLICATION;
+  }
+  conn->rx.ccec.error_code = fr->error_code;
 }
 
 static void conn_recv_path_challenge(ngtcp2_conn *conn,
@@ -4129,8 +4165,10 @@ static ssize_t conn_recv_handshake_pkt(ngtcp2_conn *conn,
   size_t payloadlen;
   ssize_t nwrite;
   uint8_t plain_hdpkt[1500];
+  ngtcp2_crypto_aead *aead;
+  ngtcp2_crypto_cipher *hp;
   ngtcp2_crypto_km *ckm;
-  const ngtcp2_vec *hp;
+  const ngtcp2_vec *hp_key;
   ngtcp2_hp_mask hp_mask;
   ngtcp2_decrypt decrypt;
   size_t aead_overhead;
@@ -4314,8 +4352,6 @@ static ssize_t conn_recv_handshake_pkt(ngtcp2_conn *conn,
     }
 
     pktns = &conn->in_pktns;
-    hp_mask = conn->callbacks.in_hp_mask;
-    decrypt = conn->callbacks.in_decrypt;
     aead_overhead = NGTCP2_INITIAL_AEAD_OVERHEAD;
     crypto = &conn->in_pktns.crypto.strm;
     crypto_level = NGTCP2_CRYPTO_LEVEL_INITIAL;
@@ -4341,8 +4377,6 @@ static ssize_t conn_recv_handshake_pkt(ngtcp2_conn *conn,
     }
 
     pktns = &conn->hs_pktns;
-    hp_mask = conn->callbacks.hp_mask;
-    decrypt = conn->callbacks.decrypt;
     aead_overhead = conn->crypto.aead_overhead;
     crypto = &conn->hs_pktns.crypto.strm;
     crypto_level = NGTCP2_CRYPTO_LEVEL_HANDSHAKE;
@@ -4355,16 +4389,20 @@ static ssize_t conn_recv_handshake_pkt(ngtcp2_conn *conn,
     return (ssize_t)pktlen;
   }
 
+  hp_mask = conn->callbacks.hp_mask;
+  decrypt = conn->callbacks.decrypt;
+  aead = &pktns->crypto.ctx.aead;
+  hp = &pktns->crypto.ctx.hp;
   ckm = pktns->crypto.rx.ckm;
-  hp = pktns->crypto.rx.hp;
+  hp_key = pktns->crypto.rx.hp_key;
 
   assert(ckm);
   assert(hp_mask);
   assert(decrypt);
 
-  nwrite =
-      conn_decrypt_hp(conn, &hd, plain_hdpkt, sizeof(plain_hdpkt), pkt, pktlen,
-                      (size_t)nread, ckm, hp, hp_mask, aead_overhead);
+  nwrite = conn_decrypt_hp(conn, &hd, plain_hdpkt, sizeof(plain_hdpkt), hp, pkt,
+                           pktlen, (size_t)nread, ckm, hp_key, hp_mask,
+                           aead_overhead);
   if (nwrite < 0) {
     if (ngtcp2_err_is_fatal((int)nwrite)) {
       return nwrite;
@@ -4409,9 +4447,9 @@ static ssize_t conn_recv_handshake_pkt(ngtcp2_conn *conn,
     return rv;
   }
 
-  nwrite = conn_decrypt_pkt(conn, conn->crypto.decrypt_buf.base, payloadlen,
-                            payload, payloadlen, plain_hdpkt, hdpktlen,
-                            hd.pkt_num, ckm, decrypt);
+  nwrite = conn_decrypt_pkt(conn, conn->crypto.decrypt_buf.base, aead, payload,
+                            payloadlen, plain_hdpkt, hdpktlen, hd.pkt_num, ckm,
+                            decrypt, aead_overhead);
   if (nwrite < 0) {
     if (ngtcp2_err_is_fatal((int)nwrite)) {
       return nwrite;
@@ -4508,13 +4546,13 @@ static ssize_t conn_recv_handshake_pkt(ngtcp2_conn *conn,
       require_ack = 1;
       break;
     case NGTCP2_FRAME_CONNECTION_CLOSE:
-      conn_recv_connection_close(conn);
+      conn_recv_connection_close(conn, &fr->connection_close);
       break;
     case NGTCP2_FRAME_CONNECTION_CLOSE_APP:
       if (fr->type != NGTCP2_PKT_HANDSHAKE) {
         return NGTCP2_ERR_PROTO;
       }
-      conn_recv_connection_close(conn);
+      conn_recv_connection_close(conn, &fr->connection_close);
       break;
     default:
       return NGTCP2_ERR_PROTO;
@@ -4551,6 +4589,8 @@ static ssize_t conn_recv_handshake_pkt(ngtcp2_conn *conn,
   if (rv != 0) {
     return rv;
   }
+
+  conn_restart_timer_on_read(conn, ts);
 
   return conn->state == NGTCP2_CS_DRAINING ? NGTCP2_ERR_DRAINING
                                            : (ssize_t)pktlen;
@@ -5455,7 +5495,7 @@ static int conn_recv_delayed_handshake_pkt(ngtcp2_conn *conn,
       if (hd->type != NGTCP2_PKT_HANDSHAKE) {
         break;
       }
-      conn_recv_connection_close(conn);
+      conn_recv_connection_close(conn, &fr->connection_close);
       break;
     case NGTCP2_FRAME_CRYPTO:
       require_ack = 1;
@@ -5474,8 +5514,14 @@ static int conn_recv_delayed_handshake_pkt(ngtcp2_conn *conn,
     ngtcp2_acktr_immediate_ack(&pktns->acktr);
   }
 
-  return ngtcp2_conn_sched_ack(conn, &pktns->acktr, hd->pkt_num, require_ack,
-                               ts);
+  rv = ngtcp2_conn_sched_ack(conn, &pktns->acktr, hd->pkt_num, require_ack, ts);
+  if (rv != 0) {
+    return rv;
+  }
+
+  conn_restart_timer_on_read(conn, ts);
+
+  return 0;
 }
 
 /*
@@ -5914,8 +5960,10 @@ static ssize_t conn_recv_pkt(ngtcp2_conn *conn, const ngtcp2_path *path,
   ngtcp2_max_frame mfr;
   ngtcp2_frame *fr = &mfr.fr;
   int require_ack = 0;
+  ngtcp2_crypto_aead *aead;
+  ngtcp2_crypto_cipher *hp;
   ngtcp2_crypto_km *ckm;
-  const ngtcp2_vec *hp;
+  const ngtcp2_vec *hp_key;
   uint8_t plain_hdpkt[1500];
   ngtcp2_hp_mask hp_mask;
   ngtcp2_decrypt decrypt;
@@ -5957,7 +6005,7 @@ static ssize_t conn_recv_pkt(ngtcp2_conn *conn, const ngtcp2_path *path,
     case NGTCP2_PKT_HANDSHAKE:
       pktns = &conn->hs_pktns;
       ckm = pktns->crypto.rx.ckm;
-      hp = pktns->crypto.rx.hp;
+      hp_key = pktns->crypto.rx.hp_key;
       hp_mask = conn->callbacks.hp_mask;
       decrypt = conn->callbacks.decrypt;
       aead_overhead = conn->crypto.aead_overhead;
@@ -5969,7 +6017,7 @@ static ssize_t conn_recv_pkt(ngtcp2_conn *conn, const ngtcp2_path *path,
 
       pktns = &conn->pktns;
       ckm = conn->early.ckm;
-      hp = conn->early.hp;
+      hp_key = conn->early.hp_key;
       hp_mask = conn->callbacks.hp_mask;
       decrypt = conn->callbacks.decrypt;
       aead_overhead = conn->crypto.aead_overhead;
@@ -5990,15 +6038,18 @@ static ssize_t conn_recv_pkt(ngtcp2_conn *conn, const ngtcp2_path *path,
 
     pktns = &conn->pktns;
     ckm = pktns->crypto.rx.ckm;
-    hp = pktns->crypto.rx.hp;
+    hp_key = pktns->crypto.rx.hp_key;
     hp_mask = conn->callbacks.hp_mask;
     decrypt = conn->callbacks.decrypt;
     aead_overhead = conn->crypto.aead_overhead;
   }
 
-  nwrite =
-      conn_decrypt_hp(conn, &hd, plain_hdpkt, sizeof(plain_hdpkt), pkt, pktlen,
-                      (size_t)nread, ckm, hp, hp_mask, aead_overhead);
+  aead = &pktns->crypto.ctx.aead;
+  hp = &pktns->crypto.ctx.hp;
+
+  nwrite = conn_decrypt_hp(conn, &hd, plain_hdpkt, sizeof(plain_hdpkt), hp, pkt,
+                           pktlen, (size_t)nread, ckm, hp_key, hp_mask,
+                           aead_overhead);
   if (nwrite < 0) {
     if (ngtcp2_err_is_fatal((int)nwrite)) {
       return nwrite;
@@ -6116,9 +6167,9 @@ static ssize_t conn_recv_pkt(ngtcp2_conn *conn, const ngtcp2_path *path,
     }
   }
 
-  nwrite = conn_decrypt_pkt(conn, conn->crypto.decrypt_buf.base, payloadlen,
-                            payload, payloadlen, plain_hdpkt, hdpktlen,
-                            hd.pkt_num, ckm, decrypt);
+  nwrite = conn_decrypt_pkt(conn, conn->crypto.decrypt_buf.base, aead, payload,
+                            payloadlen, plain_hdpkt, hdpktlen, hd.pkt_num, ckm,
+                            decrypt, aead_overhead);
 
   if (force_decrypt_failure) {
     nwrite = NGTCP2_ERR_TLS_DECRYPT;
@@ -6285,7 +6336,7 @@ static ssize_t conn_recv_pkt(ngtcp2_conn *conn, const ngtcp2_path *path,
       break;
     case NGTCP2_FRAME_CONNECTION_CLOSE:
     case NGTCP2_FRAME_CONNECTION_CLOSE_APP:
-      conn_recv_connection_close(conn);
+      conn_recv_connection_close(conn, &fr->connection_close);
       break;
     case NGTCP2_FRAME_PING:
       non_probing_pkt = 1;
@@ -6368,6 +6419,8 @@ static ssize_t conn_recv_pkt(ngtcp2_conn *conn, const ngtcp2_path *path,
   if (rv != 0) {
     return rv;
   }
+
+  conn_restart_timer_on_read(conn, ts);
 
   return (ssize_t)pktlen;
 }
@@ -7063,6 +7116,12 @@ ssize_t ngtcp2_conn_client_write_handshake(ngtcp2_conn *conn, uint8_t *dest,
       early_datalen =
           ngtcp2_min(early_datalen, conn->tx.max_offset - conn->tx.offset) +
           NGTCP2_STREAM_OVERHEAD;
+
+      if (flags & NGTCP2_WRITE_STREAM_FLAG_MORE) {
+        wflags |= NGTCP2_WRITE_PKT_FLAG_STREAM_MORE;
+      }
+    } else {
+      strm = NULL;
     }
   }
 
@@ -7090,9 +7149,6 @@ ssize_t ngtcp2_conn_client_write_handshake(ngtcp2_conn *conn, uint8_t *dest,
 
   if (spktlen && was_client_initial) {
     wflags |= NGTCP2_WRITE_PKT_FLAG_REQUIRE_PADDING;
-  }
-  if (flags & NGTCP2_WRITE_STREAM_FLAG_MORE) {
-    wflags |= NGTCP2_WRITE_PKT_FLAG_STREAM_MORE;
   }
 
   cwnd = conn_cwnd_left(conn);
@@ -7196,99 +7252,91 @@ size_t ngtcp2_conn_get_aead_overhead(ngtcp2_conn *conn) {
   return conn->crypto.aead_overhead;
 }
 
-int ngtcp2_conn_install_initial_tx_keys(ngtcp2_conn *conn, const uint8_t *key,
-                                        size_t keylen, const uint8_t *iv,
-                                        size_t ivlen, const uint8_t *pn,
-                                        size_t pnlen) {
+int ngtcp2_conn_install_initial_key(ngtcp2_conn *conn, const uint8_t *rx_key,
+                                    const uint8_t *rx_iv,
+                                    const uint8_t *rx_hp_key,
+                                    const uint8_t *tx_key, const uint8_t *tx_iv,
+                                    const uint8_t *tx_hp_key, size_t keylen,
+                                    size_t ivlen) {
   ngtcp2_pktns *pktns = &conn->in_pktns;
   int rv;
 
-  if (pktns->crypto.tx.hp) {
-    ngtcp2_vec_del(pktns->crypto.tx.hp, conn->mem);
-    pktns->crypto.tx.hp = NULL;
+  if (pktns->crypto.rx.hp_key) {
+    ngtcp2_vec_del(pktns->crypto.rx.hp_key, conn->mem);
+    pktns->crypto.rx.hp_key = NULL;
+  }
+  if (pktns->crypto.rx.ckm) {
+    ngtcp2_crypto_km_del(pktns->crypto.rx.ckm, conn->mem);
+    pktns->crypto.rx.ckm = NULL;
+  }
+  if (pktns->crypto.tx.hp_key) {
+    ngtcp2_vec_del(pktns->crypto.tx.hp_key, conn->mem);
+    pktns->crypto.tx.hp_key = NULL;
   }
   if (pktns->crypto.tx.ckm) {
     ngtcp2_crypto_km_del(pktns->crypto.tx.ckm, conn->mem);
     pktns->crypto.tx.ckm = NULL;
   }
 
-  rv = ngtcp2_crypto_km_new(&pktns->crypto.tx.ckm, key, keylen, iv, ivlen,
+  rv = ngtcp2_crypto_km_new(&pktns->crypto.rx.ckm, rx_key, keylen, rx_iv, ivlen,
                             conn->mem);
   if (rv != 0) {
     return rv;
   }
 
-  return ngtcp2_vec_new(&pktns->crypto.tx.hp, pn, pnlen, conn->mem);
-}
-
-int ngtcp2_conn_install_initial_rx_keys(ngtcp2_conn *conn, const uint8_t *key,
-                                        size_t keylen, const uint8_t *iv,
-                                        size_t ivlen, const uint8_t *pn,
-                                        size_t pnlen) {
-  ngtcp2_pktns *pktns = &conn->in_pktns;
-  int rv;
-
-  if (pktns->crypto.rx.hp) {
-    ngtcp2_vec_del(pktns->crypto.rx.hp, conn->mem);
-    pktns->crypto.rx.hp = NULL;
-  }
-  if (pktns->crypto.rx.ckm) {
-    ngtcp2_crypto_km_del(pktns->crypto.rx.ckm, conn->mem);
-    pktns->crypto.rx.ckm = NULL;
+  rv = ngtcp2_vec_new(&pktns->crypto.rx.hp_key, rx_hp_key, keylen, conn->mem);
+  if (rv != 0) {
+    return rv;
   }
 
-  rv = ngtcp2_crypto_km_new(&pktns->crypto.rx.ckm, key, keylen, iv, ivlen,
+  rv = ngtcp2_crypto_km_new(&pktns->crypto.tx.ckm, tx_key, keylen, tx_iv, ivlen,
                             conn->mem);
   if (rv != 0) {
     return rv;
   }
 
-  return ngtcp2_vec_new(&pktns->crypto.rx.hp, pn, pnlen, conn->mem);
+  return ngtcp2_vec_new(&pktns->crypto.tx.hp_key, tx_hp_key, keylen, conn->mem);
 }
 
-int ngtcp2_conn_install_handshake_tx_keys(ngtcp2_conn *conn, const uint8_t *key,
-                                          size_t keylen, const uint8_t *iv,
-                                          size_t ivlen, const uint8_t *pn,
-                                          size_t pnlen) {
+int ngtcp2_conn_install_handshake_key(
+    ngtcp2_conn *conn, const uint8_t *rx_key, const uint8_t *rx_iv,
+    const uint8_t *rx_hp_key, const uint8_t *tx_key, const uint8_t *tx_iv,
+    const uint8_t *tx_hp_key, size_t keylen, size_t ivlen) {
   ngtcp2_pktns *pktns = &conn->hs_pktns;
   int rv;
 
-  assert(!pktns->crypto.tx.hp && !pktns->crypto.tx.ckm);
+  assert(!pktns->crypto.rx.hp_key);
+  assert(!pktns->crypto.rx.ckm);
+  assert(!pktns->crypto.tx.hp_key);
+  assert(!pktns->crypto.tx.ckm);
 
-  rv = ngtcp2_crypto_km_new(&pktns->crypto.tx.ckm, key, keylen, iv, ivlen,
+  rv = ngtcp2_crypto_km_new(&pktns->crypto.rx.ckm, rx_key, keylen, rx_iv, ivlen,
                             conn->mem);
   if (rv != 0) {
     return rv;
   }
 
-  return ngtcp2_vec_new(&pktns->crypto.tx.hp, pn, pnlen, conn->mem);
-}
+  rv = ngtcp2_vec_new(&pktns->crypto.rx.hp_key, rx_hp_key, keylen, conn->mem);
+  if (rv != 0) {
+    return rv;
+  }
 
-int ngtcp2_conn_install_handshake_rx_keys(ngtcp2_conn *conn, const uint8_t *key,
-                                          size_t keylen, const uint8_t *iv,
-                                          size_t ivlen, const uint8_t *pn,
-                                          size_t pnlen) {
-  ngtcp2_pktns *pktns = &conn->hs_pktns;
-  int rv;
-
-  assert(!pktns->crypto.rx.hp && !pktns->crypto.rx.ckm);
-
-  rv = ngtcp2_crypto_km_new(&pktns->crypto.rx.ckm, key, keylen, iv, ivlen,
+  rv = ngtcp2_crypto_km_new(&pktns->crypto.tx.ckm, tx_key, keylen, tx_iv, ivlen,
                             conn->mem);
   if (rv != 0) {
     return rv;
   }
 
-  return ngtcp2_vec_new(&pktns->crypto.rx.hp, pn, pnlen, conn->mem);
+  return ngtcp2_vec_new(&pktns->crypto.tx.hp_key, tx_hp_key, keylen, conn->mem);
 }
 
-int ngtcp2_conn_install_early_keys(ngtcp2_conn *conn, const uint8_t *key,
-                                   size_t keylen, const uint8_t *iv,
-                                   size_t ivlen, const uint8_t *pn,
-                                   size_t pnlen) {
+int ngtcp2_conn_install_early_key(ngtcp2_conn *conn, const uint8_t *key,
+                                  const uint8_t *iv, const uint8_t *hp_key,
+                                  size_t keylen, size_t ivlen) {
   int rv;
 
-  assert(!conn->early.hp && !conn->early.ckm);
+  assert(!conn->early.hp_key);
+  assert(!conn->early.ckm);
 
   rv =
       ngtcp2_crypto_km_new(&conn->early.ckm, key, keylen, iv, ivlen, conn->mem);
@@ -7296,41 +7344,40 @@ int ngtcp2_conn_install_early_keys(ngtcp2_conn *conn, const uint8_t *key,
     return rv;
   }
 
-  return ngtcp2_vec_new(&conn->early.hp, pn, pnlen, conn->mem);
+  return ngtcp2_vec_new(&conn->early.hp_key, hp_key, keylen, conn->mem);
 }
 
-int ngtcp2_conn_install_tx_keys(ngtcp2_conn *conn, const uint8_t *key,
-                                size_t keylen, const uint8_t *iv, size_t ivlen,
-                                const uint8_t *pn, size_t pnlen) {
+int ngtcp2_conn_install_key(ngtcp2_conn *conn, const uint8_t *rx_key,
+                            const uint8_t *rx_iv, const uint8_t *rx_hp_key,
+                            const uint8_t *tx_key, const uint8_t *tx_iv,
+                            const uint8_t *tx_hp_key, size_t keylen,
+                            size_t ivlen) {
   ngtcp2_pktns *pktns = &conn->pktns;
   int rv;
 
-  assert(!pktns->crypto.tx.hp && !pktns->crypto.tx.ckm);
+  assert(!pktns->crypto.rx.hp_key);
+  assert(!pktns->crypto.rx.ckm);
+  assert(!pktns->crypto.tx.hp_key);
+  assert(!pktns->crypto.tx.ckm);
 
-  rv = ngtcp2_crypto_km_new(&pktns->crypto.tx.ckm, key, keylen, iv, ivlen,
+  rv = ngtcp2_crypto_km_new(&pktns->crypto.rx.ckm, rx_key, keylen, rx_iv, ivlen,
                             conn->mem);
   if (rv != 0) {
     return rv;
   }
 
-  return ngtcp2_vec_new(&pktns->crypto.tx.hp, pn, pnlen, conn->mem);
-}
+  rv = ngtcp2_vec_new(&pktns->crypto.rx.hp_key, rx_hp_key, keylen, conn->mem);
+  if (rv != 0) {
+    return rv;
+  }
 
-int ngtcp2_conn_install_rx_keys(ngtcp2_conn *conn, const uint8_t *key,
-                                size_t keylen, const uint8_t *iv, size_t ivlen,
-                                const uint8_t *pn, size_t pnlen) {
-  ngtcp2_pktns *pktns = &conn->pktns;
-  int rv;
-
-  assert(!pktns->crypto.rx.hp && !pktns->crypto.rx.ckm);
-
-  rv = ngtcp2_crypto_km_new(&pktns->crypto.rx.ckm, key, keylen, iv, ivlen,
+  rv = ngtcp2_crypto_km_new(&pktns->crypto.tx.ckm, tx_key, keylen, tx_iv, ivlen,
                             conn->mem);
   if (rv != 0) {
     return rv;
   }
 
-  rv = ngtcp2_vec_new(&pktns->crypto.rx.hp, pn, pnlen, conn->mem);
+  rv = ngtcp2_vec_new(&pktns->crypto.tx.hp_key, tx_hp_key, keylen, conn->mem);
   if (rv != 0) {
     return rv;
   }
@@ -7342,48 +7389,37 @@ int ngtcp2_conn_install_rx_keys(ngtcp2_conn *conn, const uint8_t *key,
   return 0;
 }
 
-int ngtcp2_conn_update_tx_key(ngtcp2_conn *conn, const uint8_t *key,
-                              size_t keylen, const uint8_t *iv, size_t ivlen) {
+int ngtcp2_conn_update_key(ngtcp2_conn *conn, const uint8_t *rx_key,
+                           const uint8_t *rx_iv, const uint8_t *tx_key,
+                           const uint8_t *tx_iv, size_t keylen, size_t ivlen) {
   ngtcp2_pktns *pktns = &conn->pktns;
   int rv;
 
   if ((conn->flags & NGTCP2_CONN_FLAG_WAIT_FOR_REMOTE_KEY_UPDATE) ||
+      conn->crypto.key_update.new_rx_ckm ||
       conn->crypto.key_update.new_tx_ckm) {
     return NGTCP2_ERR_INVALID_STATE;
   }
 
-  rv = ngtcp2_crypto_km_new(&conn->crypto.key_update.new_tx_ckm, key, keylen,
-                            iv, ivlen, conn->mem);
-  if (rv != 0) {
-    return rv;
-  }
-
-  if (!(pktns->crypto.tx.ckm->flags & NGTCP2_CRYPTO_KM_FLAG_KEY_PHASE_ONE)) {
-    conn->crypto.key_update.new_tx_ckm->flags |=
-        NGTCP2_CRYPTO_KM_FLAG_KEY_PHASE_ONE;
-  }
-
-  return 0;
-}
-
-int ngtcp2_conn_update_rx_key(ngtcp2_conn *conn, const uint8_t *key,
-                              size_t keylen, const uint8_t *iv, size_t ivlen) {
-  ngtcp2_pktns *pktns = &conn->pktns;
-  int rv;
-
-  if ((conn->flags & NGTCP2_CONN_FLAG_WAIT_FOR_REMOTE_KEY_UPDATE) ||
-      conn->crypto.key_update.new_rx_ckm) {
-    return NGTCP2_ERR_INVALID_STATE;
-  }
-
-  rv = ngtcp2_crypto_km_new(&conn->crypto.key_update.new_rx_ckm, key, keylen,
-                            iv, ivlen, conn->mem);
+  rv = ngtcp2_crypto_km_new(&conn->crypto.key_update.new_rx_ckm, rx_key, keylen,
+                            rx_iv, ivlen, conn->mem);
   if (rv != 0) {
     return rv;
   }
 
   if (!(pktns->crypto.rx.ckm->flags & NGTCP2_CRYPTO_KM_FLAG_KEY_PHASE_ONE)) {
     conn->crypto.key_update.new_rx_ckm->flags |=
+        NGTCP2_CRYPTO_KM_FLAG_KEY_PHASE_ONE;
+  }
+
+  rv = ngtcp2_crypto_km_new(&conn->crypto.key_update.new_tx_ckm, tx_key, keylen,
+                            tx_iv, ivlen, conn->mem);
+  if (rv != 0) {
+    return rv;
+  }
+
+  if (!(pktns->crypto.tx.ckm->flags & NGTCP2_CRYPTO_KM_FLAG_KEY_PHASE_ONE)) {
+    conn->crypto.key_update.new_tx_ckm->flags |=
         NGTCP2_CRYPTO_KM_FLAG_KEY_PHASE_ONE;
   }
 
@@ -7499,6 +7535,7 @@ void ngtcp2_conn_cancel_expired_ack_delay_timer(ngtcp2_conn *conn,
 static void
 settings_copy_from_transport_params(ngtcp2_settings *dest,
                                     const ngtcp2_transport_params *src) {
+  memset(dest, 0, sizeof(*dest));
   dest->max_stream_data_bidi_local = src->initial_max_stream_data_bidi_local;
   dest->max_stream_data_bidi_remote = src->initial_max_stream_data_bidi_remote;
   dest->max_stream_data_uni = src->initial_max_stream_data_uni;
@@ -7530,6 +7567,7 @@ settings_copy_from_transport_params(ngtcp2_settings *dest,
  */
 static void transport_params_copy_from_settings(ngtcp2_transport_params *dest,
                                                 const ngtcp2_settings *src) {
+  memset(dest, 0, sizeof(*dest));
   dest->initial_max_stream_data_bidi_local = src->max_stream_data_bidi_local;
   dest->initial_max_stream_data_bidi_remote = src->max_stream_data_bidi_remote;
   dest->initial_max_stream_data_uni = src->max_stream_data_uni;
@@ -7608,6 +7646,15 @@ int ngtcp2_conn_set_remote_transport_params(
   conn->flags |= NGTCP2_CONN_FLAG_TRANSPORT_PARAM_RECVED;
 
   return 0;
+}
+
+void ngtcp2_conn_get_remote_transport_params(ngtcp2_conn *conn,
+                                             ngtcp2_transport_params *params) {
+  if (conn->pktns.crypto.rx.ckm) {
+    transport_params_copy_from_settings(params, &conn->remote.settings);
+  } else {
+    transport_params_copy_from_settings(params, &conn->remote.pending_settings);
+  }
 }
 
 void ngtcp2_conn_set_early_remote_transport_params(
@@ -7737,11 +7784,10 @@ ssize_t ngtcp2_conn_writev_stream(ngtcp2_conn *conn, ngtcp2_path *path,
   uint64_t cwnd;
   ngtcp2_pktns *pktns = &conn->pktns;
   size_t origlen = destlen;
-  size_t server_hs_tx_left;
-  ngtcp2_rcvry_stat *rcs = &conn->rcs;
   int rv;
   uint8_t wflags = NGTCP2_WRITE_PKT_FLAG_NONE;
   int ppe_pending = (conn->flags & NGTCP2_CONN_FLAG_PPE_PENDING) != 0;
+  ssize_t res = 0;
 
   conn->log.last_ts = ts;
 
@@ -7749,22 +7795,28 @@ ssize_t ngtcp2_conn_writev_stream(ngtcp2_conn *conn, ngtcp2_path *path,
     *pdatalen = -1;
   }
 
+  if (path) {
+    ngtcp2_path_copy(path, &conn->dcid.current.ps.path);
+  }
+
   switch (conn->state) {
   case NGTCP2_CS_CLIENT_INITIAL:
   case NGTCP2_CS_CLIENT_WAIT_HANDSHAKE:
   case NGTCP2_CS_CLIENT_TLS_HANDSHAKE_FAILED:
-    if (path) {
-      ngtcp2_path_copy(path, &conn->dcid.current.ps.path);
+    nwrite =
+        ngtcp2_conn_client_write_handshake(conn, dest, destlen, pdatalen, flags,
+                                           stream_id, fin, datav, datavcnt, ts);
+    if (nwrite < 0 || conn->state != NGTCP2_CS_POST_HANDSHAKE) {
+      return nwrite;
     }
-    return ngtcp2_conn_client_write_handshake(conn, dest, destlen, pdatalen,
-                                              flags, stream_id, fin, datav,
-                                              datavcnt, ts);
+    res = nwrite;
+    dest += nwrite;
+    destlen -= (size_t)nwrite;
+    /* Break here so that we can coalesces Short packets. */
+    break;
   case NGTCP2_CS_SERVER_INITIAL:
   case NGTCP2_CS_SERVER_WAIT_HANDSHAKE:
   case NGTCP2_CS_SERVER_TLS_HANDSHAKE_FAILED:
-    if (path) {
-      ngtcp2_path_copy(path, &conn->dcid.current.ps.path);
-    }
     if (!ppe_pending) {
       nwrite = ngtcp2_conn_write_handshake(conn, dest, destlen, ts);
       if (nwrite) {
@@ -7786,6 +7838,8 @@ ssize_t ngtcp2_conn_writev_stream(ngtcp2_conn *conn, ngtcp2_path *path,
     return 0;
   }
 
+  assert(pktns->crypto.tx.ckm);
+
   if (conn_check_pkt_num_exhausted(conn)) {
     return NGTCP2_ERR_PKT_NUM_EXHAUSTED;
   }
@@ -7804,74 +7858,91 @@ ssize_t ngtcp2_conn_writev_stream(ngtcp2_conn *conn, ngtcp2_path *path,
     if (strm->flags & NGTCP2_STRM_FLAG_SHUT_WR) {
       return NGTCP2_ERR_STREAM_SHUT_WR;
     }
-  }
 
-  if (path) {
-    ngtcp2_path_copy(path, &conn->dcid.current.ps.path);
-  }
-
-  if (!ppe_pending && conn->pv) {
-    nwrite = conn_write_path_challenge(conn, path, dest, destlen, ts);
-    if (nwrite) {
-      return nwrite;
+    if (flags & NGTCP2_WRITE_STREAM_FLAG_MORE) {
+      wflags |= NGTCP2_WRITE_PKT_FLAG_STREAM_MORE;
     }
   }
 
   cwnd = conn_cwnd_left(conn);
   destlen = ngtcp2_min(destlen, cwnd);
 
-  if (conn->server) {
-    server_hs_tx_left = conn_server_hs_tx_left(conn);
-    if (server_hs_tx_left == 0) {
-      assert(!ppe_pending);
-      if (rcs->loss_detection_timer) {
-        ngtcp2_log_info(&conn->log, NGTCP2_LOG_EVENT_RCV,
-                        "loss detection timer canceled");
-        rcs->loss_detection_timer = 0;
-      }
-      return 0;
-    }
-    destlen = ngtcp2_min(destlen, server_hs_tx_left);
+  if (ppe_pending) {
+    res = conn->pkt.hs_spktlen;
+    conn->pkt.hs_spktlen = 0;
+    /* dest and destlen have already been adjusted in ppe in the first
+       run.  They are adjusted for probe packet later. */
+    nwrite = conn_write_pkt(conn, dest, destlen, pdatalen, NGTCP2_PKT_SHORT,
+                            strm, fin, datav, datavcnt, wflags, ts);
+    goto fin;
   }
 
-  if (!ppe_pending) {
+  if (conn->pv) {
+    nwrite = conn_write_path_challenge(conn, path, dest, origlen, ts);
+    if (nwrite) {
+      goto fin;
+    }
+  }
+
+  if (res == 0) {
     if (conn_handshake_remnants_left(conn)) {
       nwrite = conn_write_handshake_pkts(conn, dest, destlen, 0, ts);
-      if (nwrite) {
+      if (nwrite < 0) {
         return nwrite;
       }
+      if (nwrite > 0) {
+        res = nwrite;
+        dest += nwrite;
+        destlen -= (size_t)nwrite;
+      }
     }
-    nwrite = conn_write_handshake_ack_pkts(conn, dest, origlen, ts);
-    if (nwrite) {
-      return nwrite;
+    if (res == 0) {
+      nwrite = conn_write_handshake_ack_pkts(conn, dest, origlen, ts);
+      if (nwrite < 0) {
+        return nwrite;
+      }
+      if (nwrite > 0) {
+        res = nwrite;
+        dest += nwrite;
+        if (destlen < (size_t)nwrite) {
+          destlen = 0;
+        } else {
+          destlen -= (size_t)nwrite;
+        }
+        origlen -= (size_t)nwrite;
+      }
     }
-  }
-
-  if (flags & NGTCP2_WRITE_STREAM_FLAG_MORE) {
-    wflags |= NGTCP2_WRITE_PKT_FLAG_STREAM_MORE;
-  }
-
-  assert(pktns->crypto.tx.ckm);
-
-  if (ppe_pending) {
-    return conn_write_pkt(conn, dest, destlen, pdatalen, NGTCP2_PKT_SHORT, strm,
-                          fin, datav, datavcnt, wflags, ts);
   }
 
   if (conn->rcs.probe_pkt_left) {
-    return conn_write_probe_pkt(conn, dest, origlen, pdatalen, strm, fin, datav,
-                                datavcnt, ts);
+    nwrite = conn_write_probe_pkt(conn, dest, origlen, pdatalen, strm, fin,
+                                  datav, datavcnt, ts);
+    goto fin;
   }
 
   nwrite = conn_write_pkt(conn, dest, destlen, pdatalen, NGTCP2_PKT_SHORT, strm,
                           fin, datav, datavcnt, wflags, ts);
-  if (nwrite < 0) {
+  if (nwrite) {
     assert(nwrite != NGTCP2_ERR_NOBUF);
-    return nwrite;
+    goto fin;
   }
-  if (!ppe_pending && nwrite == 0) {
+
+  if (res == 0) {
     return conn_write_protected_ack_pkt(conn, dest, origlen, ts);
   }
+
+fin:
+  conn->pkt.hs_spktlen = 0;
+
+  if (nwrite >= 0) {
+    return res + nwrite;
+  }
+  /* NGTCP2_CONN_FLAG_PPE_PENDING is set in conn_write_pkt above.
+     ppe_pending cannot be used here. */
+  if (conn->flags & NGTCP2_CONN_FLAG_PPE_PENDING) {
+    conn->pkt.hs_spktlen = res;
+  }
+
   return nwrite;
 }
 
@@ -8598,7 +8669,7 @@ uint64_t ngtcp2_conn_get_max_data_left(ngtcp2_conn *conn) {
   return conn->tx.max_offset - conn->tx.offset;
 }
 
-ngtcp2_duration ngtcp2_conn_get_idle_timeout(ngtcp2_conn *conn) {
+ngtcp2_tstamp ngtcp2_conn_get_idle_expiry(ngtcp2_conn *conn) {
   ngtcp2_duration trpto;
 
   if (conn->local.settings.idle_timeout == 0) {
@@ -8607,12 +8678,37 @@ ngtcp2_duration ngtcp2_conn_get_idle_timeout(ngtcp2_conn *conn) {
 
   trpto = 3 * conn_compute_pto(conn);
 
-  return ngtcp2_max(conn->local.settings.idle_timeout * NGTCP2_MILLISECONDS,
+  return conn->idle_ts +
+         ngtcp2_max(conn->local.settings.idle_timeout * NGTCP2_MILLISECONDS,
                     trpto);
 }
 
 ngtcp2_duration ngtcp2_conn_get_pto(ngtcp2_conn *conn) {
   return conn_compute_pto(conn);
+}
+
+void ngtcp2_conn_set_initial_crypto_ctx(ngtcp2_conn *conn,
+                                        const ngtcp2_crypto_ctx *ctx) {
+  conn->in_pktns.crypto.ctx = *ctx;
+}
+
+const ngtcp2_crypto_ctx *ngtcp2_conn_get_initial_crypto_ctx(ngtcp2_conn *conn) {
+  return &conn->in_pktns.crypto.ctx;
+}
+
+void ngtcp2_conn_set_crypto_ctx(ngtcp2_conn *conn,
+                                const ngtcp2_crypto_ctx *ctx) {
+  conn->hs_pktns.crypto.ctx = *ctx;
+  conn->pktns.crypto.ctx = *ctx;
+}
+
+const ngtcp2_crypto_ctx *ngtcp2_conn_get_crypto_ctx(ngtcp2_conn *conn) {
+  return &conn->pktns.crypto.ctx;
+}
+
+void ngtcp2_conn_get_connection_close_error_code(
+    ngtcp2_conn *conn, ngtcp2_connection_close_error_code *ccec) {
+  *ccec = conn->rx.ccec;
 }
 
 void ngtcp2_path_challenge_entry_init(ngtcp2_path_challenge_entry *pcent,

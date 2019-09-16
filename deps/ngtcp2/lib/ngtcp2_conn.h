@@ -183,6 +183,9 @@ typedef enum {
      NGTCP2_WRITE_STREAM_FLAG_MORE is used and the intermediate state
      of ngtcp2_ppe is stored in pkt struct of ngtcp2_conn. */
   NGTCP2_CONN_FLAG_PPE_PENDING = 0x1000,
+  /* NGTCP2_CONN_FLAG_RESTART_IDLE_TIMER_ON_WRITE is set when idle
+     timer should be restarted on next write. */
+  NGTCP2_CONN_FLAG_RESTART_IDLE_TIMER_ON_WRITE = 0x2000,
 } ngtcp2_conn_flag;
 
 typedef struct {
@@ -257,19 +260,20 @@ typedef struct {
       /* ckm is a cryptographic key, and iv to encrypt outgoing
          packets. */
       ngtcp2_crypto_km *ckm;
-      /* hp is header protection key. */
-      ngtcp2_vec *hp;
+      /* hp_key is header protection key. */
+      ngtcp2_vec *hp_key;
     } tx;
 
     struct {
       /* ckm is a cryptographic key, and iv to decrypt incoming
          packets. */
       ngtcp2_crypto_km *ckm;
-      /* hp is header protection key. */
-      ngtcp2_vec *hp;
+      /* hp_key is header protection key. */
+      ngtcp2_vec *hp_key;
     } rx;
 
     ngtcp2_strm strm;
+    ngtcp2_crypto_ctx ctx;
   } crypto;
 
   ngtcp2_acktr acktr;
@@ -333,6 +337,11 @@ struct ngtcp2_conn {
   struct {
     /* strmq contains ngtcp2_strm which has frames to send. */
     ngtcp2_pq strmq;
+    /* ack is ACK frame.  The underlying buffer is resused. */
+    ngtcp2_frame *ack;
+    /* max_ack_blks is the number of additional ngtcp2_ack_blk which
+       ack can contain. */
+    size_t max_ack_blks;
     /* offset is the offset the local endpoint has sent to the remote
        endpoint. */
     uint64_t offset;
@@ -356,11 +365,13 @@ struct ngtcp2_conn {
     ngtcp2_bw bw;
     /* path_challenge stores received PATH_CHALLENGE data. */
     ngtcp2_ringbuf path_challenge;
+    /* ccec is the received connection close error code. */
+    ngtcp2_connection_close_error_code ccec;
   } rx;
 
   struct {
     ngtcp2_crypto_km *ckm;
-    ngtcp2_vec *hp;
+    ngtcp2_vec *hp_key;
   } early;
 
   struct {
@@ -431,17 +442,18 @@ struct ngtcp2_conn {
 
     size_t aead_overhead;
     /* decrypt_buf is a buffer which is used to write decrypted data. */
-    ngtcp2_array decrypt_buf;
+    ngtcp2_vec decrypt_buf;
   } crypto;
 
   /* pkt contains the packet intermediate construction data to support
      NGTCP2_WRITE_STREAM_FLAG_MORE */
   struct {
-    ngtcp2_crypto_ctx ctx;
+    ngtcp2_crypto_cc cc;
     ngtcp2_pkt_hd hd;
     ngtcp2_ppe ppe;
     ngtcp2_frame_chain **pfrc;
     int pkt_empty;
+    int hd_logged;
     uint8_t rtb_entry_flags;
     int was_client_initial;
     ssize_t hs_spktlen;
@@ -464,6 +476,8 @@ struct ngtcp2_conn {
      data" rule. */
   size_t hs_sent;
   const ngtcp2_mem *mem;
+  /* idle_ts is the time instant when idle timer started. */
+  ngtcp2_tstamp idle_ts;
   void *user_data;
   uint32_t version;
   /* flags is bitwise OR of zero or more of ngtcp2_conn_flag. */
