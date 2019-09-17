@@ -461,7 +461,9 @@ class Timer {
     env->AddCleanupHook(CleanupHook, this);
   }
 
-  inline ~Timer() = default;
+  ~Timer() {
+    env_->RemoveCleanupHook(CleanupHook, this);
+  }
 
   // Stops the timer with the side effect of the timer no longer being usable.
   // It will be cleaned up and the Timer object will be destroyed.
@@ -469,7 +471,6 @@ class Timer {
     if (stopped_)
       return;
     stopped_ = true;
-    env_->RemoveCleanupHook(CleanupHook, this);
 
     if (timer_.data == this) {
       uv_timer_stop(&timer_);
@@ -503,15 +504,12 @@ class Timer {
   }
 
   static void OnTimeout(uv_timer_t* timer) {
-    Timer* t =
-        ContainerOf(
-            &Timer::timer_,
-            reinterpret_cast<uv_timer_t*>(timer));
+    Timer* t = ContainerOf(&Timer::timer_, timer);
     t->OnTimeout();
   }
 
   static void CleanupHook(void* data) {
-    static_cast<Timer*>(data)->Stop();
+    Free(static_cast<Timer*>(data));
   }
 
   bool stopped_;
