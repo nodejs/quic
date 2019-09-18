@@ -5,7 +5,7 @@
 #include "node_crypto.h"  // SecureContext
 #include "node_process.h"
 #include "node_quic_crypto.h"
-#include "node_quic_session.h"
+#include "node_quic_session-inl.h"
 #include "node_quic_socket.h"
 #include "node_quic_stream.h"
 #include "node_quic_state.h"

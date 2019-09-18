@@ -999,7 +999,6 @@ Local<Array> GetClientHelloCiphers(
   const unsigned char* buf;
   size_t len = SSL_client_hello_get0_ciphers(ssl, &buf);
   std::vector<Local<Value>> ciphers_array;
-  size_t pos = 0;
   for (size_t n = 0; n < len; n += 2) {
     const SSL_CIPHER* cipher = SSL_CIPHER_find(ssl, buf);
     buf += 2;

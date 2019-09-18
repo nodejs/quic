@@ -839,6 +839,7 @@
             'src/node_quic_session.cc',
             'src/node_quic_socket.cc',
             'src/node_quic_stream.cc',
+            'src/node_quic_util.cc',
             'src/node_quic.cc',
           ]
         }

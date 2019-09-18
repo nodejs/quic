@@ -432,30 +432,15 @@ class Timer {
     uv_unref(reinterpret_cast<uv_handle_t*>(&timer_));
   }
 
-  static void Free(Timer* timer) {
-    timer->env_->CloseHandle(
-        reinterpret_cast<uv_handle_t*>(&timer->timer_),
-        [&](uv_handle_t* timer) {
-          Timer* t = ContainerOf(
-              &Timer::timer_,
-              reinterpret_cast<uv_timer_t*>(timer));
-          delete t;
-        });
-  }
+  static void Free(Timer* timer);
 
  private:
   inline void OnTimeout() {
     fn_(data_);
   }
 
-  static void OnTimeout(uv_timer_t* timer) {
-    Timer* t = ContainerOf(&Timer::timer_, timer);
-    t->OnTimeout();
-  }
-
-  static void CleanupHook(void* data) {
-    Free(static_cast<Timer*>(data));
-  }
+  static void OnTimeout(uv_timer_t* timer);
+  static void CleanupHook(void* data);
 
   bool stopped_;
   Environment* env_;
