@@ -133,47 +133,47 @@ void SetupInitialCryptoContext(CryptoContext* context) {
 }
 
 // TODO(@jasnell): Remove once we move to ngtcp2_crypto.h
-const EVP_CIPHER* crypto_ssl_get_aead(SSL *ssl) {
+const EVP_CIPHER* crypto_ssl_get_aead(SSL* ssl) {
   switch (SSL_CIPHER_get_id(SSL_get_current_cipher(ssl))) {
-  case TLS1_3_CK_AES_128_GCM_SHA256:
-    return EVP_aes_128_gcm();
-  case TLS1_3_CK_AES_256_GCM_SHA384:
-    return EVP_aes_256_gcm();
-  case TLS1_3_CK_CHACHA20_POLY1305_SHA256:
-    return EVP_chacha20_poly1305();
-  case TLS1_3_CK_AES_128_CCM_SHA256:
-    return EVP_aes_128_ccm();
-  default:
-    return NULL;
+    case TLS1_3_CK_AES_128_GCM_SHA256:
+      return EVP_aes_128_gcm();
+    case TLS1_3_CK_AES_256_GCM_SHA384:
+      return EVP_aes_256_gcm();
+    case TLS1_3_CK_CHACHA20_POLY1305_SHA256:
+      return EVP_chacha20_poly1305();
+    case TLS1_3_CK_AES_128_CCM_SHA256:
+      return EVP_aes_128_ccm();
+    default:
+      return nullptr;
   }
 }
 
 // TODO(@jasnell): Remove once we move to ngtcp2_crypto.h
-const EVP_CIPHER* crypto_ssl_get_hp(SSL *ssl) {
+const EVP_CIPHER* crypto_ssl_get_hp(SSL* ssl) {
   switch (SSL_CIPHER_get_id(SSL_get_current_cipher(ssl))) {
-  case TLS1_3_CK_AES_128_GCM_SHA256:
-  case TLS1_3_CK_AES_128_CCM_SHA256:
-    return EVP_aes_128_ctr();
-  case TLS1_3_CK_AES_256_GCM_SHA384:
-    return EVP_aes_256_ctr();
-  case TLS1_3_CK_CHACHA20_POLY1305_SHA256:
-    return EVP_chacha20();
-  default:
-    return NULL;
+    case TLS1_3_CK_AES_128_GCM_SHA256:
+    case TLS1_3_CK_AES_128_CCM_SHA256:
+      return EVP_aes_128_ctr();
+    case TLS1_3_CK_AES_256_GCM_SHA384:
+      return EVP_aes_256_ctr();
+    case TLS1_3_CK_CHACHA20_POLY1305_SHA256:
+      return EVP_chacha20();
+    default:
+      return nullptr;
   }
 }
 
 // TODO(@jasnell): Remove once we move to ngtcp2_crypto.h
-const EVP_MD* crypto_ssl_get_md(SSL *ssl) {
+const EVP_MD* crypto_ssl_get_md(SSL* ssl) {
   switch (SSL_CIPHER_get_id(SSL_get_current_cipher(ssl))) {
-  case TLS1_3_CK_AES_128_GCM_SHA256:
-  case TLS1_3_CK_CHACHA20_POLY1305_SHA256:
-  case TLS1_3_CK_AES_128_CCM_SHA256:
-    return EVP_sha256();
-  case TLS1_3_CK_AES_256_GCM_SHA384:
-    return EVP_sha384();
-  default:
-    return NULL;
+    case TLS1_3_CK_AES_128_GCM_SHA256:
+    case TLS1_3_CK_CHACHA20_POLY1305_SHA256:
+    case TLS1_3_CK_AES_128_CCM_SHA256:
+      return EVP_sha256();
+    case TLS1_3_CK_AES_256_GCM_SHA384:
+      return EVP_sha384();
+    default:
+      return nullptr;
   }
 }
 
@@ -244,7 +244,7 @@ bool HKDF_Expand_Label(
     size_t labellen) {
   static const uint8_t LABEL[] = "tls13 ";
   uint8_t info[256];
-  uint8_t *p = info;
+  uint8_t* p = info;
 
   *p++ = static_cast<uint8_t>(destlen / 256);
   *p++ = static_cast<uint8_t>(destlen % 256);
@@ -861,23 +861,23 @@ void LogSecret(
       return;
     std::string line;
     switch (name) {
-    case SSL_KEY_CLIENT_EARLY_TRAFFIC:
-      line = "QUIC_CLIENT_EARLY_TRAFFIC_SECRET";
-      break;
-    case SSL_KEY_CLIENT_HANDSHAKE_TRAFFIC:
-      line = "QUIC_CLIENT_HANDSHAKE_TRAFFIC_SECRET";
-      break;
-    case SSL_KEY_CLIENT_APPLICATION_TRAFFIC:
-      line = "QUIC_CLIENT_TRAFFIC_SECRET_0";
-      break;
-    case SSL_KEY_SERVER_HANDSHAKE_TRAFFIC:
-      line = "QUIC_SERVER_HANDSHAKE_TRAFFIC_SECRET";
-      break;
-    case SSL_KEY_SERVER_APPLICATION_TRAFFIC:
-      line = "QUIC_SERVER_TRAFFIC_SECRET_0";
-      break;
-    default:
-      return;
+      case SSL_KEY_CLIENT_EARLY_TRAFFIC:
+        line = "QUIC_CLIENT_EARLY_TRAFFIC_SECRET";
+        break;
+      case SSL_KEY_CLIENT_HANDSHAKE_TRAFFIC:
+        line = "QUIC_CLIENT_HANDSHAKE_TRAFFIC_SECRET";
+        break;
+      case SSL_KEY_CLIENT_APPLICATION_TRAFFIC:
+        line = "QUIC_CLIENT_TRAFFIC_SECRET_0";
+        break;
+      case SSL_KEY_SERVER_HANDSHAKE_TRAFFIC:
+        line = "QUIC_SERVER_HANDSHAKE_TRAFFIC_SECRET";
+        break;
+      case SSL_KEY_SERVER_APPLICATION_TRAFFIC:
+        line = "QUIC_SERVER_TRAFFIC_SECRET_0";
+        break;
+      default:
+        return;
     }
 
     line += " " + StringBytes::hex_encode(
@@ -1112,13 +1112,13 @@ int ALPN_Select_Proto_CB(
   uint32_t version = session->GetNegotiatedVersion();
 
   switch (version) {
-  case NGTCP2_PROTO_VER:
-    alpn = reinterpret_cast<const uint8_t*>(session->GetALPN().c_str());
-    alpnlen = session->GetALPN().length();
-    break;
-  default:
-    // Unexpected QUIC protocol version
-    return SSL_TLSEXT_ERR_NOACK;
+    case NGTCP2_PROTO_VER:
+      alpn = reinterpret_cast<const uint8_t*>(session->GetALPN().c_str());
+      alpnlen = session->GetALPN().length();
+      break;
+    default:
+      // Unexpected QUIC protocol version
+      return SSL_TLSEXT_ERR_NOACK;
   }
 
   for (auto p = in, end = in + inlen; p + alpnlen < end; p += *p + 1) {
