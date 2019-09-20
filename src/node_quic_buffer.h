@@ -29,7 +29,9 @@ typedef std::function<void(int status)> done_cb;
 // Default non-op done handler.
 inline void default_quic_buffer_chunk_done(int status) {}
 
-#define EMPTY_BUF(buf) (buf.len == 0 || buf.base == nullptr)
+inline bool IsEmptyBuffer(const uv_buf_t& buf) {
+  return buf.len == 0 || buf.base == nullptr;
+}
 
 // A quic_buffer_chunk contains the actual buffered data
 // along with a callback, and optional V8 object that
@@ -44,40 +46,36 @@ struct quic_buffer_chunk : public MemoryRetainer {
   v8::Global<v8::Object> keep_alive;
   std::unique_ptr<quic_buffer_chunk> next;
 
-  inline quic_buffer_chunk(
-    MallocedBuffer<uint8_t>&& buf_,
-    done_cb done_,
-    v8::Local<v8::Object> keep_alive_)
-    : data_buf(std::move(buf_)),
-      buf(uv_buf_init(
-          reinterpret_cast<char*>(data_buf.data),
-          data_buf.size)),
-      done(done_) {
+  quic_buffer_chunk(
+      MallocedBuffer<uint8_t>&& buf_,
+      done_cb done_,
+      v8::Local<v8::Object> keep_alive_)
+    : quic_buffer_chunk(uv_buf_init(reinterpret_cast<char*>(buf_.data),
+                                    buf_.size),
+                        done_,
+                        keep_alive_) {
+    data_buf = std::move(buf_);
+  }
+
+  explicit quic_buffer_chunk(uv_buf_t buf_) : buf(buf_) {}
+
+  quic_buffer_chunk(
+      uv_buf_t buf_,
+      done_cb done_,
+      v8::Local<v8::Object> keep_alive_)
+    : quic_buffer_chunk(buf_) {
+    done = std::move(done_);
     if (!keep_alive.IsEmpty())
       keep_alive.Reset(keep_alive_->GetIsolate(), keep_alive_);
   }
 
-  inline explicit quic_buffer_chunk(
-    uv_buf_t buf_) :
-    buf(buf_) {}
-
-  inline quic_buffer_chunk(
-    uv_buf_t buf_,
-    done_cb done_,
-    v8::Local<v8::Object> keep_alive_)
-    : buf(buf_),
-      done(done_) {
-    if (!keep_alive.IsEmpty())
-      keep_alive.Reset(keep_alive_->GetIsolate(), keep_alive_);
-  }
-
-  inline ~quic_buffer_chunk() override {
+  ~quic_buffer_chunk() override {
     CHECK(done_called);
   }
 
   void Done(int status) {
     done_called = true;
-    done(status);
+    std::move(done)(status);
   }
 
   void MemoryInfo(MemoryTracker* tracker) const override {
@@ -125,21 +123,21 @@ struct quic_buffer_chunk : public MemoryRetainer {
 // Will append the contents of buf1 to buf2, then reset buf1
 class QuicBuffer : public MemoryRetainer {
  public:
-  inline QuicBuffer() :
-    head_(nullptr),
-    tail_(nullptr),
-    size_(0),
-    count_(0),
-    length_(0),
-    rlength_(0) {}
+  QuicBuffer()
+    : head_(nullptr),
+      tail_(nullptr),
+      size_(0),
+      count_(0),
+      length_(0),
+      rlength_(0) {}
 
-  inline QuicBuffer(QuicBuffer&& src) noexcept :
-    head_(src.head_),
-    tail_(src.tail_),
-    size_(src.size_),
-    count_(src.count_),
-    length_(src.length_),
-    rlength_(src.rlength_) {
+  QuicBuffer(QuicBuffer&& src) noexcept
+    : head_(src.head_),
+      tail_(src.tail_),
+      size_(src.size_),
+      count_(src.count_),
+      length_(src.length_),
+      rlength_(src.rlength_) {
     root_ = std::move(src.root_);
     src.head_ = nullptr;
     src.tail_ = nullptr;
@@ -149,44 +147,42 @@ class QuicBuffer : public MemoryRetainer {
   }
 
   QuicBuffer& operator=(QuicBuffer&& src) noexcept {
+    if (this == &src) return *this;
     this->~QuicBuffer();
     return *new(this) QuicBuffer(std::move(src));
   }
 
   QuicBuffer& operator+=(QuicBuffer&& src) noexcept {
-    if (!tail_) {
+    if (tail_ == nullptr) {
       // If this thing is empty, just do a move...
-      this->~QuicBuffer();
-      return *new(this) QuicBuffer(std::move(src));
-    } else {
-      tail_->next = std::move(src.root_);
-      // If head_ is null, then it had been read to the
-      // end, set the new head_ equal to the appended
-      // root.
-      if (head_ == nullptr)
-        head_ = tail_->next.get();
-      tail_ = src.tail_;
-      length_ += src.length_;
-      rlength_ += src.length_;
-      size_ += src.size_;
-      count_ += src.size_;
-      src.head_ = nullptr;
-      src.tail_ = nullptr;
-      src.size_ = 0;
-      src.length_ = 0;
-      src.rlength_ = 0;
-      return *this;
+      return *this = std::move(src);
     }
+
+    tail_->next = std::move(src.root_);
+    // If head_ is null, then it had been read to the
+    // end, set the new head_ equal to the appended
+    // root.
+    if (head_ == nullptr)
+      head_ = tail_->next.get();
+    tail_ = src.tail_;
+    length_ += src.length_;
+    rlength_ += src.length_;
+    size_ += src.size_;
+    count_ += src.size_;
+    src.head_ = nullptr;
+    src.tail_ = nullptr;
+    src.size_ = 0;
+    src.length_ = 0;
+    src.rlength_ = 0;
+    return *this;
   }
 
-  inline ~QuicBuffer() override {
+  ~QuicBuffer() override {
     Cancel();  // Cancel the remaining data
     CHECK_EQ(length_, 0);
   }
 
-  inline size_t Copy(
-      uv_buf_t* bufs,
-      size_t nbufs) {
+  size_t Copy(uv_buf_t* bufs, size_t nbufs) {
     size_t total = 0;
     for (size_t n = 0; n < nbufs; n++) {
       MallocedBuffer<uint8_t> data(bufs[n].len);
@@ -203,21 +199,19 @@ class QuicBuffer : public MemoryRetainer {
   // of the internal linked list. The keep_alive allows a reference to a
   // JS object to be kept around until the final uv_buf_t
   // is consumed.
-  inline size_t Push(
+  size_t Push(
       uv_buf_t* bufs,
       size_t nbufs,
       done_cb done = default_quic_buffer_chunk_done,
       v8::Local<v8::Object> keep_alive = v8::Local<v8::Object>()) {
     size_t len = 0;
-    if (nbufs == 0 ||
-        bufs == nullptr ||
-        EMPTY_BUF(bufs[0])) {
+    if (nbufs == 0 || bufs == nullptr || IsEmptyBuffer(bufs[0])) {
       done(0);
       return 0;
     }
     size_t n = 0;
     while (nbufs > 1) {
-      if (!EMPTY_BUF(bufs[n])) {
+      if (!IsEmptyBuffer(bufs[n])) {
         Push(bufs[n]);
         length_ += bufs[n].len;
         rlength_ += bufs[n].len;
@@ -238,7 +232,7 @@ class QuicBuffer : public MemoryRetainer {
   // and popped out of the internal linked list. The keep_alive allows a
   // reference to a JS object to be kept around until the
   // final uv_buf_t is consumed.
-  inline size_t Push(
+  size_t Push(
       MallocedBuffer<uint8_t>&& buffer,
       done_cb done = default_quic_buffer_chunk_done,
       v8::Local<v8::Object> keep_alive = v8::Local<v8::Object>()) {
@@ -255,84 +249,52 @@ class QuicBuffer : public MemoryRetainer {
   // Consume the given number of bytes within the buffer. If amount is
   // negative, all buffered bytes that are available to be consumed are
   // consumed.
-  inline void Consume(ssize_t amount = -1) { Consume(0, amount); }
+  void Consume(ssize_t amount = -1) { Consume(0, amount); }
 
   // Cancels the remaining bytes within the buffer
-  inline size_t Cancel(int status = UV_ECANCELED) {
+  size_t Cancel(int status = UV_ECANCELED) {
     size_t remaining = Length();
     Consume(status, -1);
     return remaining;
   }
 
   // The total buffered bytes
-  inline size_t Length() {
+  size_t Length() {
     return length_;
   }
 
-  inline size_t RemainingLength() {
+  size_t RemainingLength() {
     return rlength_;
   }
 
   // The total number of buffers
-  inline size_t Size() {
+  size_t Size() {
     return size_;
   }
 
   // The number of buffers remaining to be read
-  inline size_t ReadRemaining() {
+  size_t ReadRemaining() {
     return count_;
   }
 
   // Drain the remaining buffers into the given vector.
   // The function will return the number of positions the
   // read head_ can be advanced.
-  inline size_t DrainInto(
-      std::vector<uv_buf_t>* list,
-      size_t* length = nullptr) {
-    size_t len = 0;
-    bool seen_head = false;
-    quic_buffer_chunk* pos = head_;
-    if (pos == nullptr)
-      return 0;
-    if (length != nullptr) *length = 0;
-    while (pos != nullptr) {
-      size_t datalen = pos->buf.len - pos->roffset;
-      if (length != nullptr) *length += datalen;
-      list->push_back(
-          uv_buf_init(pos->buf.base + pos->roffset, datalen));
-      if (pos == head_) seen_head = true;
-      if (seen_head) len++;
-      pos = pos->next.get();
-    }
-    return len;
+  size_t DrainInto(std::vector<uv_buf_t>* list, size_t* length = nullptr) {
+    return DrainInto([&](uv_buf_t buf) { list->push_back(buf); }, length);
   }
 
-  inline size_t DrainInto(
-      std::vector<ngtcp2_vec>* list,
-      size_t* length = nullptr) {
-    size_t len = 0;
-    bool seen_head = false;
-    quic_buffer_chunk* pos = head_;
-    if (pos == nullptr)
-      return 0;
-    if (length != nullptr) *length = 0;
-    while (pos != nullptr) {
-      size_t datalen = pos->buf.len - pos->roffset;
-      if (length != nullptr) *length += datalen;
-      list->push_back(ngtcp2_vec{
-          reinterpret_cast<uint8_t*>(pos->buf.base) + pos->roffset,
-          datalen});
-      if (pos == head_) seen_head = true;
-      if (seen_head) len++;
-      pos = pos->next.get();
-    }
-    return len;
+  size_t DrainInto(std::vector<ngtcp2_vec>* list, size_t* length = nullptr) {
+    return DrainInto([&](uv_buf_t buf) {
+      list->push_back(ngtcp2_vec {
+        reinterpret_cast<uint8_t*>(buf.base), buf.len });
+    }, length);
   }
 
   // Returns the current read head or an empty buffer if
   // we're empty
-  inline uv_buf_t Head() {
-    if (!head_)
+  uv_buf_t Head() {
+    if (head_ == nullptr)
       return uv_buf_init(nullptr, 0);
     return uv_buf_init(
         head_->buf.base + head_->roffset,
@@ -343,20 +305,20 @@ class QuicBuffer : public MemoryRetainer {
   // number of buffers. If amount is greater than
   // the number of buffers remaining, move to the
   // end, and return the actual number advanced.
-  inline size_t SeekHead(size_t amount = 1) {
+  size_t SeekHead(size_t amount = 1) {
     size_t n = 0;
     size_t amt = amount;
-    while (head_ && amt > 0) {
+    while (head_ != nullptr && amt > 0) {
       head_ = head_->next.get();
       n++;
       amt--;
       count_--;
-      rlength_ -= !head_ ? 0 : head_->buf.len;
+      rlength_ -= head_ == nullptr ? 0 : head_->buf.len;
     }
     return n;
   }
 
-  inline void SeekHeadOffset(ssize_t amount) {
+  void SeekHeadOffset(ssize_t amount) {
     if (amount < 0)
       return;
     size_t amt = std::min(amount < 0 ? length_ : amount, length_);
@@ -384,7 +346,27 @@ class QuicBuffer : public MemoryRetainer {
   SET_SELF_SIZE(QuicBuffer);
 
  private:
-  inline void Push(quic_buffer_chunk* chunk) {
+  template <typename Fn>
+  size_t DrainInto(Fn&& add_to_list, size_t* length) {
+    size_t len = 0;
+    bool seen_head = false;
+    quic_buffer_chunk* pos = head_;
+    if (pos == nullptr)
+      return 0;
+    if (length != nullptr) *length = 0;
+    while (pos != nullptr) {
+      size_t datalen = pos->buf.len - pos->roffset;
+      if (length != nullptr) *length += datalen;
+      add_to_list(uv_buf_init(pos->buf.base + pos->roffset, datalen));
+      if (pos == head_) seen_head = true;
+      if (seen_head) len++;
+      pos = pos->next.get();
+    }
+    return len;
+  }
+
+
+  void Push(quic_buffer_chunk* chunk) {
     size_++;
     count_++;
     if (!tail_) {
@@ -398,18 +380,15 @@ class QuicBuffer : public MemoryRetainer {
     }
   }
 
-  inline void Push(uv_buf_t buf) {
+  void Push(uv_buf_t buf) {
     Push(new quic_buffer_chunk(buf));
   }
 
-  inline void Push(
-      uv_buf_t buf,
-      done_cb done,
-      v8::Local<v8::Object> keep_alive) {
+  void Push(uv_buf_t buf, done_cb done, v8::Local<v8::Object> keep_alive) {
     Push(new quic_buffer_chunk(buf, done, keep_alive));
   }
 
-  inline bool Pop(int status = 0) {
+  bool Pop(int status = 0) {
     if (!root_)
       return false;
     std::unique_ptr<quic_buffer_chunk> root(std::move(root_));
@@ -425,7 +404,7 @@ class QuicBuffer : public MemoryRetainer {
     return true;
   }
 
-  inline void Consume(int status, ssize_t amount) {
+  void Consume(int status, ssize_t amount) {
     size_t amt = std::min(amount < 0 ? length_ : amount, length_);
     while (root_ && amt > 0) {
       auto root = root_.get();
