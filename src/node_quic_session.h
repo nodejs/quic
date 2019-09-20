@@ -93,7 +93,7 @@ class QuicSessionConfig {
 // QuicServerSession. These are set on the QuicSocket when
 // the listen() function is called and are passed to the
 // constructor of the QuicServerSession.
-typedef enum QuicServerSessionOptions : uint32_t {
+enum QuicServerSessionOptions : uint32_t {
   // When set, instructs the QuicServerSession to reject
   // client authentication certs that cannot be verified.
   QUICSERVERSESSION_OPTION_REJECT_UNAUTHORIZED = 0x1,
@@ -101,12 +101,12 @@ typedef enum QuicServerSessionOptions : uint32_t {
   // When set, instructs the QuicServerSession to request
   // a client authentication cert
   QUICSERVERSESSION_OPTION_REQUEST_CERT = 0x2
-} QuicServerSessionOptions;
+};
 
 // Options to alter the behavior of various functions on the
 // QuicClientSession. These are set on the QuicClientSession
 // constructor.
-typedef enum QuicClientSessionOptions : uint32_t {
+enum QuicClientSessionOptions : uint32_t {
   // When set, instructs the QuicClientSession to include an
   // OCSP request in the initial TLS handshake
   QUICCLIENTSESSION_OPTION_REQUEST_OCSP = 0x1,
@@ -120,14 +120,14 @@ typedef enum QuicClientSessionOptions : uint32_t {
   // When set, instructs the QuicClientSession to perform
   // additional checks on TLS session resumption.
   QUICCLIENTSESSION_OPTION_RESUME = 0x4
-} QuicClientSessionOptions;
+};
 
 
 // The QuicSessionState enums are used with the QuicSession's
 // private state_ array. This is exposed to JavaScript via an
 // aliased buffer and is used to communicate various types of
 // state efficiently across the native/JS boundary.
-typedef enum QuicSessionState : int {
+enum QuicSessionState : int {
   // Communicates whether a 'keylog' event listener has been
   // registered on the JavaScript QuicSession object. The
   // value will be either 1 or 0. When set to 1, the native
@@ -165,7 +165,7 @@ typedef enum QuicSessionState : int {
   // Just the number of session state enums for use when
   // creating the AliasedBuffer.
   IDX_QUIC_SESSION_STATE_COUNT
-} QuicSessionState;
+};
 
 // The QuicSession class is an virtual class that serves as
 // the basis for both QuicServerSession and QuicClientSession.
@@ -744,7 +744,7 @@ class QuicSession : public AsyncWrap,
   void StopRetransmitTimer();
   void StopIdleTimer();
 
-  typedef enum QuicSessionFlags : uint32_t {
+  enum QuicSessionFlags : uint32_t {
     // Initial state when a QuicSession is created but nothing yet done.
     QUICSESSION_FLAG_INITIAL = 0x1,
 
@@ -777,7 +777,7 @@ class QuicSession : public AsyncWrap,
     // Set if the QuicSession is in the middle of a silent close
     // (that is, a CONNECTION_CLOSE should not be sent)
     QUICSESSION_FLAG_SILENT_CLOSE = 0x200
-  } QuicSessionFlags;
+  };
 
   void SetFlag(QuicSessionFlags flag, bool on = true) {
     if (on)
@@ -1022,11 +1022,11 @@ class QuicSession : public AsyncWrap,
 
 class QuicServerSession : public QuicSession {
  public:
-  typedef enum InitialPacketResult : int {
+  enum InitialPacketResult : int {
     PACKET_OK,
     PACKET_IGNORE,
     PACKET_VERSION
-  } InitialPacketResult;
+  };
 
   static InitialPacketResult Accept(
     ngtcp2_pkt_hd* hd,

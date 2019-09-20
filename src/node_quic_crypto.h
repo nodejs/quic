@@ -59,7 +59,7 @@ struct CryptoContext {
 };
 
 // TODO(@jasnell): Remove once we move to ngtcp2_crypto
-typedef enum ngtcp2_crypto_side {
+enum ngtcp2_crypto_side {
   /**
    * ``NGTCP2_CRYPTO_SIDE_CLIENT`` indicates that the application is
    * client.
@@ -70,7 +70,7 @@ typedef enum ngtcp2_crypto_side {
    * server.
    */
   NGTCP2_CRYPTO_SIDE_SERVER
-} ngtcp2_crypto_side;
+};
 
 BIO_METHOD* CreateBIOMethod();
 

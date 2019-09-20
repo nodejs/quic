@@ -95,7 +95,7 @@ class QuicStream : public AsyncWrap,
                    public StreamBase,
                    public std::enable_shared_from_this<QuicStream> {
  public:
-  typedef enum QuicStreamStates : uint32_t {
+  enum QuicStreamStates : uint32_t {
     // QuicStream is fully open. Readable and Writable
     QUICSTREAM_FLAG_INITIAL = 0x0,
 
@@ -125,24 +125,24 @@ class QuicStream : public AsyncWrap,
 
     // QuicStream has been destroyed
     QUICSTREAM_FLAG_DESTROYED = 0x40
-  } QuicStreamStates;
+  };
 
-  typedef enum QuicStreamDirection {
+  enum QuicStreamDirection {
     // The QuicStream is readable and writable in both directions
     QUIC_STREAM_BIRECTIONAL,
 
     // The QuicStream is writable and readable in only one direction.
     // The direction depends on the QuicStreamOrigin.
     QUIC_STREAM_UNIDIRECTIONAL
-  } QuicStreamDirection;
+  };
 
-  typedef enum QuicStreamOrigin {
+  enum QuicStreamOrigin {
     // The QuicStream was created by the server.
     QUIC_STREAM_SERVER,
 
     // The QuicStream was created by the client.
     QUIC_STREAM_CLIENT
-  } QuicStreamOrigin;
+  };
 
 
   static void Initialize(

@@ -41,12 +41,12 @@ constexpr uint64_t DEFAULT_MAX_STREAMS_UNI = 3;
 constexpr uint64_t DEFAULT_IDLE_TIMEOUT = 10 * 1000;
 constexpr uint64_t DEFAULT_RETRYTOKEN_EXPIRATION = 10ULL;
 
-typedef enum SelectPreferredAddressPolicy : int {
+enum SelectPreferredAddressPolicy : int {
   // Ignore the server-provided preferred address
   QUIC_PREFERRED_ADDRESS_IGNORE,
   // Accept the server-provided preferred address
   QUIC_PREFERRED_ADDRESS_ACCEPT
-} SelectPreferredAddressPolicy;
+};
 
 // Fun hash combine trick based on a variadic template that
 // I came across a while back but can't remember where. Will add an attribution
@@ -70,11 +70,11 @@ inline void hash_combine(size_t* seed, const T& value, Args... rest) {
 // look at the ALPN identifier to determine exactly what it
 // means. Connection (Session) and Crypto errors, on the other
 // hand, share the same meaning regardless of the ALPN.
-typedef enum QuicErrorFamily : int {
+enum QuicErrorFamily : int {
   QUIC_ERROR_SESSION,
   QUIC_ERROR_CRYPTO,
   QUIC_ERROR_APPLICATION
-} QuicErrorFamily;
+};
 
 struct QuicError {
   QuicErrorFamily family;

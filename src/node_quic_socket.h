@@ -31,7 +31,7 @@ namespace quic {
 
 static constexpr size_t MAX_VALIDATE_ADDRESS_LRU = 10;
 
-typedef enum QuicSocketOptions : uint32_t {
+enum QuicSocketOptions : uint32_t {
   // When enabled the QuicSocket will validate the address
   // using a RETRY packet to the peer.
   QUICSOCKET_OPTIONS_VALIDATE_ADDRESS = 0x1,
@@ -41,7 +41,7 @@ typedef enum QuicSocketOptions : uint32_t {
   // validated addresses. Address validation will be skipped
   // if the address is currently in the cache.
   QUICSOCKET_OPTIONS_VALIDATE_ADDRESS_LRU = 0x2,
-} QuicSocketOptions;
+};
 
 class QuicSocket : public HandleWrap,
                    public mem::Tracker {
@@ -205,7 +205,7 @@ class QuicSocket : public HandleWrap,
   // Fields and TypeDefs
   typedef uv_udp_t HandleType;
 
-  typedef enum QuicSocketFlags : uint32_t {
+  enum QuicSocketFlags : uint32_t {
     QUICSOCKET_FLAGS_NONE = 0x0,
 
     // Indicates that the QuicSocket has entered a graceful
@@ -214,7 +214,7 @@ class QuicSocket : public HandleWrap,
     QUICSOCKET_FLAGS_PENDING_CLOSE = 0x2,
     QUICSOCKET_FLAGS_SERVER_LISTENING = 0x4,
     QUICSOCKET_FLAGS_SERVER_BUSY = 0x8,
-  } QuicSocketFlags;
+  };
 
   void SetFlag(QuicSocketFlags flag, bool on = true) {
     if (on)
