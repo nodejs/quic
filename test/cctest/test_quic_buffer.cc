@@ -39,15 +39,13 @@ TEST(QuicBuffer, Simple) {
   memset(&data, 0, node::arraysize(data));
   uv_buf_t buf = uv_buf_init(data, node::arraysize(data));
 
-  const char* test = "test data";
   bool done = false;
 
   QuicBuffer buffer;
-  buffer.Push(&buf, 1, [&](int status, void* user_data) {
-    EXPECT_EQ(&test, user_data);
+  buffer.Push(&buf, 1, [&](int status) {
     EXPECT_EQ(0, status);
     done = true;
-  }, &test);
+  });
 
   buffer.Consume(100);
   CHECK_EQ(0, buffer.Length());
@@ -66,15 +64,13 @@ TEST(QuicBuffer, ConsumeMore) {
   memset(&data, 0, node::arraysize(data));
   uv_buf_t buf = uv_buf_init(data, node::arraysize(data));
 
-  const char* test = "test data";
   bool done = false;
 
   QuicBuffer buffer;
-  buffer.Push(&buf, 1, [&](int status, void* user_data) {
-    EXPECT_EQ(&test, user_data);
+  buffer.Push(&buf, 1, [&](int status) {
     EXPECT_EQ(0, status);
     done = true;
-  }, &test);
+  });
 
   buffer.SeekHead();
   buffer.Consume(150);  // Consume more than what was buffered
@@ -87,19 +83,18 @@ TEST(QuicBuffer, Multiple) {
   TestBuffer buf1(100);
   TestBuffer buf2(50, 1);
 
-  auto cb = [](int status, void* user_data) {
-    TestBuffer* test_buffer = static_cast<TestBuffer*>(user_data);
+  auto cb = [](int status, TestBuffer* test_buffer) {
     test_buffer->Done();
   };
 
   QuicBuffer buffer;
   {
     uv_buf_t b = buf1.ToUVBuf();
-    buffer.Push(&b, 1, cb, &buf1);
+    buffer.Push(&b, 1, [&](int status) { cb(status, &buf1); });
   }
   {
     uv_buf_t b = buf2.ToUVBuf();
-    buffer.Push(&b, 1, cb, &buf2);
+    buffer.Push(&b, 1, [&](int status) { cb(status, &buf2); });
   }
 
   buffer.SeekHead(2);
@@ -133,13 +128,11 @@ TEST(QuicBuffer, Multiple2) {
   QuicBuffer buffer;
   buffer.Push(
       bufs, node::arraysize(bufs),
-      [&](int status, void* user_data) {
+      [&](int status) {
     count++;
     CHECK_EQ(0, status);
-    char* data = static_cast<char*>(user_data);
-    CHECK_EQ(ptr, data);
-    delete data;
-  }, ptr);
+    delete[] ptr;
+  });
   buffer.SeekHead(node::arraysize(bufs));
 
   buffer.Consume(25);
@@ -174,13 +167,11 @@ TEST(QuicBuffer, Cancel) {
   QuicBuffer buffer;
   buffer.Push(
       bufs, node::arraysize(bufs),
-      [&](int status, void* user_data) {
+      [&](int status) {
     count++;
     CHECK_EQ(UV_ECANCELED, status);
-    char* data = static_cast<char*>(user_data);
-    CHECK_EQ(ptr, data);
-    delete data;
-  }, ptr);
+    delete[] ptr;
+  });
 
   buffer.SeekHead();
   buffer.Consume(25);
@@ -199,19 +190,18 @@ TEST(QuicBuffer, Multiple3) {
   TestBuffer buf2(50, 1);
   TestBuffer buf3(50, 2);
 
-  auto cb = [](int status, void* user_data) {
-    TestBuffer* test_buffer = static_cast<TestBuffer*>(user_data);
+  auto cb = [](int status, TestBuffer* test_buffer) {
     test_buffer->Done();
   };
 
   QuicBuffer buffer;
   {
     uv_buf_t b = buf1.ToUVBuf();
-    buffer.Push(&b, 1, cb, &buf1);
+    buffer.Push(&b, 1, [&](int status) { cb(status, &buf1); });
   }
   {
     uv_buf_t b = buf2.ToUVBuf();
-    buffer.Push(&b, 1, cb, &buf2);
+    buffer.Push(&b, 1, [&](int status) { cb(status, &buf2); });
   }
   CHECK_EQ(150, buffer.Length());
   CHECK_EQ(2, buffer.Size());
@@ -228,7 +218,7 @@ TEST(QuicBuffer, Multiple3) {
 
   {
     uv_buf_t b = buf2.ToUVBuf();
-    buffer.Push(&b, 1, cb, &buf3);
+    buffer.Push(&b, 1, [&](int status) { cb(status, &buf3); });
   }
 
   CHECK_EQ(75, buffer.Length());
@@ -296,7 +286,7 @@ TEST(QuicBuffer, Append) {
 TEST(QuicBuffer, MallocedBuffer) {
   uint8_t* data = node::Malloc<uint8_t>(100);
   int count = 0;
-  auto cb = [&](int status, void* user_data) {
+  auto cb = [&](int status) {
     count++;
   };
 

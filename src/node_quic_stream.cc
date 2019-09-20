@@ -194,7 +194,7 @@ int QuicStream::DoWrite(
       streambuf_.Push(
           bufs,
           nbufs,
-          [&](int status, void* user_data) {
+          [req_wrap](int status) {
             // This callback function will be invoked once this
             // complete batch of buffers has been acknowledged
             // by the peer. This will have the side effect of
@@ -205,10 +205,8 @@ int QuicStream::DoWrite(
             // in the sense of providing back-pressure, but
             // also means that writes will be significantly
             // less performant unless written in batches.
-            WriteWrap* req_wrap = static_cast<WriteWrap*>(user_data);
             req_wrap->Done(status);
           },
-          req_wrap,
           req_wrap->object());
   Debug(this, "Queuing %" PRIu64 " bytes of data from %d buffers",
         length, nbufs);

@@ -24,10 +24,10 @@ namespace quic {
 // For QUIC, the data is not consumed until an explicit ack
 // is received or we know that we do not need the data.
 
-typedef std::function<void(int status, void* user_data)> done_cb;
+typedef std::function<void(int status)> done_cb;
 
 // Default non-op done handler.
-inline void default_quic_buffer_chunk_done(int status, void* user_data) {}
+inline void default_quic_buffer_chunk_done(int status) {}
 
 #define EMPTY_BUF(buf) (buf.len == 0 || buf.base == nullptr)
 
@@ -40,7 +40,6 @@ struct quic_buffer_chunk : public MemoryRetainer {
   done_cb done = default_quic_buffer_chunk_done;
   size_t offset = 0;
   size_t roffset = 0;
-  void* user_data = nullptr;
   bool done_called = false;
   v8::Global<v8::Object> keep_alive;
   std::unique_ptr<quic_buffer_chunk> next;
@@ -48,14 +47,12 @@ struct quic_buffer_chunk : public MemoryRetainer {
   inline quic_buffer_chunk(
     MallocedBuffer<uint8_t>&& buf_,
     done_cb done_,
-    void* user_data_,
-    v8::Local<v8::Object> keep_alive_) :
-    data_buf(std::move(buf_)),
-    buf(uv_buf_init(
-        reinterpret_cast<char*>(data_buf.data),
-        data_buf.size)),
-    done(done_),
-    user_data(user_data_) {
+    v8::Local<v8::Object> keep_alive_)
+    : data_buf(std::move(buf_)),
+      buf(uv_buf_init(
+          reinterpret_cast<char*>(data_buf.data),
+          data_buf.size)),
+      done(done_) {
     if (!keep_alive.IsEmpty())
       keep_alive.Reset(keep_alive_->GetIsolate(), keep_alive_);
   }
@@ -67,11 +64,9 @@ struct quic_buffer_chunk : public MemoryRetainer {
   inline quic_buffer_chunk(
     uv_buf_t buf_,
     done_cb done_,
-    void* user_data_,
-    v8::Local<v8::Object> keep_alive_) :
-    buf(buf_),
-    done(done_),
-    user_data(user_data_) {
+    v8::Local<v8::Object> keep_alive_)
+    : buf(buf_),
+      done(done_) {
     if (!keep_alive.IsEmpty())
       keep_alive.Reset(keep_alive_->GetIsolate(), keep_alive_);
   }
@@ -82,7 +77,7 @@ struct quic_buffer_chunk : public MemoryRetainer {
 
   void Done(int status) {
     done_called = true;
-    done(status, user_data);
+    done(status);
   }
 
   void MemoryInfo(MemoryTracker* tracker) const override {
@@ -205,21 +200,19 @@ class QuicBuffer : public MemoryRetainer {
   // Push one or more uv_buf_t instances into the buffer.
   // the done_cb callback will be invoked when the last
   // uv_buf_t in the bufs array is consumed and popped out
-  // of the internal linked list. The user_data is passed in to
-  // the done_cb. The keep_alive allows a reference to a
+  // of the internal linked list. The keep_alive allows a reference to a
   // JS object to be kept around until the final uv_buf_t
   // is consumed.
   inline size_t Push(
       uv_buf_t* bufs,
       size_t nbufs,
       done_cb done = default_quic_buffer_chunk_done,
-      void* user_data = nullptr,
       v8::Local<v8::Object> keep_alive = v8::Local<v8::Object>()) {
     size_t len = 0;
     if (nbufs == 0 ||
         bufs == nullptr ||
         EMPTY_BUF(bufs[0])) {
-      done(0, user_data);
+      done(0);
       return 0;
     }
     size_t n = 0;
@@ -236,28 +229,26 @@ class QuicBuffer : public MemoryRetainer {
     length_ += bufs[n].len;
     rlength_ += bufs[n].len;
     len += bufs[n].len;
-    Push(bufs[n], done, user_data, keep_alive);
+    Push(bufs[n], done, keep_alive);
     return len;
   }
 
   // Push a single malloc buf into the buffer.
   // The done_cb will be invoked when the buf is consumed
-  // and popped out of the internal linked list. The user_data
-  // is passed into the done_cb. The keep_alive allows a
+  // and popped out of the internal linked list. The keep_alive allows a
   // reference to a JS object to be kept around until the
   // final uv_buf_t is consumed.
   inline size_t Push(
       MallocedBuffer<uint8_t>&& buffer,
       done_cb done = default_quic_buffer_chunk_done,
-      void* user_data = nullptr,
       v8::Local<v8::Object> keep_alive = v8::Local<v8::Object>()) {
     if (buffer.size == 0) {
-      done(0, user_data);
+      done(0);
       return 0;
     }
     length_ += buffer.size;
     rlength_ += buffer.size;
-    Push(new quic_buffer_chunk(std::move(buffer), done, user_data, keep_alive));
+    Push(new quic_buffer_chunk(std::move(buffer), done, keep_alive));
     return buffer.size;
   }
 
@@ -414,9 +405,8 @@ class QuicBuffer : public MemoryRetainer {
   inline void Push(
       uv_buf_t buf,
       done_cb done,
-      void* user_data,
       v8::Local<v8::Object> keep_alive) {
-    Push(new quic_buffer_chunk(buf, done, user_data, keep_alive));
+    Push(new quic_buffer_chunk(buf, done, keep_alive));
   }
 
   inline bool Pop(int status = 0) {
