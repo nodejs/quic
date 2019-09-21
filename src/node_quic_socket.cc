@@ -71,20 +71,14 @@ QuicSocket::QuicSocket(
     HandleWrap(env, wrap,
                reinterpret_cast<uv_handle_t*>(&handle_),
                AsyncWrap::PROVIDER_QUICSOCKET),
-    flags_(QUICSOCKET_FLAGS_NONE),
     options_(options),
-    pending_callbacks_(0),
     max_connections_per_host_(max_connections_per_host),
-    current_ngtcp2_memory_(0),
     retry_token_expiration_(retry_token_expiration),
-    rx_loss_(0.0),
-    tx_loss_(0.0),
-    server_secure_context_(nullptr),
     server_alpn_(NGTCP2_ALPN_H3),
     stats_buffer_(
-      env->isolate(),
-      sizeof(socket_stats_) / sizeof(uint64_t),
-      reinterpret_cast<uint64_t*>(&socket_stats_)),
+        env->isolate(),
+        sizeof(socket_stats_) / sizeof(uint64_t),
+        reinterpret_cast<uint64_t*>(&socket_stats_)),
     alloc_info_(MakeAllocator()) {
   CHECK_EQ(uv_udp_init(env->event_loop(), &handle_), 0);
   Debug(this, "New QuicSocket created.");
@@ -282,23 +276,19 @@ void QuicSocket::OnAlloc(
     uv_handle_t* handle,
     size_t suggested_size,
     uv_buf_t* buf) {
-  buf->base = node::Malloc(suggested_size);
-  buf->len = suggested_size;
+  QuicSocket* socket =
+      ContainerOf(&QuicSocket::handle_, reinterpret_cast<uv_udp_t*>(handle));
+  *buf = socket->env()->AllocateManaged(suggested_size).release();
 }
 
 void QuicSocket::OnRecv(
     uv_udp_t* handle,
     ssize_t nread,
-    const uv_buf_t* buf,
+    const uv_buf_t* buf_,
     const struct sockaddr* addr,
     unsigned int flags) {
-  OnScopeLeave on_scope_leave([&]() {
-    if (buf->base != nullptr)
-      free(buf->base);
-  });
-
-  QuicSocket* socket = static_cast<QuicSocket*>(handle->data);
-  CHECK_NOT_NULL(socket);
+  QuicSocket* socket = ContainerOf(&QuicSocket::handle_, handle);
+  AllocatedBuffer buf(socket->env(), *buf_);
 
   if (nread == 0)
     return;
@@ -313,12 +303,12 @@ void QuicSocket::OnRecv(
     return;
   }
 
-  socket->Receive(nread, buf, addr, flags);
+  socket->Receive(nread, std::move(buf), addr, flags);
 }
 
 void QuicSocket::Receive(
     ssize_t nread,
-    const uv_buf_t* buf,
+    AllocatedBuffer buf,
     const struct sockaddr* addr,
     unsigned int flags) {
   Debug(this, "Receiving %d bytes from the UDP socket.", nread);
@@ -332,7 +322,7 @@ void QuicSocket::Receive(
 
   IncrementSocketStat(nread, &socket_stats_, &socket_stats::bytes_received);
 
-  const uint8_t* data = reinterpret_cast<const uint8_t*>(buf->base);
+  const uint8_t* data = reinterpret_cast<const uint8_t*>(buf.data());
 
   uint32_t pversion;
   const uint8_t* pdcid;
@@ -365,8 +355,8 @@ void QuicSocket::Receive(
   QuicCID dcid(pdcid, pdcidlen);
   QuicCID scid(pscid, pscidlen);
 
-  auto dcid_hex = dcid.ToHex();
-  auto dcid_str = dcid.ToStr();
+  std::string dcid_hex = dcid.ToHex();
+  std::string dcid_str = dcid.ToStr();
   Debug(this, "Received a QUIC packet for dcid %s", dcid_hex.c_str());
 
   // Grabbing a shared pointer to prevent the QuicSession from
@@ -625,11 +615,11 @@ void QuicSocket::SetValidatedAddress(const sockaddr* addr) {
   }
 }
 
-bool QuicSocket::IsValidatedAddress(const sockaddr* addr) {
+bool QuicSocket::IsValidatedAddress(const sockaddr* addr) const {
   if (IsOptionSet(QUICSOCKET_OPTIONS_VALIDATE_ADDRESS_LRU)) {
     auto res = std::find(std::begin(validated_addrs_),
                          std::end(validated_addrs_),
-                         addr_hash((addr)));
+                         addr_hash(addr));
     return res != std::end(validated_addrs_);
   }
   return false;
@@ -643,7 +633,6 @@ std::shared_ptr<QuicSession> QuicSocket::AcceptInitialPacket(
     const uint8_t* data,
     const struct sockaddr* addr,
     unsigned int flags) {
-  std::shared_ptr<QuicSession> session;
   HandleScope handle_scope(env()->isolate());
   Context::Scope context_scope(env()->context());
   ngtcp2_pkt_hd hd;
@@ -653,7 +642,7 @@ std::shared_ptr<QuicSession> QuicSocket::AcceptInitialPacket(
 
   if (!IsFlagSet(QUICSOCKET_FLAGS_SERVER_LISTENING)) {
     Debug(this, "QuicSocket is not listening");
-    return session;
+    return {};
   }
 
   // Perform some initial checks on the packet to see if it is an
@@ -663,9 +652,8 @@ std::shared_ptr<QuicSession> QuicSocket::AcceptInitialPacket(
       SendVersionNegotiation(version, dcid, scid, addr);
       // Fall-through to ignore packet
     case QuicServerSession::InitialPacketResult::PACKET_IGNORE:
-      return session;
+      return {};
     case QuicServerSession::InitialPacketResult::PACKET_OK:
-      // Fall-through
       break;
   }
 
@@ -711,7 +699,7 @@ std::shared_ptr<QuicSession> QuicSocket::AcceptInitialPacket(
               retry_token_expiration_)) {
         Debug(this, "A valid retry token was not found. Sending retry.");
         SendRetry(version, dcid, scid, addr);
-        return session;
+        return {};
       }
       Debug(this, "A valid retry token was found. Continuing.");
       SetValidatedAddress(addr);
@@ -721,7 +709,7 @@ std::shared_ptr<QuicSession> QuicSocket::AcceptInitialPacket(
     }
   }
 
-  session =
+  std::shared_ptr<QuicSession> session {
       QuicServerSession::New(
           this,
           &server_session_config_,
@@ -732,7 +720,7 @@ std::shared_ptr<QuicSession> QuicSocket::AcceptInitialPacket(
           version,
           server_alpn_,
           server_options_,
-          initial_connection_close);
+          initial_connection_close) };
   Local<Value> arg = session->object();
   MakeCallback(env()->quic_on_session_ready_function(), 1, &arg);
 
@@ -762,7 +750,7 @@ size_t QuicSocket::GetCurrentSocketAddressCounter(const sockaddr* addr) {
   auto it = addr_counts_.find(addr);
   if (it == std::end(addr_counts_))
     return 0;
-  return (*it).second;
+  return it->second;
 }
 
 void QuicSocket::SetServerBusy(bool on) {
@@ -841,13 +829,13 @@ void QuicSocket::OnSend(
     size_t length,
     const char* diagnostic_label) {
   IncrementSocketStat(
-    length,
-    &socket_stats_,
-    &socket_stats::bytes_sent);
+      length,
+      &socket_stats_,
+      &socket_stats::bytes_sent);
   IncrementSocketStat(
-    1,
-    &socket_stats_,
-    &socket_stats::packets_sent);
+      1,
+      &socket_stats_,
+      &socket_stats::packets_sent);
 
   Debug(this, "Packet sent status: %d (label: %s)",
         status,
@@ -928,18 +916,16 @@ QuicSocket::SendWrap::SendWrap(
     SocketAddress* dest,
     QuicBuffer* buffer,
     std::shared_ptr<QuicSession> session,
-    const char* diagnostic_label) :
-    SendWrapBase(socket, **dest, diagnostic_label),
-    buffer_(buffer),
-    session_(session) {}
+    const char* diagnostic_label)
+  : SendWrap(socket, **dest, buffer, session, diagnostic_label) {}
 
 QuicSocket::SendWrap::SendWrap(
     QuicSocket* socket,
     const sockaddr* dest,
     QuicBuffer* buffer,
     std::shared_ptr<QuicSession> session,
-    const char* diagnostic_label) :
-    SendWrapBase(socket, dest, diagnostic_label),
+    const char* diagnostic_label)
+  : SendWrapBase(socket, dest, diagnostic_label),
     buffer_(buffer),
     session_(session) {}
 
@@ -1029,12 +1015,15 @@ void NewQuicSocket(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   CHECK(args.IsConstructCall());
 
-  uint32_t options = 0;
-  USE(args[0]->Uint32Value(env->context()).To(&options));
-  uint32_t retry_token_expiration = DEFAULT_RETRYTOKEN_EXPIRATION;
-  uint32_t max_connections_per_host = DEFAULT_MAX_CONNECTIONS_PER_HOST;
-  USE(args[1]->Uint32Value(env->context()).To(&retry_token_expiration));
-  USE(args[2]->Uint32Value(env->context()).To(&max_connections_per_host));
+  uint32_t options;
+  uint32_t retry_token_expiration;
+  uint32_t max_connections_per_host;
+
+  if (!args[0]->Uint32Value(env->context()).To(&options) ||
+      !args[1]->Uint32Value(env->context()).To(&retry_token_expiration) ||
+      !args[2]->Uint32Value(env->context()).To(&max_connections_per_host)) {
+    return;
+  }
   CHECK_GE(retry_token_expiration, MIN_RETRYTOKEN_EXPIRATION);
   CHECK_LE(retry_token_expiration, MAX_RETRYTOKEN_EXPIRATION);
 
@@ -1054,14 +1043,13 @@ void NewQuicSocket(const FunctionCallbackInfo<Value>& args) {
 // arguments to a value between 0.0 and 1.0. Setting both values to 0.0
 // disables the mechanism.
 void QuicSocketSetDiagnosticPacketLoss(
-  const FunctionCallbackInfo<Value>& args) {
+    const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   QuicSocket* socket;
   ASSIGN_OR_RETURN_UNWRAP(&socket, args.Holder());
-  double rx = 0.0f;
-  double tx = 0.0f;
-  USE(args[0]->NumberValue(env->context()).To(&rx));
-  USE(args[1]->NumberValue(env->context()).To(&tx));
+  double rx, tx;
+  if (!args[0]->NumberValue(env->context()).To(&rx) ||
+      !args[1]->NumberValue(env->context()).To(&tx)) return;
   CHECK_GE(rx, 0.0f);
   CHECK_GE(tx, 0.0f);
   CHECK_LE(rx, 1.0f);
@@ -1128,7 +1116,8 @@ void QuicSocketListen(const FunctionCallbackInfo<Value>& args) {
   QuicSocket* socket;
   ASSIGN_OR_RETURN_UNWRAP(&socket, args.Holder(),
                           args.GetReturnValue().Set(UV_EBADF));
-  CHECK(args[0]->IsObject());  // Secure Context
+  CHECK(args[0]->IsObject() &&
+        env->secure_context_constructor_template()->HasInstance(args[0]));
   SecureContext* sc;
   ASSIGN_OR_RETURN_UNWRAP(&sc, args[0].As<Object>(),
                           args.GetReturnValue().Set(UV_EBADF));
@@ -1140,9 +1129,10 @@ void QuicSocketListen(const FunctionCallbackInfo<Value>& args) {
     node::Utf8Value preferred_address_host(args.GetIsolate(), args[1]);
     int32_t preferred_address_family;
     uint32_t preferred_address_port;
-    if (args[2]->Int32Value(env->context()).To(&preferred_address_family) &&
-        args[3]->Uint32Value(env->context()).To(&preferred_address_port) &&
-        SocketAddress::ToSockAddr(
+    if (!args[2]->Int32Value(env->context()).To(&preferred_address_family) ||
+        !args[3]->Uint32Value(env->context()).To(&preferred_address_port))
+      return;
+    if (SocketAddress::ToSockAddr(
             preferred_address_family,
             *preferred_address_host,
             preferred_address_port,
@@ -1160,7 +1150,7 @@ void QuicSocketListen(const FunctionCallbackInfo<Value>& args) {
   }
 
   uint32_t options = 0;
-  USE(args[5]->Uint32Value(env->context()).To(&options));
+  if (!args[5]->Uint32Value(env->context()).To(&options)) return;
 
   socket->Listen(sc, preferred_address, alpn, options);
 }

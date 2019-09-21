@@ -340,11 +340,11 @@ class QuicCID {
     ngtcp2_cid_init(&cid_, cid, len);
   }
 
-  std::string ToStr() {
+  std::string ToStr() const {
     return std::string(cid_.data, cid_.data + cid_.datalen);
   }
 
-  std::string ToHex() {
+  std::string ToHex() const {
     MaybeStackBuffer<char, 64> dest;
     dest.AllocateSufficientStorage(cid_.datalen * 2);
     dest.SetLengthAndZeroTerminate(cid_.datalen * 2);
@@ -359,8 +359,7 @@ class QuicCID {
   const ngtcp2_cid* operator*() const { return &cid_; }
 
   uint8_t* data() { return cid_.data; }
-
-  size_t length() { return cid_.datalen; }
+  size_t length() const { return cid_.datalen; }
 
  private:
   ngtcp2_cid cid_;

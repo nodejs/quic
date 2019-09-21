@@ -146,7 +146,7 @@ class QuicSocket : public HandleWrap,
 
   void Receive(
       ssize_t nread,
-      const uv_buf_t* buf,
+      AllocatedBuffer buf,
       const struct sockaddr* addr,
       unsigned int flags);
 
@@ -168,8 +168,7 @@ class QuicSocket : public HandleWrap,
       const char* diagnostic_label);
 
   void SetValidatedAddress(const sockaddr* addr);
-
-  bool IsValidatedAddress(const sockaddr* addr);
+  bool IsValidatedAddress(const sockaddr* addr) const;
 
   std::shared_ptr<QuicSession> AcceptInitialPacket(
       uint32_t version,
@@ -223,7 +222,7 @@ class QuicSocket : public HandleWrap,
       flags_ &= ~flag;
   }
 
-  bool IsFlagSet(QuicSocketFlags flag) {
+  bool IsFlagSet(QuicSocketFlags flag) const {
     return flags_ & flag;
   }
 
@@ -234,28 +233,28 @@ class QuicSocket : public HandleWrap,
       options_ &= ~option;
   }
 
-  bool IsOptionSet(QuicSocketOptions option) {
+  bool IsOptionSet(QuicSocketOptions option) const {
     return options_ & option;
   }
 
   uv_udp_t handle_;
-  uint32_t flags_;
+  uint32_t flags_ = QUICSOCKET_FLAGS_NONE;
   uint32_t options_;
   uint32_t server_options_;
 
-  size_t pending_callbacks_;
+  size_t pending_callbacks_ = 0;
   size_t max_connections_per_host_;
-  size_t current_ngtcp2_memory_;
+  size_t current_ngtcp2_memory_ = 0;
 
   uint64_t retry_token_expiration_;
 
   // Used to specify diagnostic packet loss probabilities
-  double rx_loss_;
-  double tx_loss_;
+  double rx_loss_ = 0.0;
+  double tx_loss_ = 0.0;
 
   SocketAddress local_address_;
   QuicSessionConfig server_session_config_;
-  crypto::SecureContext* server_secure_context_;
+  crypto::SecureContext* server_secure_context_ = nullptr;
   std::string server_alpn_;
   std::unordered_map<std::string, std::shared_ptr<QuicSession>> sessions_;
   std::unordered_map<std::string, std::string> dcid_to_scid_;
@@ -270,7 +269,7 @@ class QuicSocket : public HandleWrap,
   // attempts to create new connections will be ignored
   // until the value falls back below the limit.
   std::unordered_map<const sockaddr*, size_t, SocketAddress::Hash>
-    addr_counts_;
+      addr_counts_;
 
   // The validated_addrs_ vector is used as an LRU cache for
   // validated addresses only when the VALIDATE_ADDRESS_LRU

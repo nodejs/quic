@@ -32,61 +32,56 @@ namespace quic {
 QuicStream::QuicStream(
     QuicSession* session,
     Local<Object> wrap,
-    int64_t stream_id) :
-    AsyncWrap(session->env(), wrap, AsyncWrap::PROVIDER_QUICSTREAM),
+    int64_t stream_id)
+  : AsyncWrap(session->env(), wrap, AsyncWrap::PROVIDER_QUICSTREAM),
     StreamBase(session->env()),
     session_(session),
     stream_id_(stream_id),
-    max_offset_(0),
-    max_offset_ack_(0),
-    flags_(QUICSTREAM_FLAG_INITIAL),
-    available_outbound_length_(0),
-    inbound_consumed_data_while_paused_(0),
     data_rx_rate_(
-      HistogramBase::New(
-        session->env(),
-        1, std::numeric_limits<int64_t>::max())),
+        HistogramBase::New(
+            session->env(),
+            1, std::numeric_limits<int64_t>::max())),
     data_rx_size_(
-      HistogramBase::New(
-        session->env(),
-        1, NGTCP2_MAX_PKT_SIZE)),
+        HistogramBase::New(
+            session->env(),
+            1, NGTCP2_MAX_PKT_SIZE)),
     data_rx_ack_(
-      HistogramBase::New(
-        session->env(),
-        1, std::numeric_limits<int64_t>::max())),
+        HistogramBase::New(
+            session->env(),
+            1, std::numeric_limits<int64_t>::max())),
     stats_buffer_(
-      session->env()->isolate(),
-      sizeof(stream_stats_) / sizeof(uint64_t),
-      reinterpret_cast<uint64_t*>(&stream_stats_)) {
+        session->env()->isolate(),
+        sizeof(stream_stats_) / sizeof(uint64_t),
+        reinterpret_cast<uint64_t*>(&stream_stats_)) {
   CHECK_NOT_NULL(session);
   session->AddStream(this);
   Debug(this, "Created");
   StreamBase::AttachToObject(GetObject());
   stream_stats_.created_at = uv_hrtime();
 
-  USE(wrap->DefineOwnProperty(
-      env()->context(),
-      env()->stats_string(),
-      stats_buffer_.GetJSArray(),
-      PropertyAttribute::ReadOnly));
+  if (wrap->DefineOwnProperty(
+          env()->context(),
+          env()->stats_string(),
+          stats_buffer_.GetJSArray(),
+          PropertyAttribute::ReadOnly).IsNothing()) return;
 
-  USE(wrap->DefineOwnProperty(
-      env()->context(),
-      FIXED_ONE_BYTE_STRING(env()->isolate(), "data_rx_rate"),
-      data_rx_rate_->object(),
-      PropertyAttribute::ReadOnly));
+  if (wrap->DefineOwnProperty(
+          env()->context(),
+          FIXED_ONE_BYTE_STRING(env()->isolate(), "data_rx_rate"),
+          data_rx_rate_->object(),
+          PropertyAttribute::ReadOnly).IsNothing()) return;
 
-  USE(wrap->DefineOwnProperty(
-      env()->context(),
-      FIXED_ONE_BYTE_STRING(env()->isolate(), "data_rx_size"),
-      data_rx_size_->object(),
-      PropertyAttribute::ReadOnly));
+  if (wrap->DefineOwnProperty(
+          env()->context(),
+          FIXED_ONE_BYTE_STRING(env()->isolate(), "data_rx_size"),
+          data_rx_size_->object(),
+          PropertyAttribute::ReadOnly).IsNothing()) return;
 
-  USE(wrap->DefineOwnProperty(
-      env()->context(),
-      FIXED_ONE_BYTE_STRING(env()->isolate(), "data_rx_ack"),
-      data_rx_ack_->object(),
-      PropertyAttribute::ReadOnly));
+  if (wrap->DefineOwnProperty(
+          env()->context(),
+          FIXED_ONE_BYTE_STRING(env()->isolate(), "data_rx_ack"),
+          data_rx_ack_->object(),
+          PropertyAttribute::ReadOnly).IsNothing()) return;
 }
 
 std::string QuicStream::diagnostic_name() const {
@@ -139,7 +134,7 @@ int QuicStream::DoShutdown(ShutdownWrap* req_wrap) {
   // Do nothing if the stream was already shutdown. Specifically,
   // we should not attempt to send anything on the QuicSession
   if (!IsWritable())
-    return 1;
+    return UV_EPIPE;
   stream_stats_.closing_at = uv_hrtime();
   SetWriteClose();
 
@@ -162,7 +157,7 @@ int QuicStream::DoWrite(
   // A write should not have happened if we've been destroyed or
   // the QuicStream is no longer (or was never) writable.
   if (IsDestroyed() || !IsWritable()) {
-    req_wrap->Done(UV_EOF);
+    req_wrap->Done(UV_EPIPE);
     return 0;
   }
 
@@ -430,7 +425,7 @@ void QuicStreamShutdown(const FunctionCallbackInfo<Value>& args) {
 
   uint32_t family = QUIC_ERROR_APPLICATION;
   uint64_t code = ExtractErrorCode(env, args[0]);
-  USE(args[1]->Uint32Value(env->context()).To(&family));
+  if (!args[1]->Uint32Value(env->context()).To(&family)) return;
 
   stream->Shutdown(
       family == QUIC_ERROR_APPLICATION ?

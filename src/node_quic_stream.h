@@ -352,13 +352,13 @@ class QuicStream : public AsyncWrap,
 
   QuicSession* session_;
   int64_t stream_id_;
-  uint64_t max_offset_;
-  uint64_t max_offset_ack_;
-  uint32_t flags_;
+  uint64_t max_offset_ = 0;
+  uint64_t max_offset_ack_ = 0;
+  uint32_t flags_ = QUICSTREAM_FLAG_INITIAL;
 
   QuicBuffer streambuf_;
-  size_t available_outbound_length_;
-  size_t inbound_consumed_data_while_paused_;
+  size_t available_outbound_length_ = 0;
+  size_t inbound_consumed_data_while_paused_ = 0;
 
   struct stream_stats {
     // The timestamp at which the stream was created
