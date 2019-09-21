@@ -29,26 +29,6 @@ using v8::Value;
 
 namespace quic {
 
-uv_buf_t QuicStreamListener::OnStreamAlloc(size_t size) {
-  Environment* env = static_cast<QuicStream*>(stream_)->env();
-  return env->AllocateManaged(size).release();
-}
-
-void QuicStreamListener::OnStreamRead(ssize_t nread, const uv_buf_t& buf) {
-  QuicStream* stream = static_cast<QuicStream*>(stream_);
-  Environment* env = stream->env();
-  HandleScope handle_scope(env->isolate());
-  Context::Scope context_scope(env->context());
-
-  if (nread < 0) {
-    PassReadErrorToPreviousListener(nread);
-    return;
-  }
-
-  AllocatedBuffer buffer(stream->env(), buf);
-  stream->CallJSOnreadMethod(nread, buffer.ToArrayBuffer());
-}
-
 QuicStream::QuicStream(
     QuicSession* session,
     Local<Object> wrap,
@@ -82,7 +62,6 @@ QuicStream::QuicStream(
   session->AddStream(this);
   Debug(this, "Created");
   StreamBase::AttachToObject(GetObject());
-  PushStreamListener(&stream_listener_);
   stream_stats_.created_at = uv_hrtime();
 
   USE(wrap->DefineOwnProperty(

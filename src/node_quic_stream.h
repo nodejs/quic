@@ -19,12 +19,6 @@ namespace quic {
 class QuicSession;
 class QuicServerSession;
 
-class QuicStreamListener : public StreamListener {
- public:
-  uv_buf_t OnStreamAlloc(size_t suggested_size) override;
-  void OnStreamRead(ssize_t nread, const uv_buf_t& buf) override;
-};
-
 // QuicStream's are simple data flows that, fortunately, do not
 // require much. They may be:
 //
@@ -356,7 +350,6 @@ class QuicStream : public AsyncWrap,
 
   inline void IncrementStats(size_t datalen);
 
-  QuicStreamListener stream_listener_;
   QuicSession* session_;
   int64_t stream_id_;
   uint64_t max_offset_;
