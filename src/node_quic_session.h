@@ -41,44 +41,42 @@ class QuicStream;
 // in non-numeric settings (e.g. preferred_addr).
 class QuicSessionConfig {
  public:
-  inline QuicSessionConfig() {
+  QuicSessionConfig() {
     ResetToDefaults();
   }
 
-  inline explicit QuicSessionConfig(Environment* env) {
-    ResetToDefaults();
+  explicit QuicSessionConfig(Environment* env) : QuicSessionConfig() {
     Set(env);
   }
 
-  inline QuicSessionConfig(const QuicSessionConfig& config) {
-    memcpy(&settings_, &config.settings_, sizeof(ngtcp2_settings));
+  QuicSessionConfig(const QuicSessionConfig& config) {
+    settings_ = config.settings_;
     max_crypto_buffer_ = config.max_crypto_buffer_;
     settings_.initial_ts = uv_hrtime();
   }
 
-  inline uint64_t max_streams_bidi() const {
+  uint64_t max_streams_bidi() const {
     return settings_.max_streams_bidi;
   }
 
-  inline uint64_t max_streams_uni() const {
+  uint64_t max_streams_uni() const {
     return settings_.max_streams_uni;
   }
 
-  inline void ResetToDefaults();
+  void ResetToDefaults();
 
   // QuicSessionConfig::Set() pulls values out of the AliasedBuffer
   // defined in node_quic_state.h and stores the values in settings_.
   // If preferred_addr is not nullptr, it is copied into the
   // settings_.preferred_addr field
-  inline void Set(
-      Environment* env,
-      const struct sockaddr* preferred_addr = nullptr);
+  void Set(Environment* env,
+           const struct sockaddr* preferred_addr = nullptr);
 
   // Generates the stateless reset token for the settings_
-  inline void GenerateStatelessResetToken();
+  void GenerateStatelessResetToken();
 
   // If the preferred address is set, generates the associated tokens
-  inline void GeneratePreferredAddressToken(ngtcp2_cid* pscid);
+  void GeneratePreferredAddressToken(ngtcp2_cid* pscid);
 
   uint64_t GetMaxCryptoBuffer() const { return max_crypto_buffer_; }
 
@@ -212,16 +210,16 @@ class QuicSession : public AsyncWrap,
 
   std::string diagnostic_name() const override;
 
-  inline QuicError GetLastError();
+  inline QuicError GetLastError() const;
   inline void SetTLSAlert(int err);
 
   // Returns true if StartGracefulClose() has been called and the
   // QuicSession is currently in the process of a graceful close.
-  inline bool IsGracefullyClosing();
+  inline bool IsGracefullyClosing() const;
 
   // Returns true if Destroy() has been called and the
   // QuicSession is no longer usable.
-  inline bool IsDestroyed();
+  inline bool IsDestroyed() const;
 
   // Starting a GracefulClose disables the ability to open or accept
   // new streams for this session. Existing streams are allowed to
@@ -387,7 +385,7 @@ class QuicSession : public AsyncWrap,
   inline QuicStream* FindStream(int64_t id);
   inline bool HasStream(int64_t id);
 
-  bool IsHandshakeSuspended() {
+  bool IsHandshakeSuspended() const {
     return IsFlagSet(QUICSESSION_FLAG_CERT_CB_RUNNING) ||
            IsFlagSet(QUICSESSION_FLAG_CLIENT_HELLO_CB_RUNNING);
   }
@@ -548,50 +546,24 @@ class QuicSession : public AsyncWrap,
   virtual int VerifyPeerIdentity(const char* hostname) = 0;
 
   // static ngtcp2 callbacks
-  static inline int OnClientInitial(
+  static int OnClientInitial(
       ngtcp2_conn* conn,
       void* user_data);
-  static inline int OnReceiveClientInitial(
+  static int OnReceiveClientInitial(
       ngtcp2_conn* conn,
       const ngtcp2_cid* dcid,
       void* user_data);
-  static inline int OnReceiveCryptoData(
+  static int OnReceiveCryptoData(
       ngtcp2_conn* conn,
       ngtcp2_crypto_level crypto_level,
       uint64_t offset,
       const uint8_t* data,
       size_t datalen,
       void* user_data);
-  static inline int OnHandshakeCompleted(
+  static int OnHandshakeCompleted(
       ngtcp2_conn* conn,
       void* user_data);
-  static inline ssize_t OnDoHSEncrypt(
-      ngtcp2_conn* conn,
-      uint8_t* dest,
-      size_t destlen,
-      const uint8_t* plaintext,
-      size_t plaintextlen,
-      const uint8_t* key,
-      size_t keylen,
-      const uint8_t* nonce,
-      size_t noncelen,
-      const uint8_t* ad,
-      size_t adlen,
-      void* user_data);
-  static inline ssize_t OnDoHSDecrypt(
-      ngtcp2_conn* conn,
-      uint8_t* dest,
-      size_t destlen,
-      const uint8_t* ciphertext,
-      size_t ciphertextlen,
-      const uint8_t* key,
-      size_t keylen,
-      const uint8_t* nonce,
-      size_t noncelen,
-      const uint8_t* ad,
-      size_t adlen,
-      void* user_data);
-  static inline ssize_t OnDoEncrypt(
+  static ssize_t OnDoHSEncrypt(
       ngtcp2_conn* conn,
       uint8_t* dest,
       size_t destlen,
@@ -604,7 +576,7 @@ class QuicSession : public AsyncWrap,
       const uint8_t* ad,
       size_t adlen,
       void* user_data);
-  static inline ssize_t OnDoDecrypt(
+  static ssize_t OnDoHSDecrypt(
       ngtcp2_conn* conn,
       uint8_t* dest,
       size_t destlen,
@@ -617,7 +589,33 @@ class QuicSession : public AsyncWrap,
       const uint8_t* ad,
       size_t adlen,
       void* user_data);
-  static inline ssize_t OnDoInHPMask(
+  static ssize_t OnDoEncrypt(
+      ngtcp2_conn* conn,
+      uint8_t* dest,
+      size_t destlen,
+      const uint8_t* plaintext,
+      size_t plaintextlen,
+      const uint8_t* key,
+      size_t keylen,
+      const uint8_t* nonce,
+      size_t noncelen,
+      const uint8_t* ad,
+      size_t adlen,
+      void* user_data);
+  static ssize_t OnDoDecrypt(
+      ngtcp2_conn* conn,
+      uint8_t* dest,
+      size_t destlen,
+      const uint8_t* ciphertext,
+      size_t ciphertextlen,
+      const uint8_t* key,
+      size_t keylen,
+      const uint8_t* nonce,
+      size_t noncelen,
+      const uint8_t* ad,
+      size_t adlen,
+      void* user_data);
+  static ssize_t OnDoInHPMask(
       ngtcp2_conn* conn,
       uint8_t* dest,
       size_t destlen,
@@ -626,7 +624,7 @@ class QuicSession : public AsyncWrap,
       const uint8_t* sample,
       size_t samplelen,
       void* user_data);
-  static inline ssize_t OnDoHPMask(
+  static ssize_t OnDoHPMask(
       ngtcp2_conn* conn,
       uint8_t* dest,
       size_t destlen,
@@ -635,7 +633,7 @@ class QuicSession : public AsyncWrap,
       const uint8_t* sample,
       size_t samplelen,
       void* user_data);
-  static inline int OnReceiveStreamData(
+  static int OnReceiveStreamData(
       ngtcp2_conn* conn,
       int64_t stream_id,
       int fin,
@@ -644,94 +642,92 @@ class QuicSession : public AsyncWrap,
       size_t datalen,
       void* user_data,
       void* stream_user_data);
-  static inline int OnReceiveRetry(
+  static int OnReceiveRetry(
       ngtcp2_conn* conn,
       const ngtcp2_pkt_hd* hd,
       const ngtcp2_pkt_retry* retry,
       void* user_data);
-  static inline int OnAckedCryptoOffset(
+  static int OnAckedCryptoOffset(
       ngtcp2_conn* conn,
       ngtcp2_crypto_level crypto_level,
       uint64_t offset,
       size_t datalen,
       void* user_data);
-  static inline int OnAckedStreamDataOffset(
+  static int OnAckedStreamDataOffset(
       ngtcp2_conn* conn,
       int64_t stream_id,
       uint64_t offset,
       size_t datalen,
       void* user_data,
       void* stream_user_data);
-  static inline int OnSelectPreferredAddress(
+  static int OnSelectPreferredAddress(
       ngtcp2_conn* conn,
       ngtcp2_addr* dest,
       const ngtcp2_preferred_addr* paddr,
       void* user_data);
-  static inline int OnStreamClose(
+  static int OnStreamClose(
       ngtcp2_conn* conn,
       int64_t stream_id,
       uint64_t app_error_code,
       void* user_data,
       void* stream_user_data);
-  static inline int OnStreamOpen(
+  static int OnStreamOpen(
       ngtcp2_conn* conn,
       int64_t stream_id,
       void* user_data);
-  static inline int OnStreamReset(
+  static int OnStreamReset(
       ngtcp2_conn* conn,
       int64_t stream_id,
       uint64_t final_size,
       uint64_t app_error_code,
       void* user_data,
       void* stream_user_data);
-  static inline int OnRand(
+  static int OnRand(
       ngtcp2_conn* conn,
       uint8_t* dest,
       size_t destlen,
       ngtcp2_rand_ctx ctx,
       void* user_data);
-  static inline int OnGetNewConnectionID(
+  static int OnGetNewConnectionID(
       ngtcp2_conn* conn,
       ngtcp2_cid* cid,
       uint8_t* token,
       size_t cidlen,
       void* user_data);
-  static inline int OnRemoveConnectionID(
+  static int OnRemoveConnectionID(
       ngtcp2_conn* conn,
       const ngtcp2_cid* cid,
       void* user_data);
-  static inline int OnUpdateKey(
+  static int OnUpdateKey(
       ngtcp2_conn* conn,
       void* user_data);
-  static inline int OnPathValidation(
+  static int OnPathValidation(
       ngtcp2_conn* conn,
       const ngtcp2_path* path,
       ngtcp2_path_validation_result res,
       void* user_data);
-  static inline void OnIdleTimeout(
-      uv_timer_t* timer);
-  static inline int OnExtendMaxStreamsUni(
+  static int OnExtendMaxStreamsUni(
       ngtcp2_conn* conn,
       uint64_t max_streams,
       void* user_data);
-  static inline int OnExtendMaxStreamsBidi(
+  static int OnExtendMaxStreamsBidi(
       ngtcp2_conn* conn,
       uint64_t max_streams,
       void* user_data);
-  static inline int OnExtendMaxStreamData(
+  static int OnExtendMaxStreamData(
       ngtcp2_conn* conn,
       int64_t stream_id,
       uint64_t max_data,
       void* user_data,
       void* stream_user_data);
-  static inline int OnVersionNegotiation(
+  static int OnVersionNegotiation(
       ngtcp2_conn* conn,
       const ngtcp2_pkt_hd* hd,
       const uint32_t* sv,
       size_t nsv,
       void* user_data);
-  static inline void OnKeylog(const SSL* ssl, const char* line);
-  static inline int OnStatelessReset(
+  static void OnKeylog(const SSL* ssl, const char* line);
+  static int OnStatelessReset(
       ngtcp2_conn* conn,
       const ngtcp2_pkt_stateless_reset* sr,
       void* user_data);
@@ -783,7 +779,7 @@ class QuicSession : public AsyncWrap,
       flags_ &= ~flag;
   }
 
-  bool IsFlagSet(QuicSessionFlags flag) {
+  bool IsFlagSet(QuicSessionFlags flag) const {
     return flags_ & flag;
   }
 
@@ -794,7 +790,7 @@ class QuicSession : public AsyncWrap,
       options_ &= ~option;
   }
 
-  bool IsOptionSet(uint32_t option) {
+  bool IsOptionSet(uint32_t option) const {
     return options_ & option;
   }
 
@@ -1121,38 +1117,7 @@ class QuicServerSession : public QuicSession {
   MallocedBuffer<uint8_t> conn_closebuf_;
   v8::Global<v8::ArrayBufferView> ocsp_response_;
 
-  const ngtcp2_conn_callbacks callbacks_ = {
-    nullptr,
-    OnReceiveClientInitial,
-    OnReceiveCryptoData,
-    OnHandshakeCompleted,
-    nullptr,  // recv_version_negotiation
-    OnDoHSEncrypt,
-    OnDoHSDecrypt,
-    OnDoEncrypt,
-    OnDoDecrypt,
-    OnDoInHPMask,
-    OnDoHPMask,
-    OnReceiveStreamData,
-    OnAckedCryptoOffset,
-    OnAckedStreamDataOffset,
-    OnStreamOpen,
-    OnStreamClose,
-    OnStatelessReset,
-    nullptr,  // recv_retry
-    nullptr,  // extend_max_streams_bidi
-    nullptr,  // extend_max_streams_uni
-    OnRand,
-    OnGetNewConnectionID,
-    OnRemoveConnectionID,
-    OnUpdateKey,
-    OnPathValidation,
-    nullptr,  // select_preferred_addr
-    OnStreamReset,
-    OnExtendMaxStreamsBidi,
-    OnExtendMaxStreamsUni,
-    OnExtendMaxStreamData
-  };
+  static const ngtcp2_conn_callbacks callbacks;
 
   friend class QuicSession;
 };
@@ -1260,38 +1225,7 @@ class QuicClientSession : public QuicSession {
   MaybeStackBuffer<char> transportParams_;
 
 
-  const ngtcp2_conn_callbacks callbacks_ = {
-    OnClientInitial,
-    nullptr,
-    OnReceiveCryptoData,
-    OnHandshakeCompleted,
-    OnVersionNegotiation,
-    OnDoHSEncrypt,
-    OnDoHSDecrypt,
-    OnDoEncrypt,
-    OnDoDecrypt,
-    OnDoInHPMask,
-    OnDoHPMask,
-    OnReceiveStreamData,
-    OnAckedCryptoOffset,
-    OnAckedStreamDataOffset,
-    OnStreamOpen,
-    OnStreamClose,
-    OnStatelessReset,
-    OnReceiveRetry,
-    OnExtendMaxStreamsBidi,
-    OnExtendMaxStreamsUni,
-    OnRand,
-    OnGetNewConnectionID,
-    OnRemoveConnectionID,
-    OnUpdateKey,
-    OnPathValidation,
-    OnSelectPreferredAddress,
-    OnStreamReset,
-    OnExtendMaxStreamsBidi,
-    OnExtendMaxStreamsUni,
-    OnExtendMaxStreamData
-  };
+  static const ngtcp2_conn_callbacks callbacks;
 
   friend class QuicSession;
 };
