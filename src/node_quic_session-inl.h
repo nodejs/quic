@@ -11,15 +11,15 @@ namespace node {
 
 namespace quic {
 
-void QuicSession::CheckAllocatedSize(size_t previous_size) {
+void QuicSession::CheckAllocatedSize(size_t previous_size) const {
   CHECK_GE(current_ngtcp2_memory_, previous_size);
 }
 
-void QuicSession::IncrementAllocatedSize(size_t size) {
+void QuicSession::IncreaseAllocatedSize(size_t size) {
   current_ngtcp2_memory_ += size;
 }
 
-void QuicSession::DecrementAllocatedSize(size_t size) {
+void QuicSession::DecreaseAllocatedSize(size_t size) {
   current_ngtcp2_memory_ -= size;
 }
 

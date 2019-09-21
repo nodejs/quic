@@ -5,6 +5,7 @@
 #include "node.h"
 #include "node_crypto.h"
 #include "node_internals.h"
+#include "node_mem-inl.h"
 #include "node_quic_crypto.h"
 #include "node_quic_session-inl.h"
 #include "node_quic_socket.h"
@@ -83,7 +84,8 @@ QuicSocket::QuicSocket(
     stats_buffer_(
       env->isolate(),
       sizeof(socket_stats_) / sizeof(uint64_t),
-      reinterpret_cast<uint64_t*>(&socket_stats_)) {
+      reinterpret_cast<uint64_t*>(&socket_stats_)),
+    alloc_info_(MakeAllocator()) {
   CHECK_EQ(uv_udp_init(env->event_loop(), &handle_), 0);
   Debug(this, "New QuicSocket created.");
 
@@ -486,8 +488,6 @@ void QuicSocket::SendInitialConnectionClose(
   ngtcp2_settings settings;
   ngtcp2_settings_default(&settings);
 
-  mem::Allocator<ngtcp2_mem> allocator(this);
-
   ngtcp2_conn* conn;
   ngtcp2_conn_server_new(
     &conn,
@@ -497,7 +497,7 @@ void QuicSocket::SendInitialConnectionClose(
     version,
     &callbacks,
     &settings,
-    *allocator,
+    &alloc_info_,
     nullptr);
 
   SendWrapStack* req =
@@ -1011,18 +1011,17 @@ void QuicSocket::SetDiagnosticPacketLoss(double rx, double tx) {
   tx_loss_ = tx;
 }
 
-inline void QuicSocket::CheckAllocatedSize(size_t previous_size) {
+void QuicSocket::CheckAllocatedSize(size_t previous_size) const {
   CHECK_GE(current_ngtcp2_memory_, previous_size);
 }
 
-inline void QuicSocket::IncrementAllocatedSize(size_t size) {
+void QuicSocket::IncreaseAllocatedSize(size_t size) {
   current_ngtcp2_memory_ += size;
 }
 
-inline void QuicSocket::DecrementAllocatedSize(size_t size) {
+void QuicSocket::DecreaseAllocatedSize(size_t size) {
   current_ngtcp2_memory_ -= size;
 }
-
 
 // JavaScript API
 namespace {

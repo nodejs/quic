@@ -622,6 +622,7 @@
         'src/node_internals.h',
         'src/node_main_instance.h',
         'src/node_mem.h',
+        'src/node_mem-inl.h',
         'src/node_messaging.h',
         'src/node_metadata.h',
         'src/node_mutex.h',

@@ -183,7 +183,7 @@ enum QuicSessionState : int {
 // a QuicSession object.
 class QuicSession : public AsyncWrap,
                     public std::enable_shared_from_this<QuicSession>,
-                    public mem::Tracker {
+                    public mem::NgLibMemoryManager<QuicSession, ngtcp2_mem> {
  public:
   static const int kInitialClientBufferLength = 4096;
 
@@ -338,10 +338,10 @@ class QuicSession : public AsyncWrap,
   virtual bool SendConnectionClose() = 0;
   virtual int TLSHandshake_Initial() = 0;
 
-  // Implementation for mem::Tracker
-  inline void CheckAllocatedSize(size_t previous_size) override;
-  inline void IncrementAllocatedSize(size_t size) override;
-  inline void DecrementAllocatedSize(size_t size) override;
+  // Implementation for mem::NgLibMemoryManager
+  inline void CheckAllocatedSize(size_t previous_size) const;
+  inline void IncreaseAllocatedSize(size_t size);
+  inline void DecreaseAllocatedSize(size_t size);
 
   // Tracks whether or not we are currently within an ngtcp2 callback
   // function. Certain ngtcp2 APIs are not supposed to be called when
@@ -876,7 +876,7 @@ class QuicSession : public AsyncWrap,
 
   AliasedFloat64Array state_;
 
-  mem::Allocator<ngtcp2_mem> allocator_;
+  ngtcp2_mem alloc_info_;
 
   struct session_stats {
     // The timestamp at which the session was created

@@ -44,7 +44,7 @@ enum QuicSocketOptions : uint32_t {
 };
 
 class QuicSocket : public HandleWrap,
-                   public mem::Tracker {
+                   public mem::NgLibMemoryManager<QuicSocket, ngtcp2_mem> {
  public:
   static void Initialize(
       Environment* env,
@@ -126,10 +126,10 @@ class QuicSocket : public HandleWrap,
   SET_MEMORY_INFO_NAME(QuicSocket)
   SET_SELF_SIZE(QuicSocket)
 
-  // Implementation for mem::Tracker
-  inline void CheckAllocatedSize(size_t previous_size) override;
-  inline void IncrementAllocatedSize(size_t size) override;
-  inline void DecrementAllocatedSize(size_t size) override;
+  // Implementation for mem::NgLibMemoryManager
+  void CheckAllocatedSize(size_t previous_size) const;
+  void IncreaseAllocatedSize(size_t size);
+  void DecreaseAllocatedSize(size_t size);
 
  private:
   static void OnAlloc(
@@ -318,6 +318,8 @@ class QuicSocket : public HandleWrap,
   socket_stats socket_stats_{0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
   AliasedBigUint64Array stats_buffer_;
+
+  ngtcp2_mem alloc_info_;
 
   template <typename... Members>
   void IncrementSocketStat(

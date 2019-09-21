@@ -6,6 +6,7 @@
 #include "node_buffer.h"
 #include "node_crypto.h"
 #include "node_internals.h"
+#include "node_mem-inl.h"
 #include "node_quic_crypto.h"
 #include "node_quic_session.h"  // NOLINT(build/include_inline)
 #include "node_quic_session-inl.h"
@@ -182,7 +183,7 @@ QuicSession::QuicSession(
     idle_(new Timer(socket->env(), [this]() { OnIdleTimeout(); })),
     retransmit_(new Timer(socket->env(), [this]() { MaybeTimeout(); })),
     state_(env()->isolate(), IDX_QUIC_SESSION_STATE_COUNT),
-    allocator_(this),
+    alloc_info_(MakeAllocator()),
     crypto_rx_ack_(
         HistogramBase::New(
             socket->env(),
@@ -2013,7 +2014,7 @@ void QuicServerSession::Init(
           version,
           &callbacks,
           *cfg,
-          *allocator_,
+          &alloc_info_,
           static_cast<QuicSession*>(this)), 0);
 
   if (ocid)
@@ -2543,7 +2544,7 @@ bool QuicClientSession::Init(
           version,
           &callbacks,
           *config,
-          *allocator_,
+          &alloc_info_,
           static_cast<QuicSession*>(this)), 0);
 
   connection_.reset(conn);
