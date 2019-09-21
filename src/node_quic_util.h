@@ -393,14 +393,10 @@ void IncrementStat(
 // reset the timer; Stop to halt the timer.
 class Timer {
  public:
-  inline explicit Timer(
-      Environment* env,
-      std::function<void(void* data)> fn,
-      void* data = nullptr) :
-      stopped_(false),
+  explicit Timer(Environment* env, std::function<void()> fn)
+    : stopped_(false),
       env_(env),
-      fn_(fn),
-      data_(data) {
+      fn_(fn) {
     uv_timer_init(env_->event_loop(), &timer_);
     timer_.data = this;
     env->AddCleanupHook(CleanupHook, this);
@@ -412,7 +408,7 @@ class Timer {
 
   // Stops the timer with the side effect of the timer no longer being usable.
   // It will be cleaned up and the Timer object will be destroyed.
-  inline void Stop() {
+  void Stop() {
     if (stopped_)
       return;
     stopped_ = true;
@@ -425,7 +421,7 @@ class Timer {
 
   // If the timer is not currently active, interval must be either 0 or greater.
   // If the timer is already active, interval is ignored.
-  inline void Update(uint64_t interval) {
+  void Update(uint64_t interval) {
     if (stopped_)
       return;
     uv_timer_start(&timer_, OnTimeout, interval, interval);
@@ -435,18 +431,13 @@ class Timer {
   static void Free(Timer* timer);
 
  private:
-  inline void OnTimeout() {
-    fn_(data_);
-  }
-
   static void OnTimeout(uv_timer_t* timer);
   static void CleanupHook(void* data);
 
   bool stopped_;
   Environment* env_;
-  std::function<void(void* data)> fn_;
+  std::function<void()> fn_;
   uv_timer_t timer_;
-  void* data_;
 };
 
 using TimerPointer = DeleteFnPtr<Timer, Timer::Free>;

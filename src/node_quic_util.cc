@@ -19,7 +19,7 @@ void Timer::Free(Timer* timer) {
 
 void Timer::OnTimeout(uv_timer_t* timer) {
   Timer* t = ContainerOf(&Timer::timer_, timer);
-  t->OnTimeout();
+  t->fn_();
 }
 
 void Timer::CleanupHook(void* data) {

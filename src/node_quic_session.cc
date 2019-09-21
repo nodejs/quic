@@ -64,8 +64,8 @@ QuicSession::QuicSession(
     alpn_(alpn),
     options_(options),
     initial_connection_close_(initial_connection_close),
-    idle_(new Timer(socket->env(), OnIdleTimeoutCB, this)),
-    retransmit_(new Timer(socket->env(), OnRetransmitTimeoutCB, this)),
+    idle_(new Timer(socket->env(), [this]() { OnIdleTimeout(); })),
+    retransmit_(new Timer(socket->env(), [this]() { MaybeTimeout(); })),
     state_(env()->isolate(), IDX_QUIC_SESSION_STATE_COUNT),
     allocator_(this),
     crypto_rx_ack_(

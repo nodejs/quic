@@ -736,9 +736,6 @@ class QuicSession : public AsyncWrap,
       const ngtcp2_pkt_stateless_reset* sr,
       void* user_data);
 
-  static inline void OnIdleTimeoutCB(void* data);
-  static inline void OnRetransmitTimeoutCB(void* data);
-
   void UpdateIdleTimer();
   void UpdateRetransmitTimer(uint64_t timeout);
   void StopRetransmitTimer();

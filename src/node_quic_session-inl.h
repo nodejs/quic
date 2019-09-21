@@ -652,16 +652,6 @@ inline int Empty(const ngtcp2_vec* vec, size_t cnt) {
   return i == cnt;
 }
 
-inline void QuicSession::OnIdleTimeoutCB(void* data) {
-  QuicSession* session = static_cast<QuicSession*>(data);
-  session->OnIdleTimeout();
-}
-
-inline void QuicSession::OnRetransmitTimeoutCB(void* data) {
-  QuicSession* session = static_cast<QuicSession*>(data);
-  session->MaybeTimeout();
-}
-
 }  // namespace quic
 }  // namespace node
 
