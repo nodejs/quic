@@ -240,16 +240,13 @@ class SocketAddress {
         reinterpret_cast<const sockaddr_in6*>(addr)->sin6_port);
   }
 
-  static void GetAddress(const sockaddr* addr, char** host) {
-    char hostbuf[INET6_ADDRSTRLEN];
+  static void GetAddress(const sockaddr* addr, char* host, size_t host_len) {
     const void* src = addr->sa_family == AF_INET ?
         static_cast<const void*>(
             &(reinterpret_cast<const sockaddr_in*>(addr)->sin_addr)) :
         static_cast<const void*>(
             &(reinterpret_cast<const sockaddr_in6*>(addr)->sin6_addr));
-    if (uv_inet_ntop(addr->sa_family, src, hostbuf, sizeof(hostbuf)) == 0) {
-      *host = hostbuf;
-    }
+    uv_inet_ntop(addr->sa_family, src, host, host_len);
   }
 
   static size_t GetAddressLen(const sockaddr* addr) {

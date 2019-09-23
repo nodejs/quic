@@ -810,8 +810,8 @@ int QuicSocket::SendPacket(
   if (buffer->Length() == 0 || buffer->RemainingLength() == 0)
     return 0;
 
-  char* host;
-  SocketAddress::GetAddress(dest, &host);
+  char host[INET6_ADDRSTRLEN];
+  SocketAddress::GetAddress(dest, host, sizeof(host));
   Debug(this, "Sending to %s at port %d", host, SocketAddress::GetPort(dest));
 
   QuicSocket::SendWrap* wrap =
