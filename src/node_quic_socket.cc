@@ -512,7 +512,7 @@ void QuicSocket::SendInitialConnectionClose(
 
   if (nwrite > 0) {
     req->SetLength(nwrite);
-    req->Send();
+    if (req->Send() != 0) delete req;  // TODO(addaleax): Better error handling?
   }
 }
 
@@ -548,7 +548,7 @@ void QuicSocket::SendVersionNegotiation(
   if (nwrite < 0)
     return;
   req->SetLength(nwrite);
-  req->Send();
+  if (req->Send() != 0) delete req;  // TODO(addaleax): Better error handling?
 }
 
 ssize_t QuicSocket::SendRetry(
@@ -599,7 +599,9 @@ ssize_t QuicSocket::SendRetry(
     return nwrite;
   req->SetLength(nwrite);
 
-  return req->Send();
+  int err = req->Send();
+  if (err != 0) delete req;
+  return err;
 }
 
 namespace {
@@ -821,7 +823,9 @@ int QuicSocket::SendPacket(
           buffer,
           session,
           diagnostic_label);
-  return wrap->Send();
+  int err = wrap->Send();
+  if (err != 0) delete wrap;
+  return err;
 }
 
 void QuicSocket::OnSend(
