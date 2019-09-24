@@ -877,6 +877,7 @@ bool QuicSocket::SendWrapBase::IsDiagnosticPacketLoss() {
 }
 
 void QuicSocket::SendWrapBase::Done(int status) {
+  socket_->env()->DecreaseWaitingRequestCounter();
   socket_->OnSend(status, Length(), diagnostic_label());
 }
 
@@ -905,12 +906,16 @@ int QuicSocket::SendWrapStack::Send() {
           reinterpret_cast<char*>(*buf_),
           buf_.length());
 
-  return uv_udp_send(
+  int err = uv_udp_send(
       req(),
       &Socket()->handle_,
       &buf, 1,
       **Address(),
       OnSend);
+  // As this does not inherit from ReqWrap, we have to manage the request
+  // counter manually.
+  if (err == 0) Socket()->env()->IncreaseWaitingRequestCounter();
+  return err;
 }
 
 // The QuicSocket::SendWrap will maintain a std::weak_ref
@@ -981,6 +986,9 @@ int QuicSocket::SendWrap::Send() {
       OnSend);
 
   if (err == 0) {
+    // As this does not inherit from ReqWrap, we have to manage the request
+    // counter manually.
+    Socket()->env()->IncreaseWaitingRequestCounter();
     Debug(Socket(), "Advancing read head %" PRIu64, length_);
     buffer_->SeekHeadOffset(length_);
   }
