@@ -21,6 +21,7 @@
 
 #include <array>
 #include <functional>
+#include <string>
 #include <type_traits>
 #include <utility>
 
@@ -54,7 +55,9 @@ static void Ngtcp2DebugLog(void* user_data, const char* fmt, ...) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
   va_list ap;
   va_start(ap, fmt);
-  Debug(session->env(), DebugCategory::NGTCP2_DEBUG, fmt, ap);
+  std::string format(fmt, strlen(fmt) + 1);
+  format[strlen(fmt)] = '\n';
+  Debug(session->env(), DebugCategory::NGTCP2_DEBUG, format, ap);
   va_end(ap);
 }
 
