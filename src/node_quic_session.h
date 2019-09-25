@@ -246,7 +246,7 @@ class QuicSession : public AsyncWrap,
 
   ngtcp2_conn* Connection() { return connection_.get(); }
 
-  void AddStream(QuicStream* stream);
+  void AddStream(std::shared_ptr<QuicStream> stream);
 
   // Immediately discards the state of the QuicSession
   // and renders the QuicSession instance completely

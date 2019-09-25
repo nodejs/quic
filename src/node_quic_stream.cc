@@ -54,7 +54,6 @@ QuicStream::QuicStream(
         sizeof(stream_stats_) / sizeof(uint64_t),
         reinterpret_cast<uint64_t*>(&stream_stats_)) {
   CHECK_NOT_NULL(session);
-  session->AddStream(this);
   Debug(this, "Created");
   StreamBase::AttachToObject(GetObject());
   stream_stats_.created_at = uv_hrtime();
@@ -366,14 +365,17 @@ void QuicStream::Shutdown(uint64_t app_error_code) {
   session_->ShutdownStream(GetID(), app_error_code);
 }
 
-QuicStream* QuicStream::New(QuicSession* session, int64_t stream_id) {
+std::shared_ptr<QuicStream> QuicStream::New(
+    QuicSession* session, int64_t stream_id) {
   Local<Object> obj;
   if (!session->env()
               ->quicserverstream_constructor_template()
               ->NewInstance(session->env()->context()).ToLocal(&obj)) {
     return nullptr;
   }
-  return new QuicStream(session, obj, stream_id);
+  std::shared_ptr<QuicStream> stream {new QuicStream(session, obj, stream_id)};
+  session->AddStream(stream);
+  return stream;
 }
 
 // JavaScript API
@@ -394,7 +396,7 @@ void OpenUnidirectionalStream(const FunctionCallbackInfo<Value>& args) {
   if (!session->OpenUnidirectionalStream(&stream_id))
     return;
 
-  QuicStream* stream = QuicStream::New(session, stream_id);
+  std::shared_ptr<QuicStream> stream = QuicStream::New(session, stream_id);
   args.GetReturnValue().Set(stream->object());
 }
 
@@ -408,7 +410,7 @@ void OpenBidirectionalStream(const FunctionCallbackInfo<Value>& args) {
   if (!session->OpenBidirectionalStream(&stream_id))
     return;
 
-  QuicStream* stream = QuicStream::New(session, stream_id);
+  std::shared_ptr<QuicStream> stream = QuicStream::New(session, stream_id);
   args.GetReturnValue().Set(stream->object());
 }
 

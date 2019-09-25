@@ -144,7 +144,8 @@ class QuicStream : public AsyncWrap,
       v8::Local<v8::Object> target,
       v8::Local<v8::Context> context);
 
-  static QuicStream* New(QuicSession* session, int64_t stream_id);
+  static std::shared_ptr<QuicStream> New(
+      QuicSession* session, int64_t stream_id);
 
   std::string diagnostic_name() const override;
 
