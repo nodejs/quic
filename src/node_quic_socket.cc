@@ -94,8 +94,6 @@ QuicSocket::QuicSocket(
 }
 
 QuicSocket::~QuicSocket() {
-  CHECK(sessions_.empty());
-  CHECK(dcid_to_scid_.empty());
   uint64_t now = uv_hrtime();
   Debug(this,
         "QuicSocket destroyed.\n"

@@ -244,15 +244,11 @@ QuicSession::QuicSession(
 }
 
 QuicSession::~QuicSession() {
-  DCHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
-  CHECK(IsFlagSet(QUICSESSION_FLAG_DESTROYED));
+  CHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
 
   uint64_t sendbuf_length = sendbuf_.Cancel();
   uint64_t handshake_length = handshake_.Cancel();
   uint64_t txbuf_length = txbuf_.Cancel();
-
-  ssl_.reset();
-  connection_.reset();
 
   Debug(this,
         "Destroyed.\n"
