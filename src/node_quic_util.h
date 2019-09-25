@@ -267,26 +267,23 @@ class SocketAddress {
   }
 
   void Copy(SocketAddress* addr) {
-    if (memcmp(&address_, **addr, addr->Size()) != 0)
-      memcpy(&address_, **addr, addr->Size());
+    Copy(**addr);
   }
 
   void Copy(const sockaddr* source) {
-    if (memcmp(&address_, source, GetAddressLen(source)) != 0)
-      memcpy(&address_, source, GetAddressLen(source));
+    memcpy(&address_, source, GetAddressLen(source));
   }
 
   void Set(uv_udp_t* handle) {
     int addrlen = sizeof(address_);
     CHECK_EQ(uv_udp_getsockname(
-      handle,
-      reinterpret_cast<sockaddr*  >(&address_),
-      &addrlen), 0);
+        handle,
+        reinterpret_cast<sockaddr*>(&address_),
+        &addrlen), 0);
   }
 
   void Update(const ngtcp2_addr* addr) {
-    if (memcmp(&address_, addr->addr, addr->addrlen) != 0)
-      memcpy(&address_, addr->addr, addr->addrlen);
+    memcpy(&address_, addr->addr, addr->addrlen);
   }
 
   const sockaddr* operator*() const {
