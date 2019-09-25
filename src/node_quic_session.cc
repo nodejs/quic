@@ -178,6 +178,7 @@ QuicSession::QuicSession(
     uint32_t options,
     uint64_t initial_connection_close)
   : AsyncWrap(socket->env(), wrap, provider_type),
+    alloc_info_(MakeAllocator()),
     side_(side),
     socket_(socket),
     alpn_(alpn),
@@ -186,7 +187,6 @@ QuicSession::QuicSession(
     idle_(new Timer(socket->env(), [this]() { OnIdleTimeout(); })),
     retransmit_(new Timer(socket->env(), [this]() { MaybeTimeout(); })),
     state_(env()->isolate(), IDX_QUIC_SESSION_STATE_COUNT),
-    alloc_info_(MakeAllocator()),
     crypto_rx_ack_(
         HistogramBase::New(
             socket->env(),

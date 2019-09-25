@@ -71,6 +71,7 @@ QuicSocket::QuicSocket(
     HandleWrap(env, wrap,
                reinterpret_cast<uv_handle_t*>(&handle_),
                AsyncWrap::PROVIDER_QUICSOCKET),
+    alloc_info_(MakeAllocator()),
     options_(options),
     max_connections_per_host_(max_connections_per_host),
     retry_token_expiration_(retry_token_expiration),
@@ -78,8 +79,7 @@ QuicSocket::QuicSocket(
     stats_buffer_(
         env->isolate(),
         sizeof(socket_stats_) / sizeof(uint64_t),
-        reinterpret_cast<uint64_t*>(&socket_stats_)),
-    alloc_info_(MakeAllocator()) {
+        reinterpret_cast<uint64_t*>(&socket_stats_)) {
   CHECK_EQ(uv_udp_init(env->event_loop(), &handle_), 0);
   Debug(this, "New QuicSocket created.");
 

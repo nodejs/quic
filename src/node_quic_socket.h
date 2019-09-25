@@ -237,6 +237,7 @@ class QuicSocket : public HandleWrap,
     return options_ & option;
   }
 
+  ngtcp2_mem alloc_info_;
   uv_udp_t handle_;
   uint32_t flags_ = QUICSOCKET_FLAGS_NONE;
   uint32_t options_;
@@ -317,8 +318,6 @@ class QuicSocket : public HandleWrap,
   socket_stats socket_stats_{0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
   AliasedBigUint64Array stats_buffer_;
-
-  ngtcp2_mem alloc_info_;
 
   template <typename... Members>
   void IncrementSocketStat(

@@ -824,6 +824,8 @@ class QuicSession : public AsyncWrap,
     return ngtcp2_conn_write_connection_close;
   }
 
+  ngtcp2_mem alloc_info_;
+
   ngtcp2_crypto_side side_;
   QuicSocket* socket_;
   std::string alpn_;
@@ -875,8 +877,6 @@ class QuicSession : public AsyncWrap,
   std::map<int64_t, std::shared_ptr<QuicStream>> streams_;
 
   AliasedFloat64Array state_;
-
-  ngtcp2_mem alloc_info_;
 
   struct session_stats {
     // The timestamp at which the session was created
