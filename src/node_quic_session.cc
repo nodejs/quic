@@ -332,7 +332,7 @@ void QuicSession::AckedStreamDataOffset(
 
 // Add the given QuicStream to this QuicSession's collection of streams. All
 // streams added must be removed before the QuicSession instance is freed.
-void QuicSession::AddStream(QuicStream* stream) {
+void QuicSession::AddStream(std::shared_ptr<QuicStream> stream) {
   DCHECK(!IsFlagSet(QUICSESSION_FLAG_GRACEFUL_CLOSING));
   Debug(this, "Adding stream %" PRId64 " to session.", stream->GetID());
   streams_.emplace(stream->GetID(), stream);
@@ -412,7 +412,7 @@ QuicStream* QuicSession::CreateStream(int64_t stream_id) {
   CHECK(!IsFlagSet(QUICSESSION_FLAG_GRACEFUL_CLOSING));
   CHECK(!IsFlagSet(QUICSESSION_FLAG_CLOSING));
 
-  QuicStream* stream = QuicStream::New(this, stream_id);
+  std::shared_ptr<QuicStream> stream = QuicStream::New(this, stream_id);
   CHECK_NOT_NULL(stream);
   Local<Value> argv[] = {
     stream->object(),
@@ -423,7 +423,7 @@ QuicStream* QuicSession::CreateStream(int64_t stream_id) {
   // from being freed while the MakeCallback is running.
   std::shared_ptr<QuicSession> ptr(shared_from_this());
   MakeCallback(env()->quic_on_stream_ready_function(), arraysize(argv), argv);
-  return stream;
+  return stream.get();
 }
 
 // Mark the QuicSession instance destroyed. After this is called,
