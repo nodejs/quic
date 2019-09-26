@@ -3,7 +3,7 @@ const common = require('../common');
 const assert = require('assert');
 
 const expected_keys = ['ares', 'brotli', 'modules', 'node',
-                       'uv', 'v8', 'zlib', 'nghttp2', 'napi',
+                       'uv', 'v8', 'zlib', 'nghttp2', 'nghttp3', 'napi',
                        'http_parser', 'llhttp'];
 
 if (common.hasCrypto) {
