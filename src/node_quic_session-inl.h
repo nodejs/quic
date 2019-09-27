@@ -24,10 +24,6 @@ void QuicSession::DecreaseAllocatedSize(size_t size) {
   current_ngtcp2_memory_ -= size;
 }
 
-void QuicSession::SetTLSAlert(int err) {
-  SetLastError(InitQuicError(QUIC_ERROR_CRYPTO, err));
-}
-
 void QuicSession::SetLastError(QuicError error) {
   last_error_ = error;
 }

@@ -26,5 +26,35 @@ void Timer::CleanupHook(void* data) {
   Free(static_cast<Timer*>(data));
 }
 
+ngtcp2_crypto_level from_ossl_level(OSSL_ENCRYPTION_LEVEL ossl_level) {
+  switch (ossl_level) {
+  case ssl_encryption_initial:
+    return NGTCP2_CRYPTO_LEVEL_INITIAL;
+  case ssl_encryption_early_data:
+    return NGTCP2_CRYPTO_LEVEL_EARLY;
+  case ssl_encryption_handshake:
+    return NGTCP2_CRYPTO_LEVEL_HANDSHAKE;
+  case ssl_encryption_application:
+    return NGTCP2_CRYPTO_LEVEL_APP;
+  default:
+    UNREACHABLE();
+  }
+}
+
+const char* crypto_level_name(ngtcp2_crypto_level level) {
+  switch (level) {
+    case NGTCP2_CRYPTO_LEVEL_INITIAL:
+      return "initial";
+    case NGTCP2_CRYPTO_LEVEL_EARLY:
+      return "early";
+    case NGTCP2_CRYPTO_LEVEL_HANDSHAKE:
+      return "handshake";
+    case NGTCP2_CRYPTO_LEVEL_APP:
+      return "app";
+    default:
+      UNREACHABLE();
+  }
+}
+
 }  // namespace quic
 }  // namespace node

@@ -555,7 +555,7 @@ void QuicSocket::SendVersionNegotiation(
   if (req->Send() != 0) delete req;  // TODO(addaleax): Better error handling?
 }
 
-ssize_t QuicSocket::SendRetry(
+bool QuicSocket::SendRetry(
     uint32_t version,
     QuicCID* dcid,
     QuicCID* scid,
@@ -564,18 +564,19 @@ ssize_t QuicSocket::SendRetry(
       new SendWrapStack(
           this,
           addr,
-          NGTCP2_MAX_PKTLEN_IPV6,
+          NGTCP2_MAX_PKTLEN_IPV4,
           "retry");
 
   std::array<uint8_t, 256> token;
   size_t tokenlen = token.size();
 
   if (!GenerateRetryToken(
-          token.data(), &tokenlen,
+          token.data(),
+          &tokenlen,
           addr,
           **dcid,
           &token_secret_)) {
-    return -1;
+    return false;
   }
 
   ngtcp2_pkt_hd hd;
@@ -600,12 +601,13 @@ ssize_t QuicSocket::SendRetry(
           token.data(),
           tokenlen);
   if (nwrite <= 0)
-    return nwrite;
+    return false;
+
   req->SetLength(nwrite);
 
   int err = req->Send();
   if (err != 0) delete req;
-  return err;
+  return err == 0;
 }
 
 namespace {
@@ -656,7 +658,7 @@ BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
   switch (QuicServerSession::Accept(&hd, data, nread)) {
     case QuicServerSession::InitialPacketResult::PACKET_VERSION:
       SendVersionNegotiation(version, dcid, scid, addr);
-      // Fall-through to ignore packet
+      // Fall through
     case QuicServerSession::InitialPacketResult::PACKET_IGNORE:
       return {};
     case QuicServerSession::InitialPacketResult::PACKET_OK:
