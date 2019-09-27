@@ -71,9 +71,6 @@ void QuicSetCallbacks(const FunctionCallbackInfo<Value>& args) {
 #undef SETFUNCTION
 }
 
-void QuicProtocolVersion(const FunctionCallbackInfo<Value>& args) {
-  args.GetReturnValue().Set(NGTCP2_PROTO_VER);
-}
 
 // Sets QUIC specific configuration options for the SecureContext.
 // It's entirely likely that there's a better way to do this, but
@@ -193,9 +190,6 @@ void Initialize(Local<Object> target,
                  "setCallbacks",
                  QuicSetCallbacks);
   env->SetMethod(target,
-                 "protocolVersion",
-                 QuicProtocolVersion);
-  env->SetMethod(target,
                  "initSecureContext",
                  QuicInitSecureContext);
   env->SetMethod(target,
@@ -220,6 +214,7 @@ void Initialize(Local<Object> target,
   NODE_DEFINE_CONSTANT(constants, NGTCP2_MAX_CIDLEN);
   NODE_DEFINE_CONSTANT(constants, NGTCP2_MIN_CIDLEN);
   NODE_DEFINE_CONSTANT(constants, NGTCP2_NO_ERROR);
+  NODE_DEFINE_CONSTANT(constants, NGTCP2_PROTO_VER);
   NODE_DEFINE_CONSTANT(constants, QUIC_ERROR_APPLICATION);
   NODE_DEFINE_CONSTANT(constants, QUIC_ERROR_CRYPTO);
   NODE_DEFINE_CONSTANT(constants, QUIC_ERROR_SESSION);
