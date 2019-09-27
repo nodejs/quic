@@ -439,6 +439,9 @@ class Timer final : public MemoryRetainer {
 
 using TimerPointer = DeleteFnPtr<Timer, Timer::Free>;
 
+ngtcp2_crypto_level from_ossl_level(OSSL_ENCRYPTION_LEVEL ossl_level);
+const char* crypto_level_name(ngtcp2_crypto_level level);
+
 }  // namespace quic
 }  // namespace node
 

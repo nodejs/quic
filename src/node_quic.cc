@@ -75,6 +75,7 @@ void QuicSetCallbacks(const FunctionCallbackInfo<Value>& args) {
 // Sets QUIC specific configuration options for the SecureContext.
 // It's entirely likely that there's a better way to do this, but
 // for now this works.
+template <ngtcp2_crypto_side side>
 void QuicInitSecureContext(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   CHECK(args[0]->IsObject());  // Secure Context
@@ -82,80 +83,13 @@ void QuicInitSecureContext(const FunctionCallbackInfo<Value>& args) {
   SecureContext* sc;
   ASSIGN_OR_RETURN_UNWRAP(&sc, args[0].As<Object>(),
                           args.GetReturnValue().Set(UV_EBADF));
-
-  constexpr auto ssl_opts = (SSL_OP_ALL & ~SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS) |
-                            SSL_OP_SINGLE_ECDH_USE |
-                            SSL_OP_CIPHER_SERVER_PREFERENCE |
-                            SSL_OP_NO_ANTI_REPLAY;
-  SSL_CTX_set_options(**sc, ssl_opts);
-  SSL_CTX_clear_options(**sc, SSL_OP_ENABLE_MIDDLEBOX_COMPAT);
-  SSL_CTX_set_mode(**sc, SSL_MODE_RELEASE_BUFFERS | SSL_MODE_QUIC_HACK);
-  SSL_CTX_set_default_verify_paths(**sc);
-  SSL_CTX_set_max_early_data(**sc, std::numeric_limits<uint32_t>::max());
-  SSL_CTX_set_alpn_select_cb(**sc, ALPN_Select_Proto_CB, nullptr);
-  SSL_CTX_set_client_hello_cb(**sc, Client_Hello_CB, nullptr);
-  SSL_CTX_set_tlsext_status_cb(**sc, TLS_Status_Callback);
-  SSL_CTX_set_tlsext_status_arg(**sc, nullptr);
-  CHECK_EQ(
-      SSL_CTX_add_custom_ext(
-          **sc,
-          NGTCP2_TLSEXT_QUIC_TRANSPORT_PARAMETERS,
-          SSL_EXT_CLIENT_HELLO | SSL_EXT_TLS1_3_ENCRYPTED_EXTENSIONS,
-          Server_Transport_Params_Add_CB,
-          Transport_Params_Free_CB, nullptr,
-          Server_Transport_Params_Parse_CB,
-          nullptr), 1);
-
   const node::Utf8Value groups(env->isolate(), args[1]);
-  if (!SSL_CTX_set1_groups_list(**sc, *groups)) {
-    unsigned long err = ERR_get_error();  // NOLINT(runtime/int)
-    if (!err)
-      return env->ThrowError("Failed to set groups");
-    return crypto::ThrowCryptoError(env, err);
-  }
-}
 
-void QuicInitSecureContextClient(const FunctionCallbackInfo<Value>& args) {
-  Environment* env = Environment::GetCurrent(args);
-  CHECK(args[0]->IsObject());  // Secure Context
-  CHECK(args[1]->IsString());  // groups
-  SecureContext* sc;
-  ASSIGN_OR_RETURN_UNWRAP(&sc, args[0].As<Object>(),
-                          args.GetReturnValue().Set(UV_EBADF));
+  InitializeSecureContext(sc, side);
 
-  SSL_CTX_set_mode(**sc, SSL_MODE_QUIC_HACK);
-  SSL_CTX_clear_options(**sc, SSL_OP_ENABLE_MIDDLEBOX_COMPAT);
-  SSL_CTX_set_default_verify_paths(**sc);
-  SSL_CTX_set_tlsext_status_cb(**sc, TLS_Status_Callback);
-  SSL_CTX_set_tlsext_status_arg(**sc, nullptr);
-
-  CHECK_EQ(SSL_CTX_add_custom_ext(
-      **sc,
-      NGTCP2_TLSEXT_QUIC_TRANSPORT_PARAMETERS,
-      SSL_EXT_CLIENT_HELLO | SSL_EXT_TLS1_3_ENCRYPTED_EXTENSIONS,
-      Client_Transport_Params_Add_CB,
-      Transport_Params_Free_CB,
-      nullptr,
-      Client_Transport_Params_Parse_CB,
-      nullptr), 1);
-
-
-  const node::Utf8Value groups(env->isolate(), args[1]);
-  if (!SSL_CTX_set1_groups_list(**sc, *groups)) {
-    unsigned long err = ERR_get_error();  // NOLINT(runtime/int)
-    if (!err)
-      return env->ThrowError("Failed to set groups");
-    return crypto::ThrowCryptoError(env, err);
-  }
-
-  SSL_CTX_set_session_cache_mode(
-    **sc, SSL_SESS_CACHE_CLIENT | SSL_SESS_CACHE_NO_INTERNAL_STORE);
-  SSL_CTX_sess_set_new_cb(**sc, [](SSL* ssl, SSL_SESSION* session) {
-    QuicClientSession* s =
-        static_cast<QuicClientSession*>(
-            SSL_get_app_data(ssl));
-    return s->SetSession(session);
-  });
+  // TODO(@jasnell): Throw a proper node.js error with code
+  if (!SetGroups(sc, *groups))
+    return env->ThrowError("Failed to set groups");
 }
 }  // namespace
 
@@ -191,10 +125,10 @@ void Initialize(Local<Object> target,
                  QuicSetCallbacks);
   env->SetMethod(target,
                  "initSecureContext",
-                 QuicInitSecureContext);
+                 QuicInitSecureContext<NGTCP2_CRYPTO_SIDE_SERVER>);
   env->SetMethod(target,
                  "initSecureContextClient",
-                 QuicInitSecureContextClient);
+                 QuicInitSecureContext<NGTCP2_CRYPTO_SIDE_CLIENT>);
 
   Local<Object> constants = Object::New(env->isolate());
   NODE_DEFINE_CONSTANT(constants, AF_INET);
