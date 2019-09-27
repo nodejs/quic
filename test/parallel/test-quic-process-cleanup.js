@@ -7,7 +7,6 @@ if (!common.hasQuic)
 // well. We use Workers because they have a more clearly defined shutdown
 // sequence and we can stop execution at any point.
 
-const assert = require('assert');
 const quic = require('quic');
 const { isMainThread, Worker } = require('worker_threads');
 
