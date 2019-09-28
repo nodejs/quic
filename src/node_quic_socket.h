@@ -71,7 +71,7 @@ class QuicSocket : public HandleWrap,
       const char* iface);
   void AddSession(
       QuicCID* cid,
-      std::shared_ptr<QuicSession> session);
+      BaseObjectPtr<QuicSession> session);
   void AssociateCID(
       QuicCID* cid,
       QuicCID* scid);
@@ -110,7 +110,7 @@ class QuicSocket : public HandleWrap,
   int SendPacket(
       const sockaddr* dest,
       QuicBuffer* buf,
-      std::shared_ptr<QuicSession> session,
+      BaseObjectPtr<QuicSession> session,
       const char* diagnostic_label = nullptr);
   void SetServerBusy(bool on);
   void SetDiagnosticPacketLoss(double rx = 0.0, double tx = 0.0);
@@ -170,7 +170,7 @@ class QuicSocket : public HandleWrap,
   void SetValidatedAddress(const sockaddr* addr);
   bool IsValidatedAddress(const sockaddr* addr) const;
 
-  std::shared_ptr<QuicSession> AcceptInitialPacket(
+  BaseObjectPtr<QuicSession> AcceptInitialPacket(
       uint32_t version,
       QuicCID* dcid,
       QuicCID* scid,
@@ -257,7 +257,7 @@ class QuicSocket : public HandleWrap,
   QuicSessionConfig server_session_config_;
   crypto::SecureContext* server_secure_context_ = nullptr;
   std::string server_alpn_;
-  std::unordered_map<std::string, std::shared_ptr<QuicSession>> sessions_;
+  std::unordered_map<std::string, BaseObjectPtr<QuicSession>> sessions_;
   std::unordered_map<std::string, std::string> dcid_to_scid_;
   std::array<uint8_t, TOKEN_SECRETLEN> token_secret_;
 
@@ -347,7 +347,7 @@ class QuicSocket : public HandleWrap,
 
     uv_udp_send_t* req() { return &req_; }
 
-    QuicSocket* Socket() { return socket_; }
+    QuicSocket* Socket() { return socket_.get(); }
 
     SocketAddress* Address() { return &address_; }
 
@@ -363,7 +363,7 @@ class QuicSocket : public HandleWrap,
 
    private:
     uv_udp_send_t req_;
-    QuicSocket* socket_;
+    BaseObjectPtr<QuicSocket> socket_;
     SocketAddress address_;
     const char* diagnostic_label_;
   };
@@ -377,14 +377,14 @@ class QuicSocket : public HandleWrap,
         QuicSocket* socket,
         SocketAddress* dest,
         QuicBuffer* buffer,
-        std::shared_ptr<QuicSession> session,
+        BaseObjectPtr<QuicSession> session,
         const char* diagnostic_label = nullptr);
 
     SendWrap(
         QuicSocket* socket,
         const sockaddr* dest,
         QuicBuffer* buffer,
-        std::shared_ptr<QuicSession> session,
+        BaseObjectPtr<QuicSession> session,
         const char* diagnostic_label = nullptr);
 
     void Done(int status) override;
@@ -395,7 +395,7 @@ class QuicSocket : public HandleWrap,
 
    private:
     QuicBuffer* buffer_;
-    std::shared_ptr<QuicSession> session_;
+    BaseObjectPtr<QuicSession> session_;
     size_t length_ = 0;
   };
 

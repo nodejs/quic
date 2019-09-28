@@ -182,7 +182,6 @@ enum QuicSessionState : int {
 // control. In other words, there's quite a bit going on within
 // a QuicSession object.
 class QuicSession : public AsyncWrap,
-                    public std::enable_shared_from_this<QuicSession>,
                     public mem::NgLibMemoryManager<QuicSession, ngtcp2_mem> {
  public:
   static const int kInitialClientBufferLength = 4096;
@@ -240,13 +239,13 @@ class QuicSession : public AsyncWrap,
 
   const ngtcp2_cid* scid() const { return &scid_; }
 
-  QuicSocket* Socket() { return socket_; }
+  inline QuicSocket* Socket() const;
 
   SSL* ssl() { return ssl_.get(); }
 
   ngtcp2_conn* Connection() { return connection_.get(); }
 
-  void AddStream(std::shared_ptr<QuicStream> stream);
+  void AddStream(BaseObjectPtr<QuicStream> stream);
 
   // Immediately discards the state of the QuicSession
   // and renders the QuicSession instance completely
@@ -382,7 +381,7 @@ class QuicSession : public AsyncWrap,
   // the idle timeout period elapses or until the
   // QuicSession is explicitly destroyed.
   inline bool IsInDrainingPeriod();
-  inline QuicStream* FindStream(int64_t id);
+  QuicStream* FindStream(int64_t id);
   inline bool HasStream(int64_t id);
 
   bool IsHandshakeSuspended() const {
@@ -827,7 +826,7 @@ class QuicSession : public AsyncWrap,
   ngtcp2_mem alloc_info_;
 
   ngtcp2_crypto_side side_;
-  QuicSocket* socket_;
+  BaseObjectWeakPtr<QuicSocket> socket_;
   std::string alpn_;
 
   ngtcp2_crypto_level rx_crypto_level_ = NGTCP2_CRYPTO_LEVEL_INITIAL;
@@ -874,7 +873,7 @@ class QuicSession : public AsyncWrap,
   // Temporary holding for inbound TLS handshake data.
   std::vector<uint8_t> peer_handshake_;
 
-  std::map<int64_t, std::shared_ptr<QuicStream>> streams_;
+  std::map<int64_t, BaseObjectPtr<QuicStream>> streams_;
 
   AliasedFloat64Array state_;
 
@@ -1031,7 +1030,7 @@ class QuicServerSession : public QuicSession {
       v8::Local<v8::Object> target,
       v8::Local<v8::Context> context);
 
-  static std::shared_ptr<QuicSession> New(
+  static BaseObjectPtr<QuicSession> New(
       QuicSocket* socket,
       QuicSessionConfig* config,
       const ngtcp2_cid* rcid,
@@ -1068,7 +1067,6 @@ class QuicServerSession : public QuicSession {
   SET_MEMORY_INFO_NAME(QuicServerSession)
   SET_SELF_SIZE(QuicServerSession)
 
- private:
   QuicServerSession(
       QuicSocket* socket,
       QuicSessionConfig* config,
@@ -1082,6 +1080,7 @@ class QuicServerSession : public QuicSession {
       uint32_t options,
       uint64_t initial_connection_close);
 
+ private:
   void DisassociateCID(const ngtcp2_cid* cid) override;
   void InitTLS_Post() override;
   void RemoveFromSocket() override;
@@ -1129,7 +1128,7 @@ class QuicClientSession : public QuicSession {
       v8::Local<v8::Object> target,
       v8::Local<v8::Context> context);
 
-  static std::shared_ptr<QuicSession> New(
+  static BaseObjectPtr<QuicSession> New(
       QuicSocket* socket,
       const struct sockaddr* addr,
       uint32_t version,

@@ -125,7 +125,7 @@ void QuicSocket::MemoryInfo(MemoryTracker* tracker) const {
 
 void QuicSocket::AddSession(
     QuicCID* cid,
-    std::shared_ptr<QuicSession> session) {
+    BaseObjectPtr<QuicSession> session) {
   sessions_[cid->ToStr()] = session;
   IncrementSocketAddressCounter(**session->GetRemoteAddress());
   IncrementSocketStat(
@@ -361,7 +361,7 @@ void QuicSocket::Receive(
   // desconstructing while we're still using it. The session may
   // end up being destroyed, however, so we have to make sure
   // we're checking for that.
-  std::shared_ptr<QuicSession> session;
+  BaseObjectPtr<QuicSession> session;
 
   // Identify the appropriate handler
   auto session_it = sessions_.find(dcid_str);
@@ -408,15 +408,15 @@ void QuicSocket::Receive(
         return;
       }
     } else {
-      session_it = sessions_.find((*scid_it).second);
-      session = (*session_it).second;
+      session_it = sessions_.find(scid_it->second);
+      session = session_it->second;
       CHECK_NE(session_it, std::end(sessions_));
     }
   } else {
-    session = (*session_it).second;
+    session = session_it->second;
   }
 
-  CHECK_NOT_NULL(session);
+  CHECK(session);
 
   // If the packet could not successfully processed for any reason (possibly
   // due to being malformed or malicious in some way) we ignore it completely.
@@ -625,7 +625,7 @@ bool QuicSocket::IsValidatedAddress(const sockaddr* addr) const {
   return false;
 }
 
-std::shared_ptr<QuicSession> QuicSocket::AcceptInitialPacket(
+BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
     uint32_t version,
     QuicCID* dcid,
     QuicCID* scid,
@@ -709,7 +709,7 @@ std::shared_ptr<QuicSession> QuicSocket::AcceptInitialPacket(
     }
   }
 
-  std::shared_ptr<QuicSession> session {
+  BaseObjectPtr<QuicSession> session =
       QuicServerSession::New(
           this,
           &server_session_config_,
@@ -720,7 +720,7 @@ std::shared_ptr<QuicSession> QuicSocket::AcceptInitialPacket(
           version,
           server_alpn_,
           server_options_,
-          initial_connection_close) };
+          initial_connection_close);
   Local<Value> arg = session->object();
   MakeCallback(env()->quic_on_session_ready_function(), 1, &arg);
 
@@ -801,7 +801,7 @@ int QuicSocket::DropMembership(const char* address, const char* iface) {
 int QuicSocket::SendPacket(
     const sockaddr* dest,
     QuicBuffer* buffer,
-    std::shared_ptr<QuicSession> session,
+    BaseObjectPtr<QuicSession> session,
     const char* diagnostic_label) {
   // If there is no data in the buffer,
   // or no data remaining to be read,
@@ -922,7 +922,7 @@ QuicSocket::SendWrap::SendWrap(
     QuicSocket* socket,
     SocketAddress* dest,
     QuicBuffer* buffer,
-    std::shared_ptr<QuicSession> session,
+    BaseObjectPtr<QuicSession> session,
     const char* diagnostic_label)
   : SendWrap(socket, **dest, buffer, session, diagnostic_label) {}
 
@@ -930,7 +930,7 @@ QuicSocket::SendWrap::SendWrap(
     QuicSocket* socket,
     const sockaddr* dest,
     QuicBuffer* buffer,
-    std::shared_ptr<QuicSession> session,
+    BaseObjectPtr<QuicSession> session,
     const char* diagnostic_label)
   : SendWrapBase(socket, dest, diagnostic_label),
     buffer_(buffer),

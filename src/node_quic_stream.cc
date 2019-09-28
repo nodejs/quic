@@ -140,7 +140,7 @@ int QuicStream::DoShutdown(ShutdownWrap* req_wrap) {
   // If we're not currently within an ngtcp2 callback, then we need to
   // tell the QuicSession to initiate serialization and sending of any
   // pending frames.
-  if (!QuicSession::Ngtcp2CallbackScope::InNgtcp2CallbackScope(session_))
+  if (!QuicSession::Ngtcp2CallbackScope::InNgtcp2CallbackScope(session_.get()))
     session_->SendStreamData(this);
 
   return 1;
@@ -190,7 +190,7 @@ int QuicStream::DoWrite(
   // the pending stream data. Otherwise, the data will be flushed
   // once the ngtcp2 callback scope exits and all streams with
   // data pending are flushed.
-  if (!QuicSession::Ngtcp2CallbackScope::InNgtcp2CallbackScope(session_))
+  if (!QuicSession::Ngtcp2CallbackScope::InNgtcp2CallbackScope(session_.get()))
     session_->SendStreamData(this);
 
   // IncrementAvailableOutboundLength(len);
@@ -365,15 +365,16 @@ void QuicStream::Shutdown(uint64_t app_error_code) {
   session_->ShutdownStream(GetID(), app_error_code);
 }
 
-std::shared_ptr<QuicStream> QuicStream::New(
+BaseObjectPtr<QuicStream> QuicStream::New(
     QuicSession* session, int64_t stream_id) {
   Local<Object> obj;
   if (!session->env()
               ->quicserverstream_constructor_template()
               ->NewInstance(session->env()->context()).ToLocal(&obj)) {
-    return nullptr;
+    return {};
   }
-  std::shared_ptr<QuicStream> stream {new QuicStream(session, obj, stream_id)};
+  BaseObjectPtr<QuicStream> stream =
+      MakeDetachedBaseObject<QuicStream>(session, obj, stream_id);
   session->AddStream(stream);
   return stream;
 }
@@ -396,7 +397,7 @@ void OpenUnidirectionalStream(const FunctionCallbackInfo<Value>& args) {
   if (!session->OpenUnidirectionalStream(&stream_id))
     return;
 
-  std::shared_ptr<QuicStream> stream = QuicStream::New(session, stream_id);
+  BaseObjectPtr<QuicStream> stream = QuicStream::New(session, stream_id);
   args.GetReturnValue().Set(stream->object());
 }
 
@@ -410,7 +411,7 @@ void OpenBidirectionalStream(const FunctionCallbackInfo<Value>& args) {
   if (!session->OpenBidirectionalStream(&stream_id))
     return;
 
-  std::shared_ptr<QuicStream> stream = QuicStream::New(session, stream_id);
+  BaseObjectPtr<QuicStream> stream = QuicStream::New(session, stream_id);
   args.GetReturnValue().Set(stream->object());
 }
 

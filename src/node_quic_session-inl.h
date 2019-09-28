@@ -4,6 +4,7 @@
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
 #include "node_quic_session.h"
+#include "node_quic_socket.h"
 
 #include <algorithm>
 
@@ -47,14 +48,6 @@ bool QuicSession::IsInDrainingPeriod() {
   return ngtcp2_conn_is_in_draining_period(Connection());
 }
 
-// Locate the QuicStream with the given id or return nullptr
-QuicStream* QuicSession::FindStream(int64_t id) {
-  auto it = streams_.find(id);
-  if (it == std::end(streams_))
-    return nullptr;
-  return it->second.get();
-}
-
 bool QuicSession::HasStream(int64_t id) {
   return streams_.find(id) != std::end(streams_);
 }
@@ -72,6 +65,10 @@ bool QuicSession::IsDestroyed() const {
 void QuicSession::StartGracefulClose() {
   SetFlag(QUICSESSION_FLAG_GRACEFUL_CLOSING);
   session_stats_.closing_at = uv_hrtime();
+}
+
+QuicSocket* QuicSession::Socket() const {
+  return socket_.get();
 }
 
 }  // namespace quic

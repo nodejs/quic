@@ -85,9 +85,7 @@ class QuicServerSession;
 // This causes all queued data and pending JavaScript writes to be
 // abandoned, and causes the QuicStream to be immediately closed at the
 // ngtcp2 level.
-class QuicStream : public AsyncWrap,
-                   public StreamBase,
-                   public std::enable_shared_from_this<QuicStream> {
+class QuicStream : public AsyncWrap, public StreamBase {
  public:
   enum QuicStreamStates : uint32_t {
     // QuicStream is fully open. Readable and Writable
@@ -144,7 +142,7 @@ class QuicStream : public AsyncWrap,
       v8::Local<v8::Object> target,
       v8::Local<v8::Context> context);
 
-  static std::shared_ptr<QuicStream> New(
+  static BaseObjectPtr<QuicStream> New(
       QuicSession* session, int64_t stream_id);
 
   std::string diagnostic_name() const override;
@@ -260,7 +258,7 @@ class QuicStream : public AsyncWrap,
     return HasSentFin() && streambuf_.Length() == 0;
   }
 
-  QuicSession* Session() const { return session_; }
+  QuicSession* Session() const { return session_.get(); }
 
   virtual void AckedDataOffset(uint64_t offset, size_t datalen);
 
@@ -305,12 +303,12 @@ class QuicStream : public AsyncWrap,
   SET_MEMORY_INFO_NAME(QuicStream)
   SET_SELF_SIZE(QuicStream)
 
- private:
   QuicStream(
       QuicSession* session,
       v8::Local<v8::Object> target,
       int64_t stream_id);
 
+ private:
   // Called only when a final stream frame has been received from
   // the peer. This has the side effect of marking the readable
   // side of the stream closed. No additional data will be received
@@ -351,7 +349,7 @@ class QuicStream : public AsyncWrap,
 
   inline void IncrementStats(size_t datalen);
 
-  QuicSession* session_;
+  BaseObjectWeakPtr<QuicSession> session_;
   int64_t stream_id_;
   uint64_t max_offset_ = 0;
   uint64_t max_offset_ack_ = 0;

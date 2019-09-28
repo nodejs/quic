@@ -284,6 +284,14 @@ std::string QuicSession::diagnostic_name() const {
       " (" + std::to_string(static_cast<int64_t>(get_async_id())) + ")";
 }
 
+// Locate the QuicStream with the given id or return nullptr
+QuicStream* QuicSession::FindStream(int64_t id) {
+  auto it = streams_.find(id);
+  if (it == std::end(streams_))
+    return nullptr;
+  return it->second.get();
+}
+
 void QuicSession::AckedCryptoOffset(size_t datalen) {
   // It is possible for the QuicSession to have been destroyed but not yet
   // deconstructed. In such cases, we want to ignore the callback as there
@@ -331,7 +339,7 @@ void QuicSession::AckedStreamDataOffset(
 
 // Add the given QuicStream to this QuicSession's collection of streams. All
 // streams added must be removed before the QuicSession instance is freed.
-void QuicSession::AddStream(std::shared_ptr<QuicStream> stream) {
+void QuicSession::AddStream(BaseObjectPtr<QuicStream> stream) {
   DCHECK(!IsFlagSet(QUICSESSION_FLAG_GRACEFUL_CLOSING));
   Debug(this, "Adding stream %" PRId64 " to session.", stream->GetID());
   streams_.emplace(stream->GetID(), stream);
@@ -400,7 +408,7 @@ void QuicSession::ImmediateClose() {
 
   // Grab a shared pointer to this to prevent the QuicSession
   // from being freed while the MakeCallback is running.
-  std::shared_ptr<QuicSession> ptr(shared_from_this());
+  BaseObjectPtr<QuicSession> ptr(this);
   MakeCallback(env()->quic_on_session_close_function(), arraysize(argv), argv);
 }
 
@@ -411,8 +419,8 @@ QuicStream* QuicSession::CreateStream(int64_t stream_id) {
   CHECK(!IsFlagSet(QUICSESSION_FLAG_GRACEFUL_CLOSING));
   CHECK(!IsFlagSet(QUICSESSION_FLAG_CLOSING));
 
-  std::shared_ptr<QuicStream> stream = QuicStream::New(this, stream_id);
-  CHECK_NOT_NULL(stream);
+  BaseObjectPtr<QuicStream> stream = QuicStream::New(this, stream_id);
+  CHECK(stream);
   Local<Value> argv[] = {
     stream->object(),
     Number::New(env()->isolate(), static_cast<double>(stream_id))
@@ -420,7 +428,7 @@ QuicStream* QuicSession::CreateStream(int64_t stream_id) {
 
   // Grab a shared pointer to this to prevent the QuicSession
   // from being freed while the MakeCallback is running.
-  std::shared_ptr<QuicSession> ptr(shared_from_this());
+  BaseObjectPtr<QuicSession> ptr(this);
   MakeCallback(env()->quic_on_stream_ready_function(), arraysize(argv), argv);
   return stream.get();
 }
@@ -462,7 +470,7 @@ void QuicSession::Destroy() {
   StopRetransmitTimer();
 
   // The QuicSession instances are kept alive using
-  // std::shared_ptr. The only persistent shared_ptr
+  // BaseObjectPtr. The only persistent BaseObjectPtr
   // is the map in the associated QuicSocket. Removing
   // the QuicSession from the QuicSocket will free
   // that pointer, allowing the QuicSession to be
@@ -726,7 +734,7 @@ void QuicSession::HandshakeCompleted() {
 
   // Grab a shared pointer to this to prevent the QuicSession
   // from being freed while the MakeCallback is running.
-  std::shared_ptr<QuicSession> ptr(shared_from_this());
+  BaseObjectPtr<QuicSession> ptr(this);
   MakeCallback(env()->quic_on_session_handshake_function(),
                arraysize(argv),
                argv);
@@ -789,7 +797,7 @@ void QuicSession::Keylog(const char* line) {
 
   // Grab a shared pointer to this to prevent the QuicSession
   // from being freed while the MakeCallback is running.
-  std::shared_ptr<QuicSession> ptr(shared_from_this());
+  BaseObjectPtr<QuicSession> ptr(this);
   MakeCallback(env()->quic_on_session_keylog_function(), 1, &line_bf);
 }
 
@@ -966,7 +974,7 @@ void QuicSession::PathValidation(
   };
   // Grab a shared pointer to this to prevent the QuicSession
   // from being freed while the MakeCallback is running.
-  std::shared_ptr<QuicSession> ptr(shared_from_this());
+  BaseObjectPtr<QuicSession> ptr(this);
   MakeCallback(
       env()->quic_on_session_path_validation_function(),
       arraysize(argv),
@@ -1244,7 +1252,7 @@ void QuicSession::RemoveConnectionID(const ngtcp2_cid* cid) {
 // Removes the QuicSession from the current socket. This is
 // done with when the session is being destroyed or being
 // migrated to another QuicSocket. It is important to keep in mind
-// that the QuicSocket uses a shared_ptr for the QuicSession.
+// that the QuicSocket uses a BaseObjectPtr for the QuicSession.
 // If the session is removed and there are no other references held,
 // the session object will be destroyed automatically.
 void QuicSession::RemoveFromSocket() {
@@ -1259,7 +1267,7 @@ void QuicSession::RemoveFromSocket() {
   Debug(this, "Removed from the QuicSocket.");
   QuicCID scid(scid_);
   socket_->RemoveSession(&scid, **GetRemoteAddress());
-  socket_ = nullptr;
+  socket_.reset();
 }
 
 // Removes the given stream from the QuicSession. All streams must
@@ -1472,7 +1480,7 @@ bool QuicSession::SendPacket(const char* diagnostic_label) {
   int err = Socket()->SendPacket(
       *remote_address_,
       &txbuf_,
-      shared_from_this(),
+      BaseObjectPtr<QuicSession>(this),
       diagnostic_label);
   if (err != 0) {
     SetLastError(QUIC_ERROR_SESSION, err);
@@ -1597,7 +1605,7 @@ void QuicSession::SilentClose(bool stateless_reset) {
 
   // Grab a shared pointer to this to prevent the QuicSession
   // from being freed while the MakeCallback is running.
-  std::shared_ptr<QuicSession> ptr(shared_from_this());
+  BaseObjectPtr<QuicSession> ptr(this);
   MakeCallback(
       env()->quic_on_session_silent_close_function(), arraysize(argv), argv);
 }
@@ -1625,7 +1633,7 @@ void QuicSession::StreamClose(int64_t stream_id, uint64_t app_error_code) {
 
   // Grab a shared pointer to this to prevent the QuicSession
   // from being freed while the MakeCallback is running.
-  std::shared_ptr<QuicSession> ptr(shared_from_this());
+  BaseObjectPtr<QuicSession> ptr(this);
   MakeCallback(env()->quic_on_stream_close_function(), arraysize(argv), argv);
 }
 
@@ -1699,7 +1707,7 @@ void QuicSession::StreamReset(
   };
   // Grab a shared pointer to this to prevent the QuicSession
   // from being freed while the MakeCallback is running.
-  std::shared_ptr<QuicSession> ptr(shared_from_this());
+  BaseObjectPtr<QuicSession> ptr(this);
   MakeCallback(env()->quic_on_stream_reset_function(), arraysize(argv), argv);
 }
 
@@ -1924,7 +1932,7 @@ QuicServerSession::QuicServerSession(
   Init(config, addr, dcid, ocid, version);
 }
 
-std::shared_ptr<QuicSession> QuicServerSession::New(
+BaseObjectPtr<QuicSession> QuicServerSession::New(
     QuicSocket* socket,
     QuicSessionConfig* config,
     const ngtcp2_cid* rcid,
@@ -1941,18 +1949,19 @@ std::shared_ptr<QuicSession> QuicServerSession::New(
              ->NewInstance(socket->env()->context()).ToLocal(&obj)) {
     return {};
   }
-  std::shared_ptr<QuicSession> session { new QuicServerSession(
-      socket,
-      config,
-      obj,
-      rcid,
-      addr,
-      dcid,
-      ocid,
-      version,
-      alpn,
-      options,
-      initial_connection_close) };
+  BaseObjectPtr<QuicSession> session =
+      MakeDetachedBaseObject<QuicServerSession>(
+          socket,
+          config,
+          obj,
+          rcid,
+          addr,
+          dcid,
+          ocid,
+          version,
+          alpn,
+          options,
+          initial_connection_close);
 
   session->AddToSocket(socket);
   return session;
@@ -1962,7 +1971,7 @@ std::shared_ptr<QuicSession> QuicServerSession::New(
 void QuicServerSession::AddToSocket(QuicSocket* socket) {
   QuicCID scid(scid_);
   QuicCID rcid(rcid_);
-  socket->AddSession(&scid, shared_from_this());
+  socket->AddSession(&scid, BaseObjectPtr<QuicSession>(this));
   socket->AssociateCID(&rcid, &scid);
 
   if (pscid_.datalen) {
@@ -2121,7 +2130,7 @@ int QuicServerSession::OnClientHello() {
 
   // Grab a shared pointer to this to prevent the QuicSession
   // from being freed while the MakeCallback is running.
-  std::shared_ptr<QuicSession> ptr(shared_from_this());
+  BaseObjectPtr<QuicSession> ptr(this);
   MakeCallback(
       env()->quic_on_session_client_hello_function(),
       arraysize(argv), argv);
@@ -2223,7 +2232,7 @@ int QuicServerSession::OnCert() {
 
   // Grab a shared pointer to this to prevent the QuicSession
   // from being freed while the MakeCallback is running.
-  std::shared_ptr<QuicSession> ptr(shared_from_this());
+  BaseObjectPtr<QuicSession> ptr(this);
   MakeCallback(env()->quic_on_session_cert_function(), arraysize(argv), argv);
 
   return IsFlagSet(QUICSESSION_FLAG_CERT_CB_RUNNING) ? -1 : 1;
@@ -2268,7 +2277,7 @@ void QuicSession::UpdateRecoveryStats() {
   recovery_stats_.smoothed_rtt = static_cast<double>(stat.smoothed_rtt);
 }
 
-// The QuicSocket maintains a map of std::shared_ptr's that keep
+// The QuicSocket maintains a map of BaseObjectPtr's that keep
 // the QuicSession instance alive. Once socket_->RemoveSession()
 // is called, the QuicSession instance will be freed if there are
 // no other references being held.
@@ -2402,7 +2411,7 @@ QuicClientSession::QuicClientSession(
   CHECK(Init(addr, version, early_transport_params, session_ticket, dcid));
 }
 
-std::shared_ptr<QuicSession> QuicClientSession::New(
+BaseObjectPtr<QuicSession> QuicClientSession::New(
     QuicSocket* socket,
     const struct sockaddr* addr,
     uint32_t version,
@@ -2422,20 +2431,21 @@ std::shared_ptr<QuicSession> QuicClientSession::New(
     return {};
   }
 
-  std::shared_ptr<QuicSession> session { new QuicClientSession(
-      socket,
-      obj,
-      addr,
-      version,
-      context,
-      hostname,
-      port,
-      early_transport_params,
-      session_ticket,
-      dcid,
-      select_preferred_address_policy,
-      alpn,
-      options) };
+  BaseObjectPtr<QuicSession> session =
+      MakeDetachedBaseObject<QuicClientSession>(
+          socket,
+          obj,
+          addr,
+          version,
+          context,
+          hostname,
+          port,
+          early_transport_params,
+          session_ticket,
+          dcid,
+          select_preferred_address_policy,
+          alpn,
+          options);
 
   session->AddToSocket(socket);
   session->TLSHandshake();
@@ -2444,7 +2454,7 @@ std::shared_ptr<QuicSession> QuicClientSession::New(
 
 void QuicClientSession::AddToSocket(QuicSocket* socket) {
   QuicCID scid(scid_);
-  socket->AddSession(&scid, shared_from_this());
+  socket->AddSession(&scid, BaseObjectPtr<QuicSession>(this));
 
   std::vector<ngtcp2_cid> cids(ngtcp2_conn_get_num_scid(Connection()));
   ngtcp2_conn_get_scid(Connection(), cids.data());
@@ -2484,7 +2494,7 @@ void QuicClientSession::VersionNegotiation(
 
   // Grab a shared pointer to this to prevent the QuicSession
   // from being freed while the MakeCallback is running.
-  std::shared_ptr<QuicSession> ptr(shared_from_this());
+  BaseObjectPtr<QuicSession> ptr(this);
   MakeCallback(
       env()->quic_on_session_version_negotiation_function(),
       arraysize(argv), argv);
@@ -2642,7 +2652,7 @@ int QuicClientSession::SetSession(SSL_SESSION* session) {
   }
   // Grab a shared pointer to this to prevent the QuicSession
   // from being freed while the MakeCallback is running.
-  std::shared_ptr<QuicSession> ptr(shared_from_this());
+  BaseObjectPtr<QuicSession> ptr(this);
   MakeCallback(env()->quic_on_session_ticket_function(), arraysize(argv), argv);
 
   return 1;
@@ -2651,7 +2661,7 @@ int QuicClientSession::SetSession(SSL_SESSION* session) {
 bool QuicClientSession::SetSocket(QuicSocket* socket, bool nat_rebinding) {
   CHECK(!IsFlagSet(QUICSESSION_FLAG_DESTROYED));
   CHECK(!IsFlagSet(QUICSESSION_FLAG_GRACEFUL_CLOSING));
-  if (socket == nullptr || socket == socket_)
+  if (socket == nullptr || socket == socket_.get())
     return true;
 
   // Step 1: Add this Session to the given Socket
@@ -2661,7 +2671,7 @@ bool QuicClientSession::SetSocket(QuicSocket* socket, bool nat_rebinding) {
   RemoveFromSocket();
 
   // Step 3: Update the internal references
-  socket_ = socket;
+  socket_.reset(socket);
   socket->ReceiveStart();
 
   // Step 4: Update ngtcp2
@@ -2737,7 +2747,7 @@ int QuicClientSession::OnTLSStatus() {
   }
   // Grab a shared pointer to this to prevent the QuicSession
   // from being freed while the MakeCallback is running.
-  std::shared_ptr<QuicSession> ptr(shared_from_this());
+  BaseObjectPtr<QuicSession> ptr(this);
   MakeCallback(env()->quic_on_session_status_function(), 1, &arg);
   return 1;
 }
@@ -3616,7 +3626,7 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
 
   socket->ReceiveStart();
 
-  std::shared_ptr<QuicSession> session =
+  BaseObjectPtr<QuicSession> session =
       QuicClientSession::New(
           socket,
           const_cast<const sockaddr*>(reinterpret_cast<sockaddr*>(&addr)),
