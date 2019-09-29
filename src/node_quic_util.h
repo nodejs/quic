@@ -200,7 +200,7 @@ class SocketAddress {
     }
 
     char host[NI_MAXHOST];
-    if (uv_inet_ntop(af, binaddr, host, sizeof(host)) == 0)
+    if (uv_inet_ntop(af, binaddr, host, sizeof(host)) != 0)
       return false;
 
     addrinfo hints{};
