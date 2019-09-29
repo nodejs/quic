@@ -1150,7 +1150,7 @@
           ],
           'sources': [
             'test/cctest/test_quic_buffer.cc',
-            'test/cctest/test-quic-verifyhostnameidentity.cc'
+            'test/cctest/test_quic_verifyhostnameidentity.cc'
           ]
         }],
         ['v8_enable_inspector==1', {
