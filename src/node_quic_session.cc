@@ -1472,7 +1472,7 @@ bool QuicSession::SendPacket(const char* diagnostic_label) {
     txbuf_ += std::move(sendbuf_);
   }
   // There's nothing to send, so let's not try
-  if (txbuf_.Length() == 0)
+  if (txbuf_.Length() == 0 || Socket() == nullptr)
     return true;
   Debug(this, "There are %" PRIu64 " bytes in txbuf_ to send", txbuf_.Length());
   session_stats_.session_sent_at = uv_hrtime();
@@ -3577,6 +3577,14 @@ void QuicSessionPing(const FunctionCallbackInfo<Value>& args) {
   session->Ping();
 }
 
+// TODO(addaleax): This is a temporary solution for testing and should be
+// removed later.
+void QuicSessionRemoveFromSocket(const FunctionCallbackInfo<Value>& args) {
+  QuicSession* session;
+  ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
+  session->RemoveFromSocket();
+}
+
 void QuicSessionUpdateKey(const FunctionCallbackInfo<Value>& args) {
   QuicSession* session;
   ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
@@ -3658,6 +3666,7 @@ void AddMethods(Environment* env, Local<FunctionTemplate> session) {
   env->SetProtoMethod(session, "gracefulClose", QuicSessionGracefulClose);
   env->SetProtoMethod(session, "updateKey", QuicSessionUpdateKey);
   env->SetProtoMethod(session, "ping", QuicSessionPing);
+  env->SetProtoMethod(session, "removeFromSocket", QuicSessionRemoveFromSocket);
   env->SetProtoMethod(session, "onClientHelloDone",
                       QuicSessionOnClientHelloDone);
   env->SetProtoMethod(session, "onCertDone", QuicSessionOnCertDone);

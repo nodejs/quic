@@ -8,9 +8,13 @@ if (!common.hasQuic)
 // sequence and we can stop execution at any point.
 
 const quic = require('quic');
-const { isMainThread, Worker } = require('worker_threads');
+const { isMainThread, Worker, workerData } = require('worker_threads');
 
-if (isMainThread) return new Worker(__filename);
+if (isMainThread) {
+  new Worker(__filename, { workerData: { removeFromSocket: true } });
+  new Worker(__filename, { workerData: { removeFromSocket: false } });
+  return;
+}
 
 const fixtures = require('../common/fixtures');
 const key = fixtures.readKey('agent1-key.pem', 'binary');
@@ -58,6 +62,8 @@ server.on('ready', common.mustCall(() => {
   });
 
   req.on('stream', common.mustCall(() => {
+    if (workerData.removeFromSocket)
+      req.removeFromSocket();
     process.exit();
   }));
 
