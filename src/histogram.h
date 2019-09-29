@@ -64,13 +64,12 @@ class HistogramBase : public BaseObject, public Histogram {
   static void HistogramReset(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void Initialize(Environment* env);
 
-  static inline HistogramBase* New(
+  static inline BaseObjectPtr<HistogramBase> New(
       Environment* env,
       int64_t lowest,
       int64_t highest,
       int figures = 3);
 
- private:
   inline HistogramBase(
       Environment* env,
       v8::Local<v8::Object> wrap,
@@ -78,6 +77,7 @@ class HistogramBase : public BaseObject, public Histogram {
       int64_t highest,
       int figures = 3);
 
+ private:
   int64_t exceeds_ = 0;
   uint64_t prev_ = 0;
 };

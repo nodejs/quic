@@ -63,9 +63,11 @@ HistogramBase::HistogramBase(
     v8::Local<v8::Object> wrap,
     int64_t lowest,
     int64_t highest,
-    int figures) :
-    BaseObject(env, wrap),
-    Histogram(lowest, highest, figures) {}
+    int figures)
+  : BaseObject(env, wrap),
+    Histogram(lowest, highest, figures) {
+  MakeWeak();
+}
 
 bool HistogramBase::RecordDelta() {
   uint64_t time = uv_hrtime();
@@ -92,7 +94,7 @@ void HistogramBase::ResetState() {
   prev_ = 0;
 }
 
-HistogramBase* HistogramBase::New(
+BaseObjectPtr<HistogramBase> HistogramBase::New(
     Environment* env,
     int64_t lowest,
     int64_t highest,
@@ -102,9 +104,10 @@ HistogramBase* HistogramBase::New(
   v8::Local<v8::Object> obj;
   auto tmpl = env->histogram_ctor_template();
   if (!tmpl->NewInstance(env->context()).ToLocal(&obj))
-    return nullptr;
+    return {};
 
-  return new HistogramBase(env, obj, lowest, highest, figures);
+  return MakeDetachedBaseObject<HistogramBase>(
+      env, obj, lowest, highest, figures);
 }
 
 }  // namespace node

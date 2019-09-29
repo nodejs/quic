@@ -931,13 +931,13 @@ class QuicSession : public AsyncWrap,
   // crypto_rx_ack_ measures the elapsed time between crypto acks
   // for this stream. This data can be used to detect peers that are
   // generally taking too long to acknowledge crypto data.
-  std::unique_ptr<HistogramBase> crypto_rx_ack_;
+  BaseObjectPtr<HistogramBase> crypto_rx_ack_;
 
   // crypto_handshake_rate_ measures the elapsed time between
   // crypto continuation steps. This data can be used to detect
   // peers that are generally taking too long to carry out the
   // handshake
-  std::unique_ptr<HistogramBase> crypto_handshake_rate_;
+  BaseObjectPtr<HistogramBase> crypto_handshake_rate_;
 
   struct recovery_stats {
     double min_rtt;
