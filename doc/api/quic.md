@@ -199,12 +199,11 @@ added: REPLACEME
 
 Information about the cipher algorithm selected for the session.
 
-### quicsession.close([code[, callback]])
+### quicsession.close([callback])
 <!-- YAML
 added: REPLACEME
 -->
 
-* `code` {number} The error code to when closing the session. Default: `0`.
 * `callback` {Function} Callback invoked when the close operation is completed
 
 Begins a graceful close of the `QuicSession`. Existing `QuicStream` instances
