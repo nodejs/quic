@@ -296,9 +296,7 @@ class QuicStream : public AsyncWrap, public StreamBase {
 
   AsyncWrap* GetAsyncWrap() override { return this; }
 
-  void MemoryInfo(MemoryTracker* tracker) const override {
-    tracker->TrackField("buffer", &streambuf_);
-  }
+  void MemoryInfo(MemoryTracker* tracker) const override;
 
   SET_MEMORY_INFO_NAME(QuicStream)
   SET_SELF_SIZE(QuicStream)

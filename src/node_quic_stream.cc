@@ -379,6 +379,14 @@ BaseObjectPtr<QuicStream> QuicStream::New(
   return stream;
 }
 
+void QuicStream::MemoryInfo(MemoryTracker* tracker) const {
+  tracker->TrackField("buffer", &streambuf_);
+  tracker->TrackField("data_rx_rate", data_rx_rate_);
+  tracker->TrackField("data_rx_size", data_rx_size_);
+  tracker->TrackField("data_rx_ack", data_rx_ack_);
+  tracker->TrackField("stats_buffer", stats_buffer_);
+}
+
 // JavaScript API
 namespace {
 void QuicStreamGetID(const FunctionCallbackInfo<Value>& args) {
