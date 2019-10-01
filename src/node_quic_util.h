@@ -384,7 +384,7 @@ void IncrementStat(
 // Simple timer wrapper that is used to implement the internals
 // for idle and retransmission timeouts. Call Update to start or
 // reset the timer; Stop to halt the timer.
-class Timer {
+class Timer final : public MemoryRetainer {
  public:
   explicit Timer(Environment* env, std::function<void()> fn)
     : stopped_(false),
@@ -395,7 +395,7 @@ class Timer {
     env->AddCleanupHook(CleanupHook, this);
   }
 
-  ~Timer() {
+  ~Timer() override {
     env_->RemoveCleanupHook(CleanupHook, this);
   }
 
@@ -422,6 +422,10 @@ class Timer {
   }
 
   static void Free(Timer* timer);
+
+  SET_NO_MEMORY_INFO()
+  SET_MEMORY_INFO_NAME(Timer)
+  SET_SELF_SIZE(Timer)
 
  private:
   static void OnTimeout(uv_timer_t* timer);
