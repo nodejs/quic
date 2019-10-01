@@ -2643,12 +2643,11 @@ int QuicClientSession::SetSession(SSL_SESSION* session) {
   if (!session_ticket.empty())
     argv[1] = session_ticket.ToBuffer().ToLocalChecked();
 
-  if (transportParams_.length() > 0) {
-    argv[2] = Buffer::New(
+  if (has_transport_params_) {
+    argv[2] = Buffer::Copy(
         env(),
-        *transportParams_,
-        transportParams_.length(),
-        [](char* data, void* hint) {}, nullptr).ToLocalChecked();
+        reinterpret_cast<const char*>(&transport_params_),
+        sizeof(transport_params_)).ToLocalChecked();
   }
   // Grab a shared pointer to this to prevent the QuicSession
   // from being freed while the MakeCallback is running.
@@ -2696,8 +2695,8 @@ bool QuicClientSession::SetSocket(QuicSocket* socket, bool nat_rebinding) {
 void QuicClientSession::StoreRemoteTransportParams(
     ngtcp2_transport_params* params) {
   CHECK(!IsFlagSet(QUICSESSION_FLAG_DESTROYED));
-  transportParams_.AllocateSufficientStorage(sizeof(ngtcp2_transport_params));
-  memcpy(*transportParams_, params, sizeof(ngtcp2_transport_params));
+  transport_params_ = *params;
+  has_transport_params_ = true;
 }
 
 void QuicClientSession::InitTLS_Post() {

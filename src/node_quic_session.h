@@ -1221,7 +1221,8 @@ class QuicClientSession : public QuicSession {
   SelectPreferredAddressPolicy select_preferred_address_policy_;
   std::string hostname_;
 
-  MaybeStackBuffer<char> transportParams_;
+  ngtcp2_transport_params transport_params_;
+  bool has_transport_params_;
 
 
   static const ngtcp2_conn_callbacks callbacks;
