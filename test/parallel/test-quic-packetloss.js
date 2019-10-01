@@ -74,7 +74,7 @@ server.on('ready', common.mustCall(() => {
     let n = 0;
     function sendChunk() {
       if (n < kData.length) {
-        stream.write(kData[n++]);
+        stream.write(kData[n++], common.mustCall());
         setImmediate(sendChunk);
       } else {
         stream.end();
@@ -86,10 +86,10 @@ server.on('ready', common.mustCall(() => {
     stream.resume();
     stream.setEncoding('utf8');
     stream.on('data', (chunk) => data += chunk);
-    stream.on('end', () => {
+    stream.on('end', common.mustCall(() => {
       console.log(data, data.length);
       assert.strictEqual(data, kData);
-    });
+    }));
 
     stream.on('close', common.mustCall(() => {
       debug('Bidirectional, Client-initiated stream %d closed', stream.id);
