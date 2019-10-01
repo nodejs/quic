@@ -1883,6 +1883,24 @@ bool QuicSession::UpdateKey() {
       &crypto_ctx_);
 }
 
+void QuicSession::MemoryInfo(MemoryTracker* tracker) const {
+  tracker->TrackField("alpn", alpn_);
+  tracker->TrackField("idle", idle_);
+  tracker->TrackField("retransmit", retransmit_);
+  tracker->TrackField("rx_secret", rx_secret_);
+  tracker->TrackField("tx_secret", tx_secret_);
+  tracker->TrackField("sendbuf", sendbuf_);
+  tracker->TrackField("handshake", handshake_);
+  tracker->TrackField("txbuf", txbuf_);
+  tracker->TrackField("peer_handshake", peer_handshake_);
+  tracker->TrackField("streams", streams_);
+  tracker->TrackField("state", state_);
+  tracker->TrackField("crypto_rx_ack", crypto_rx_ack_);
+  tracker->TrackField("crypto_handshake_rate", crypto_handshake_rate_);
+  tracker->TrackField("stats_buffer", stats_buffer_);
+  tracker->TrackField("recovery_stats_buffer", recovery_stats_buffer_);
+  tracker->TrackFieldWithSize("current_ngtcp2_memory", current_ngtcp2_memory_);
+}
 
 // QuicServerSession
 QuicServerSession::InitialPacketResult QuicServerSession::Accept(
@@ -2376,6 +2394,11 @@ int QuicServerSession::VerifyPeerIdentity(const char* hostname) {
   return VerifyPeerCertificate(ssl());
 }
 
+void QuicServerSession::MemoryInfo(MemoryTracker* tracker) const {
+  QuicSession::MemoryInfo(tracker);
+  tracker->TrackField("conn_closebuf", conn_closebuf_);
+  tracker->TrackField("ocsp_response", ocsp_response_);
+}
 
 // QuicClientSession
 
@@ -2886,6 +2909,11 @@ int QuicClientSession::VerifyPeerIdentity(const char* hostname) {
         hostname != nullptr ? hostname : hostname_.c_str());
   }
   return 0;
+}
+
+void QuicClientSession::MemoryInfo(MemoryTracker* tracker) const {
+  QuicSession::MemoryInfo(tracker);
+  tracker->TrackField("hostname", hostname_);
 }
 
 // Static ngtcp2 callbacks are registered when ngtcp2 when a new ngtcp2_conn is

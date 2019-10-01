@@ -364,6 +364,8 @@ class QuicSession : public AsyncWrap,
     QuicSession* session_;
   };
 
+  void MemoryInfo(MemoryTracker* tracker) const override;
+
  private:
   // Returns true if the QuicSession has entered the
   // closing period following a call to ImmediateClose.
@@ -1063,7 +1065,8 @@ class QuicServerSession : public QuicSession {
   const ngtcp2_cid* rcid() const { return &rcid_; }
   ngtcp2_cid* pscid() { return &pscid_; }
 
-  void MemoryInfo(MemoryTracker* tracker) const override {}
+  void MemoryInfo(MemoryTracker* tracker) const override;
+
   SET_MEMORY_INFO_NAME(QuicServerSession)
   SET_SELF_SIZE(QuicServerSession)
 
@@ -1168,7 +1171,8 @@ class QuicClientSession : public QuicSession {
 
   bool SendConnectionClose() override;
 
-  void MemoryInfo(MemoryTracker* tracker) const override {}
+  void MemoryInfo(MemoryTracker* tracker) const override;
+
   SET_MEMORY_INFO_NAME(QuicClientSession)
   SET_SELF_SIZE(QuicClientSession)
 

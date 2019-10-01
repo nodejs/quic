@@ -120,7 +120,13 @@ QuicSocket::~QuicSocket() {
 }
 
 void QuicSocket::MemoryInfo(MemoryTracker* tracker) const {
-  // TODO(@jasnell): Implement memory tracking information
+  tracker->TrackField("sessions", sessions_);
+  tracker->TrackField("dcid_to_scid", dcid_to_scid_);
+  tracker->TrackFieldWithSize("addr_counts",
+      addr_counts_.size() * (sizeof(sockaddr*) + sizeof(size_t)));
+  tracker->TrackField("validated_addrs", validated_addrs_);
+  tracker->TrackField("stats_buffer", stats_buffer_);
+  tracker->TrackFieldWithSize("current_ngtcp2_memory", current_ngtcp2_memory_);
 }
 
 void QuicSocket::AddSession(
