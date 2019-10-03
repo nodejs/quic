@@ -943,7 +943,7 @@ socket.on('ready', () => {
 });
 ```
 
-#### Call Results#
+#### Call Results
 
 A call on a socket that is not ready to send or no longer open may throw a
 Not running Error.
@@ -1105,6 +1105,54 @@ added: REPLACEME
 * Type: {QuicSession}
 
 The `QuicServerSession` or `QuicClientSession`.
+
+### quicstream.sendFD(fd[, options])
+<!-- YAML
+added: REPLACEME
+-->
+
+* `fd` {number|FileHandle} A readable file descriptor.
+* `options` {Object}
+  * `offset` {number} The offset position at which to begin reading.
+    Default: `-1`.
+  * `length` {number} The amount of data from the fd to send.
+    Default: `-1`.
+
+Instead of using a `Quicstream` as a writable stream, send data from a given file
+descriptor.
+
+If `offset` is set to a non-negative number, reading starts from that position
+and the file offset will not be advanced.
+If `length` is set to a non-negative number, it gives the maximum number of
+bytes that are read from the file.
+
+The file descriptor or `FileHandle` is not closed when the stream is closed,
+so it will need to be closed manually once it is no longer needed.
+Using the same file descriptor concurrently for multiple streams
+is not supported and may result in data loss. Re-using a file descriptor
+after a stream has finished is supported.
+
+### quicstream.sendFile(path[, options])
+<!-- YAML
+added: REPLACEME
+-->
+
+* `path` {string|Buffer|URL}
+* `options` {Object}
+  * `onError` {Function} Callback function invoked in the case of an
+    error before send.
+  * `offset` {number} The offset position at which to begin reading.
+    Default: `-1`.
+  * `length` {number} The amount of data from the fd to send.
+    Default: `-1`.
+
+Instead of using a `QuicStream` as a writable stream, send data from a given file
+path.
+
+The `options.onError` callback will be called if the file could not be opened.
+If `offset` is set to a non-negative number, reading starts from that position.
+If `length` is set to a non-negative number, it gives the maximum number of
+bytes that are read from the file.
 
 ### quicstream.unidirectional
 <!-- YAML
