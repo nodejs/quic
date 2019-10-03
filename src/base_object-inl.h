@@ -187,7 +187,7 @@ void BaseObject::decrease_refcount() {
   if (new_refcount == 0) {
     if (metadata->is_detached) {
       delete this;
-    } else if (metadata->wants_weak_jsobj) {
+    } else if (metadata->wants_weak_jsobj && !persistent_handle_.IsEmpty()) {
       MakeWeak();
     }
   }
@@ -195,7 +195,7 @@ void BaseObject::decrease_refcount() {
 
 void BaseObject::increase_refcount() {
   unsigned int prev_refcount = pointer_data()->strong_ptr_count++;
-  if (prev_refcount == 0)
+  if (prev_refcount == 0 && !persistent_handle_.IsEmpty())
     persistent_handle_.ClearWeak();
 }
 
