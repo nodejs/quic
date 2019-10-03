@@ -11,14 +11,12 @@ const expected_keys = [
   'v8',
   'zlib',
   'nghttp2',
-  'nghttp3',
   'napi',
   'llhttp'
 ];
 
 if (common.hasCrypto) {
   expected_keys.push('openssl');
-  expected_keys.push('ngtcp2');
 }
 
 if (common.hasIntl) {
@@ -26,6 +24,11 @@ if (common.hasIntl) {
   expected_keys.push('cldr');
   expected_keys.push('tz');
   expected_keys.push('unicode');
+}
+
+if (common.hasQuic) {
+  expected_keys.push('ngtcp2');
+  expected_keys.push('nghttp3');
 }
 
 expected_keys.sort();
