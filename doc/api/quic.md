@@ -113,7 +113,6 @@ added: REPLACEME
 Emitted immediately before the `'close'` event if the `QuicSession` was
 destroyed with an error.
 
-
 ### Event: `'keylog'`
 <!-- YAML
 added: REPLACEME
@@ -177,7 +176,6 @@ added: REPLACEME
 -->
 
 Emitted when a new `QuicStream` has been initiated by the connected peer.
-
 
 ### quicsession.alpnProtocol
 <!-- YAML
@@ -393,7 +391,6 @@ three arguments:
 The `sessionTicket` and `remoteTransportParams` are useful when creating a new
 `QuicClientSession` to more quickly resume an existing session.
 
-
 ### quicclientsession.ephemeralKeyInfo
 <!-- YAML
 added: REPLACEME
@@ -535,7 +532,6 @@ Tells the kernel to join a multicast group at the given `multicastAddress` and
 choose one interface and will add membership to it. To add membership to every
 available interface, call `quicsocket.addMembership()` multiple times, once per
 interface.
-
 
 ### quicsocket.address
 <!-- YAML
@@ -1017,7 +1013,6 @@ The default on most systems is `64` but can vary.
 added: REPLACEME
 -->
 
-
 ## Class: QuicStream extends stream.Duplex
 <!-- YAML
 added: REPLACEME
@@ -1119,8 +1114,6 @@ added: REPLACEME
 * Type: {boolean}
 
 Set to `true` if the `QuicStream` is unidirectional.
-
-
 
 [RFC 4007]: https://tools.ietf.org/html/rfc4007
 [Certificate Object]: https://nodejs.org/dist/latest-v12.x/docs/api/tls.html#tls_certificate_object
