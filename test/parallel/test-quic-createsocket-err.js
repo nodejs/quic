@@ -59,16 +59,23 @@ const { createSocket } = require('quic');
   });
 });
 
-// Test invalid QuicSocket reuseAddr argument option
+// Test invalid QuicSocket validateAddress argument option
 [1, NaN, 1n, null, {}, []].forEach((validateAddress) => {
   assert.throws(() => createSocket({ validateAddress }), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
 });
 
-// Test invalid QuicSocket reuseAddr argument option
-[1, NaN, 1n, null, {}, []].forEach((reuseAddr) => {
-  assert.throws(() => createSocket({ reuseAddr }), {
+// Test invalid QuicSocket validateAddressLRU argument option
+[1, NaN, 1n, null, {}, []].forEach((validateAddressLRU) => {
+  assert.throws(() => createSocket({ validateAddressLRU }), {
+    code: 'ERR_INVALID_ARG_TYPE'
+  });
+});
+
+// Test invalid QuicSocket autoClose argument option
+[1, NaN, 1n, null, {}, []].forEach((autoClose) => {
+  assert.throws(() => createSocket({ autoClose }), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
 });
@@ -106,6 +113,13 @@ const { createSocket } = require('quic');
   false
 ].forEach((maxConnectionsPerHost) => {
   assert.throws(() => createSocket({ maxConnectionsPerHost }), {
+    code: 'ERR_INVALID_ARG_TYPE'
+  });
+});
+
+// Test invalid QuicSocket type argument option
+[1, NaN, 1n, null, {}, []].forEach((type) => {
+  assert.throws(() => createSocket({ type }), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
 });
