@@ -10,7 +10,6 @@
 #include <stdio.h>
 #include <limits.h>
 #include <errno.h>
-#include <assert.h>
 #include "../ssl_locl.h"
 #include <openssl/evp.h>
 #include <openssl/buffer.h>
@@ -348,22 +347,6 @@ int ssl3_write_bytes(SSL *s, int type, const void *buf_, size_t len,
     int i;
     size_t tmpwrit;
 
-    if (s->mode & SSL_MODE_QUIC_HACK) {
-        /* If we have an alert to send, lets send it */
-        if (s->s3->alert_dispatch) {
-            i = s->method->ssl_dispatch_alert(s);
-            if (i <= 0) {
-                /* SSLfatal() already called if appropriate */
-                return i;
-            }
-        }
-
-        s->rwstate = SSL_WRITING;
-        *written = len;
-
-        return 1;
-    }
-
     s->rwstate = SSL_NOTHING;
     tot = s->rlayer.wnum;
     /*
@@ -683,10 +666,6 @@ int do_ssl3_write(SSL *s, int type, const unsigned char *buf,
     SSL_SESSION *sess;
     size_t totlen = 0, len, wpinited = 0;
     size_t j;
-
-    if (s->mode & SSL_MODE_QUIC_HACK) {
-        assert(0);
-    }
 
     for (j = 0; j < numpipes; j++)
         totlen += pipelens[j];
@@ -1152,10 +1131,6 @@ int ssl3_write_pending(SSL *s, int type, const unsigned char *buf, size_t len,
     size_t currbuf = 0;
     size_t tmpwrit = 0;
 
-    if (s->mode & SSL_MODE_QUIC_HACK) {
-        assert(0);
-    }
-
     if ((s->rlayer.wpend_tot > len)
         || (!(s->mode & SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER)
             && (s->rlayer.wpend_buf != buf))
@@ -1257,117 +1232,6 @@ int ssl3_read_bytes(SSL *s, int type, int *recvd_type, unsigned char *buf,
             /* SSLfatal() already called */
             return -1;
         }
-    }
-
-    if (s->mode & SSL_MODE_QUIC_HACK) {
-        /* In QUIC, we only expect handshake protocol.  Alerts are
-           notified by decicated API function. */
-        if (!ossl_statem_get_in_handshake(s)) {
-            /* We found handshake data, so we're going back into init */
-            ossl_statem_set_in_init(s, 1);
-
-            i = s->handshake_func(s);
-            /* SSLfatal() already called if appropriate */
-            if (i < 0)
-                return i;
-            if (i == 0) {
-                return -1;
-            }
-            *readbytes = 0;
-            return 1;
-        }
-
-        if (s->rlayer.packet_length == 0) {
-            if (rbuf->left < 4) {
-                if (rbuf->len - rbuf->offset < 4 - rbuf->left) {
-                    memmove(rbuf->buf, rbuf->buf + rbuf->offset - rbuf->left,
-                            rbuf->left);
-                    rbuf->offset = rbuf->left;
-                }
-                s->rwstate = SSL_READING;
-                /* TODO(size_t): Convert this function */
-                ret = BIO_read(s->rbio, rbuf->buf + rbuf->offset,
-                               rbuf->len - rbuf->offset);
-                if (ret < 0) {
-                    return -1;
-                }
-                /* TODO Check this is really ok */
-                if (ret == 0) {
-                    *readbytes = 0;
-                    return 1;
-                }
-
-                rbuf->left += ret;
-                rbuf->offset += ret;
-
-                if (rbuf->left < 4) {
-                    *readbytes = 0;
-                    return 1;
-                }
-                rbuf->offset -= rbuf->left;
-            }
-
-            switch (rbuf->buf[rbuf->offset]) {
-            case SSL3_MT_CLIENT_HELLO:
-            case SSL3_MT_SERVER_HELLO:
-            case SSL3_MT_NEWSESSION_TICKET:
-            case SSL3_MT_END_OF_EARLY_DATA:
-            case SSL3_MT_ENCRYPTED_EXTENSIONS:
-            case SSL3_MT_CERTIFICATE:
-            case SSL3_MT_CERTIFICATE_REQUEST:
-            case SSL3_MT_CERTIFICATE_VERIFY:
-            case SSL3_MT_FINISHED:
-            case SSL3_MT_KEY_UPDATE:
-            case SSL3_MT_MESSAGE_HASH:
-                break;
-            default:
-                SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_SSL3_READ_BYTES,
-                         ERR_R_INTERNAL_ERROR);
-                return -1;
-            }
-
-            s->rlayer.packet_length = (rbuf->buf[rbuf->offset + 1] << 16)
-                                      + (rbuf->buf[rbuf->offset + 2] << 8)
-                                      + rbuf->buf[rbuf->offset + 3] + 4;
-        }
-
-        if (s->rlayer.packet_length) {
-            size_t n;
-
-            n = len < s->rlayer.packet_length ? len : s->rlayer.packet_length;
-            if (rbuf->left == 0) {
-                s->rwstate = SSL_READING;
-                ret = BIO_read(s->rbio, buf, n);
-                if (ret >= 0) {
-                    s->rlayer.packet_length -= ret;
-                    *readbytes = ret;
-                    if (recvd_type) {
-                        *recvd_type = SSL3_RT_HANDSHAKE;
-                    }
-                    return 1;
-                }
-                return -1;
-            }
-
-            n = n < rbuf->left ? n : rbuf->left;
-
-            memcpy(buf, rbuf->buf + rbuf->offset, n);
-            rbuf->offset += n;
-            rbuf->left -= n;
-            s->rlayer.packet_length -= n;
-            if (rbuf->left == 0) {
-                rbuf->offset = 0;
-            }
-            *readbytes = n;
-            if (recvd_type) {
-                *recvd_type = SSL3_RT_HANDSHAKE;
-            }
-            return 1;
-        }
-
-        SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_SSL3_READ_BYTES,
-                 ERR_R_INTERNAL_ERROR);
-        return -1;
     }
 
     if ((type && (type != SSL3_RT_APPLICATION_DATA)
