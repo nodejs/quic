@@ -1,4 +1,3 @@
-// Flags: --expose-internals
 'use strict';
 
 // This test is not yet working correctly because data

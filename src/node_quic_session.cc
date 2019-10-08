@@ -1291,7 +1291,8 @@ void QuicSession::RemoveStream(int64_t stream_id) {
 void QuicSession::ScheduleRetransmit() {
   uint64_t now = uv_hrtime();
   uint64_t expiry = ngtcp2_conn_get_expiry(Connection());
-  uint64_t interval = (expiry < now) ? 1 : ((expiry - now) / 1000000UL);
+  uint64_t interval = (expiry - now) / 1000000UL;
+  if (expiry < now || interval == 0) interval = 1;
   Debug(this, "Scheduling the retransmit timer for %" PRIu64, interval);
   UpdateRetransmitTimer(interval);
 }
