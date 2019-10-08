@@ -8,9 +8,9 @@ if (!common.hasQuic)
 // sequence and we can stop execution at any point.
 
 const quic = require('quic');
-const { isMainThread, Worker, workerData } = require('worker_threads');
+const { Worker, workerData } = require('worker_threads');
 
-if (isMainThread) {
+if (workerData === null) {
   new Worker(__filename, { workerData: { removeFromSocket: true } });
   new Worker(__filename, { workerData: { removeFromSocket: false } });
   return;
