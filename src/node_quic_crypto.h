@@ -60,8 +60,8 @@ bool DeriveAndInstallInitialKey(
 // Called when QuicSession::UpdateKey() is called.
 bool UpdateAndInstallKey(
     QuicSession* session,
-    std::vector<uint8_t>& current_rx_secret,
-    std::vector<uint8_t>& current_tx_secret);
+    std::vector<uint8_t>* current_rx_secret,
+    std::vector<uint8_t>* current_tx_secret);
 
 // Get the server name identified in the client hello
 const char* GetClientHelloServerName(SSL* ssl);

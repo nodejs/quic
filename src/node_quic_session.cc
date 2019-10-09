@@ -615,11 +615,11 @@ void QuicSession::HandshakeCompleted() {
   Local<Value> verifyErrorReason =
       err != 0 ?
           GetValidationErrorReason(env(), err) :
-          v8::Null(env()->isolate());
+          v8::Null(env()->isolate()).As<Value>();
   Local<Value> verifyErrorCode =
       err != 0 ?
           GetValidationErrorCode(env(), err) :
-          v8::Null(env()->isolate());
+          v8::Null(env()->isolate()).As<Value>();
 
   Local<Value> argv[] = {
     servername,
@@ -1644,7 +1644,7 @@ bool QuicSession::UpdateKey() {
 
   IncrementStat(1, &session_stats_, &session_stats::keyupdate_count);
 
-  return UpdateAndInstallKey(this, rx_secret_, tx_secret_);
+  return UpdateAndInstallKey(this, &rx_secret_, &tx_secret_);
 }
 
 void QuicSession::MemoryInfo(MemoryTracker* tracker) const {
