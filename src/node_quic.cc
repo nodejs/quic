@@ -47,7 +47,6 @@ void QuicSetCallbacks(const FunctionCallbackInfo<Value>& args) {
     env->set_quic_on_##callback##_function(fn.As<Function>());                \
   } while (0)
 
-  SETFUNCTION("onSocketReady", socket_ready);
   SETFUNCTION("onSocketClose", socket_close);
   SETFUNCTION("onSocketError", socket_error);
   SETFUNCTION("onSessionReady", session_ready);
@@ -163,8 +162,6 @@ void Initialize(Local<Object> target,
   NODE_DEFINE_CONSTANT(constants, SSL_OP_SINGLE_ECDH_USE);
   NODE_DEFINE_CONSTANT(constants, TLS1_3_VERSION);
   NODE_DEFINE_CONSTANT(constants, UV_EBADF);
-  NODE_DEFINE_CONSTANT(constants, UV_UDP_IPV6ONLY);
-  NODE_DEFINE_CONSTANT(constants, UV_UDP_REUSEADDR);
 
   NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_ACTIVE_CONNECTION_ID_LIMIT);
   NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_MAX_STREAM_DATA_BIDI_LOCAL);

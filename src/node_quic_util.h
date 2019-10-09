@@ -271,14 +271,6 @@ class SocketAddress {
     memcpy(&address_, source, GetAddressLen(source));
   }
 
-  void Set(uv_udp_t* handle) {
-    int addrlen = sizeof(address_);
-    CHECK_EQ(uv_udp_getsockname(
-        handle,
-        reinterpret_cast<sockaddr*>(&address_),
-        &addrlen), 0);
-  }
-
   void Update(const ngtcp2_addr* addr) {
     memcpy(&address_, addr->addr, addr->addrlen);
   }
