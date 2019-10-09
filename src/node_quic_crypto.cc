@@ -25,13 +25,12 @@
 
 namespace node {
 
+using crypto::EntropySource;
 using v8::Array;
 using v8::Local;
 using v8::Object;
 using v8::String;
 using v8::Value;
-
-using crypto::EntropySource;
 
 namespace quic {
 
@@ -895,7 +894,7 @@ int AddHandshakeData(
   return 1;
 }
 
-int FlushFlight(SSL *ssl) { return 1; }
+int FlushFlight(SSL* ssl) { return 1; }
 
 int SendAlert(
     SSL* ssl,
@@ -1136,8 +1135,8 @@ bool DeriveAndInstallInitialKey(
 
 bool UpdateAndInstallKey(
     QuicSession* session,
-    std::vector<uint8_t>& current_rx_secret,
-    std::vector<uint8_t>& current_tx_secret) {
+    std::vector<uint8_t>* current_rx_secret,
+    std::vector<uint8_t>* current_tx_secret) {
   SessionSecret rx_secret;
   SessionSecret tx_secret;
   SessionKey rx_key;
@@ -1153,19 +1152,19 @@ bool UpdateAndInstallKey(
          rx_iv.data(),
          tx_key.data(),
          tx_iv.data(),
-         current_rx_secret.data(),
-         current_tx_secret.data(),
-         current_rx_secret.size()))) {
+         current_rx_secret->data(),
+         current_tx_secret->data(),
+         current_rx_secret->size()))) {
     return false;
   }
 
-  current_rx_secret.assign(
+  current_rx_secret->assign(
       std::begin(rx_secret),
-      std::begin(rx_secret) + current_rx_secret.size());
+      std::begin(rx_secret) + current_rx_secret->size());
 
-  current_tx_secret.assign(
+  current_tx_secret->assign(
       std::begin(tx_secret),
-      std::begin(tx_secret) + current_tx_secret.size());
+      std::begin(tx_secret) + current_tx_secret->size());
 
   return true;
 }
