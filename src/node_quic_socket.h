@@ -10,7 +10,7 @@
 #include "node_quic_session.h"
 #include "node_quic_util.h"
 #include "env.h"
-#include "handle_wrap.h"
+#include "udp_wrap.h"
 #include "v8.h"
 #include "uv.h"
 
@@ -43,7 +43,8 @@ enum QuicSocketOptions : uint32_t {
   QUICSOCKET_OPTIONS_VALIDATE_ADDRESS_LRU = 0x2,
 };
 
-class QuicSocket : public HandleWrap,
+class QuicSocket : public AsyncWrap,
+                   public UDPListener,
                    public mem::NgLibMemoryManager<QuicSocket, ngtcp2_mem> {
  public:
   static void Initialize(
@@ -54,6 +55,7 @@ class QuicSocket : public HandleWrap,
   QuicSocket(
       Environment* env,
       Local<Object> wrap,
+      Local<Object> udp_base_wrap,
       uint64_t retry_token_expiration,
       size_t max_connections_per_host,
       uint32_t options = 0);
@@ -61,30 +63,16 @@ class QuicSocket : public HandleWrap,
 
   SocketAddress* GetLocalAddress() { return &local_address_; }
 
-  void Close(
-      v8::Local<v8::Value> close_callback = v8::Local<v8::Value>()) override;
-
   void MaybeClose();
 
-  int AddMembership(
-      const char* address,
-      const char* iface);
   void AddSession(
       QuicCID* cid,
       BaseObjectPtr<QuicSession> session);
   void AssociateCID(
       QuicCID* cid,
       QuicCID* scid);
-  int Bind(
-      const char* address,
-      uint32_t port,
-      uint32_t flags,
-      int family);
   void DisassociateCID(
       QuicCID* cid);
-  int DropMembership(
-      const char* address,
-      const char* iface);
   void Listen(
       crypto::SecureContext* context,
       const sockaddr* preferred_address = nullptr,
@@ -97,16 +85,6 @@ class QuicSocket : public HandleWrap,
       const sockaddr* addr);
   void ReportSendError(
       int error);
-  int SetBroadcast(
-      bool on);
-  int SetMulticastInterface(
-      const char* iface);
-  int SetMulticastLoopback(
-      bool on);
-  int SetMulticastTTL(
-      int ttl);
-  int SetTTL(
-      int ttl);
   int SendPacket(
       const sockaddr* dest,
       QuicBuffer* buf,
@@ -115,12 +93,11 @@ class QuicSocket : public HandleWrap,
   void SetServerBusy(bool on);
   void SetDiagnosticPacketLoss(double rx = 0.0, double tx = 0.0);
   void StopListening();
+  void WaitForPendingCallbacks();
 
   crypto::SecureContext* GetServerSecureContext() {
     return server_secure_context_;
   }
-
-  const uv_udp_t* operator*() const { return &handle_; }
 
   void MemoryInfo(MemoryTracker* tracker) const override;
   SET_MEMORY_INFO_NAME(QuicSocket)
@@ -130,6 +107,16 @@ class QuicSocket : public HandleWrap,
   void CheckAllocatedSize(size_t previous_size) const;
   void IncreaseAllocatedSize(size_t size);
   void DecreaseAllocatedSize(size_t size);
+
+  // Implementation for UDPWrapListener
+  uv_buf_t OnAlloc(size_t suggested_size) override;
+  void OnRecv(ssize_t nread,
+              const uv_buf_t& buf,
+              const sockaddr* addr,
+              unsigned int flags) override;
+  ReqWrap<uv_udp_send_t>* CreateSendWrap(size_t msg_size) override;
+  void OnSendDone(ReqWrap<uv_udp_send_t>* wrap, int status) override;
+  void OnAfterBind() override;
 
  private:
   static void OnAlloc(
@@ -165,6 +152,7 @@ class QuicSocket : public HandleWrap,
   void OnSend(
       int status,
       size_t length,
+      QuicBuffer* buffer,
       const char* diagnostic_label);
 
   void SetValidatedAddress(const sockaddr* addr);
@@ -192,17 +180,9 @@ class QuicSocket : public HandleWrap,
   void DecrementPendingCallbacks() { pending_callbacks_--; }
   bool HasPendingCallbacks() { return pending_callbacks_ > 0; }
 
-  template <typename T,
-            int (*F)(const typename T::HandleType*, sockaddr*, int*)>
-  friend void node::GetSockOrPeerName(
-      const v8::FunctionCallbackInfo<v8::Value>&);
-
   // Returns true if, and only if, diagnostic packet loss is enabled
   // and the current packet should be artificially considered lost.
   bool IsDiagnosticPacketLoss(double prob);
-
-  // Fields and TypeDefs
-  typedef uv_udp_t HandleType;
 
   enum QuicSocketFlags : uint32_t {
     QUICSOCKET_FLAGS_NONE = 0x0,
@@ -210,7 +190,7 @@ class QuicSocket : public HandleWrap,
     // Indicates that the QuicSocket has entered a graceful
     // closing phase, indicating that no additional
     QUICSOCKET_FLAGS_GRACEFUL_CLOSE = 0x1,
-    QUICSOCKET_FLAGS_PENDING_CLOSE = 0x2,
+    QUICSOCKET_FLAGS_WAITING_FOR_CALLBACKS = 0x2,
     QUICSOCKET_FLAGS_SERVER_LISTENING = 0x4,
     QUICSOCKET_FLAGS_SERVER_BUSY = 0x8,
   };
@@ -238,7 +218,8 @@ class QuicSocket : public HandleWrap,
   }
 
   ngtcp2_mem alloc_info_;
-  uv_udp_t handle_;
+  UDPWrapBase* udp_;
+  BaseObjectPtr<AsyncWrap> udp_strong_ptr_;
   uint32_t flags_ = QUICSOCKET_FLAGS_NONE;
   uint32_t options_;
   uint32_t server_options_;
@@ -330,96 +311,37 @@ class QuicSocket : public HandleWrap,
     access(a, mems...) += delta;
   }
 
-  class SendWrapBase {
+  class SendWrap : public ReqWrap<uv_udp_send_t> {
    public:
-    SendWrapBase(
-        QuicSocket* socket,
-        const sockaddr* dest,
-        const char* diagnostic_label = nullptr);
+    SendWrap(Environment* env,
+             v8::Local<v8::Object> req_wrap_obj,
+             size_t total_length_);
 
-    virtual ~SendWrapBase() = default;
-
-    virtual void Done(int status);
-
-    virtual int Send() = 0;
-
-    uv_udp_send_t* operator*() { return &req_; }
-
-    uv_udp_send_t* req() { return &req_; }
-
-    QuicSocket* Socket() { return socket_.get(); }
-
-    SocketAddress* Address() { return &address_; }
-
+    void set_data(MallocedBuffer<char>&& data) { data_ = std::move(data); }
+    void set_quic_buffer(QuicBuffer* buffer) { buffer_ = buffer; }
+    void set_session(BaseObjectPtr<QuicSession> session) { session_ = session; }
+    void set_diagnostic_label(const char* label) { diagnostic_label_ = label; }
+    QuicBuffer* quic_buffer() const { return buffer_; }
     const char* diagnostic_label() const { return diagnostic_label_; }
+    size_t total_length() const { return total_length_; }
 
-    static void OnSend(
-        uv_udp_send_t* req,
-        int status);
-
-    virtual size_t Length() = 0;
-
-    bool IsDiagnosticPacketLoss();
+    SET_SELF_SIZE(SendWrap);
+    std::string MemoryInfoName() const override;
+    void MemoryInfo(MemoryTracker* tracker) const override;
 
    private:
-    uv_udp_send_t req_;
-    BaseObjectPtr<QuicSocket> socket_;
-    SocketAddress address_;
-    const char* diagnostic_label_;
-  };
-
-  // The SendWrap drains the given QuicBuffer and sends it to the
-  // uv_udp_t handle. When the async operation completes, the done_cb
-  // is invoked with the status and the user_data forwarded on.
-  class SendWrap : public SendWrapBase {
-   public:
-    SendWrap(
-        QuicSocket* socket,
-        SocketAddress* dest,
-        QuicBuffer* buffer,
-        BaseObjectPtr<QuicSession> session,
-        const char* diagnostic_label = nullptr);
-
-    SendWrap(
-        QuicSocket* socket,
-        const sockaddr* dest,
-        QuicBuffer* buffer,
-        BaseObjectPtr<QuicSession> session,
-        const char* diagnostic_label = nullptr);
-
-    void Done(int status) override;
-
-    int Send() override;
-
-    size_t Length() override { return length_; }
-
-   private:
-    QuicBuffer* buffer_;
     BaseObjectPtr<QuicSession> session_;
-    size_t length_ = 0;
+    QuicBuffer* buffer_ = nullptr;
+    MallocedBuffer<char> data_;
+    const char* diagnostic_label_ = nullptr;
+    size_t total_length_;
   };
 
-  class SendWrapStack : public SendWrapBase {
-   public:
-    SendWrapStack(
-        QuicSocket* socket,
-        const sockaddr* dest,
-        size_t len,
-        const char* diagnostic_label = nullptr);
+  SendWrap* last_created_send_wrap_ = nullptr;
 
-    int Send() override;
-
-    uint8_t* buffer() { return *buf_; }
-
-    void SetLength(size_t len) {
-      buf_.SetLength(len);
-    }
-
-    size_t Length() override { return buf_.length(); }
-
-   private:
-    MaybeStackBuffer<uint8_t> buf_;
-  };
+  int Send(const sockaddr* addr,
+           MallocedBuffer<char>&& data,
+           const char* diagnostic_label = "unspecified");
 };
 
 }  // namespace quic

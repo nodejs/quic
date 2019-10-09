@@ -27,9 +27,8 @@ const kALPN = 'zzz';
     common.expectsError({
       code: 'EINVAL',
       type: Error,
-      // TODO(@oyyd): Currently we can't know the exact "syscall" so that it's
-      // undefined here.
-      message: 'undefined EINVAL',
+      message: 'bind EINVAL 0.0.0.0',
+      syscall: 'bind'
     })(err);
   }));
 

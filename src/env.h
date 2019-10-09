@@ -436,7 +436,6 @@ constexpr size_t kFsStatsBufferLength =
 # define QUIC_ENVIRONMENT_STRONG_PERSISTENT_VALUES(V)                          \
   V(quic_on_socket_close_function, v8::Function)                               \
   V(quic_on_socket_error_function, v8::Function)                               \
-  V(quic_on_socket_ready_function, v8::Function)                               \
   V(quic_on_socket_server_busy_function, v8::Function)                         \
   V(quic_on_session_cert_function, v8::Function)                               \
   V(quic_on_session_client_hello_function, v8::Function)                       \

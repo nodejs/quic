@@ -60,6 +60,7 @@ namespace node {
   V(QUERYWRAP)                                                                \
   V(QUICCLIENTSESSION)                                                        \
   V(QUICSERVERSESSION)                                                        \
+  V(QUICSENDWRAP)                                                             \
   V(QUICSOCKET)                                                               \
   V(QUICSTREAM)                                                               \
   V(SHUTDOWNWRAP)                                                             \

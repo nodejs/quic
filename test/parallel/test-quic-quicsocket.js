@@ -124,20 +124,10 @@ socket.on('ready', common.mustCall(() => {
   socket.setBroadcast();
   socket.setBroadcast(true);
   socket.setBroadcast(false);
-  [1, 'test', {}, NaN, 1n, null].forEach((i) => {
-    assert.throws(() => socket.setBroadcast(i), {
-      code: 'ERR_INVALID_ARG_TYPE'
-    });
-  });
 
   socket.setMulticastLoopback();
   socket.setMulticastLoopback(true);
   socket.setMulticastLoopback(false);
-  [1, 'test', {}, NaN, 1n, null].forEach((i) => {
-    assert.throws(() => socket.setMulticastLoopback(i), {
-      code: 'ERR_INVALID_ARG_TYPE'
-    });
-  });
 
   socket.setMulticastInterface('0.0.0.0');
 
