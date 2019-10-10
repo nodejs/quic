@@ -1527,7 +1527,10 @@ void QuicSession::StreamReset(
 
 void QuicSession::UpdateIdleTimer() {
   CHECK_NOT_NULL(idle_);
-  uint64_t timeout = ngtcp2_conn_get_idle_expiry(Connection()) / 1000000UL;
+  uint64_t now = uv_hrtime();
+  uint64_t expiry = ngtcp2_conn_get_idle_expiry(Connection());
+  uint64_t timeout = (expiry - now) / 1000000UL;
+  if (expiry < now || timeout == 0) timeout = 1;
   Debug(this, "Updating idle timeout to %" PRIu64, timeout);
   idle_->Update(timeout);
 }
