@@ -71,10 +71,12 @@ const idleTimeout = common.platformTimeout(1000);
     idleTimeout,
   });
 
-  server.on('session', common.mustCall(() => {
-    client.close();
-    server.close();
-    assert(Date.now() - start < idleTimeout + error);
+  server.on('session', common.mustCall((serverSession) => {
+    serverSession.on('close', common.mustCall(() => {
+      client.close();
+      server.close();
+      assert(Date.now() - start < idleTimeout + error);
+    }));
   }));
 
   server.on('ready', common.mustCall(() => {
