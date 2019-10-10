@@ -592,6 +592,13 @@ void QuicSession::HandleError() {
 // need to do at this point is let the javascript side know.
 void QuicSession::HandshakeCompleted() {
   Debug(this, "Handshake is completed");
+
+  // TODO(@jasnell): We should determine if the ALPN
+  // protocol identifier was selected by this point.
+  // If no protocol identifier was selected, then we
+  // should stop here here and close the QuicSession
+  // with a protocol error.
+
   session_stats_.handshake_completed_at = uv_hrtime();
 
   HandleScope scope(env()->isolate());
@@ -1673,6 +1680,7 @@ void QuicSession::MemoryInfo(MemoryTracker* tracker) const {
 // QuicServerSession
 QuicServerSession::InitialPacketResult QuicServerSession::Accept(
     ngtcp2_pkt_hd* hd,
+    uint32_t version,
     const uint8_t* data,
     ssize_t nread) {
   // The initial packet is too short and not a valid QUIC packet.
@@ -1685,6 +1693,16 @@ QuicServerSession::InitialPacketResult QuicServerSession::Accept(
     case 1:
       return PACKET_VERSION;
   }
+
+  // Currently, we only understand one version of the QUIC
+  // protocol, but that could change in the future. If it
+  // does change, the following check needs to be updated
+  // to check against a range of possible versions.
+  // See NGTCP2_PROTO_VER and NGTCP2_PROTO_VER_MAX in the
+  // ngtcp2.h header file for more details.
+  if (version != NGTCP2_PROTO_VER)
+    return PACKET_VERSION;
+
   return PACKET_OK;
 }
 
