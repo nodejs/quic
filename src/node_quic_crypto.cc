@@ -823,7 +823,7 @@ int Client_Hello_CB(
   }
 }
 
-int ALPN_Select_Proto_CB(
+int AlpnSelection(
     SSL* ssl,
     const unsigned char** out,
     unsigned char* outlen,
@@ -831,31 +831,23 @@ int ALPN_Select_Proto_CB(
     unsigned int inlen,
     void* arg) {
   QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
-  const uint8_t* alpn;
-  size_t alpnlen;
-  uint32_t version = session->GetNegotiatedVersion();
 
-  switch (version) {
-    case NGTCP2_PROTO_VER:
-      alpn = reinterpret_cast<const uint8_t*>(session->GetALPN().c_str());
-      alpnlen = session->GetALPN().length();
-      break;
-    default:
-      // Unexpected QUIC protocol version
-      return SSL_TLSEXT_ERR_NOACK;
+  unsigned char* tmp;
+
+  // The QuicServerSession supports exactly one ALPN identifier. If that does
+  // not match any of the ALPN identifiers provided in the client request,
+  // then we fail here. Note that this will not fail the TLS handshake, so
+  // we have to check later if the ALPN matches the expected identifier or not.
+  if (SSL_select_next_proto(
+          &tmp,
+          outlen,
+          reinterpret_cast<const unsigned char*>(session->GetALPN().c_str()),
+          session->GetALPN().length(),
+          in,
+          inlen) == OPENSSL_NPN_NO_OVERLAP) {
+    return SSL_TLSEXT_ERR_NOACK;
   }
-
-  for (auto p = in, end = in + inlen; p + alpnlen < end; p += *p + 1) {
-    if (std::equal(alpn, alpn + alpnlen, p)) {
-      *out = p + 1;
-      *outlen = *p;
-      return SSL_TLSEXT_ERR_OK;
-    }
-  }
-
-  *out = alpn + 1;
-  *outlen = alpn[0];
-
+  *out = tmp;
   return SSL_TLSEXT_ERR_OK;
 }
 
@@ -1016,7 +1008,7 @@ void InitializeSecureContext(
       SSL_CTX_set_options(**sc, ssl_server_opts);
       SSL_CTX_set_mode(**sc, SSL_MODE_RELEASE_BUFFERS);
       SSL_CTX_set_max_early_data(**sc, std::numeric_limits<uint32_t>::max());
-      SSL_CTX_set_alpn_select_cb(**sc, ALPN_Select_Proto_CB, nullptr);
+      SSL_CTX_set_alpn_select_cb(**sc, AlpnSelection, nullptr);
       SSL_CTX_set_client_hello_cb(**sc, Client_Hello_CB, nullptr);
       break;
     case NGTCP2_CRYPTO_SIDE_CLIENT:

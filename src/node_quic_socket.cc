@@ -655,7 +655,7 @@ BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
 
   // Perform some initial checks on the packet to see if it is an
   // acceptable initial packet with the right QUIC version.
-  switch (QuicServerSession::Accept(&hd, data, nread)) {
+  switch (QuicServerSession::Accept(&hd, version, data, nread)) {
     case QuicServerSession::InitialPacketResult::PACKET_VERSION:
       SendVersionNegotiation(version, dcid, scid, addr);
       // Fall through

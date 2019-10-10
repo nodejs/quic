@@ -1000,6 +1000,7 @@ class QuicServerSession : public QuicSession {
 
   static InitialPacketResult Accept(
     ngtcp2_pkt_hd* hd,
+    uint32_t version,
     const uint8_t* data,
     ssize_t nread);
 
