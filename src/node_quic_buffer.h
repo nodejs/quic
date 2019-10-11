@@ -43,17 +43,14 @@ struct quic_buffer_chunk : public MemoryRetainer {
   size_t offset = 0;
   size_t roffset = 0;
   bool done_called = false;
-  v8::Global<v8::Object> keep_alive;
   std::unique_ptr<quic_buffer_chunk> next;
 
   quic_buffer_chunk(
       MallocedBuffer<uint8_t>&& buf_,
-      done_cb done_,
-      v8::Local<v8::Object> keep_alive_)
+      done_cb done_)
     : quic_buffer_chunk(uv_buf_init(reinterpret_cast<char*>(buf_.data),
                                     buf_.size),
-                        done_,
-                        keep_alive_) {
+                        done_) {
     data_buf = std::move(buf_);
   }
 
@@ -61,12 +58,9 @@ struct quic_buffer_chunk : public MemoryRetainer {
 
   quic_buffer_chunk(
       uv_buf_t buf_,
-      done_cb done_,
-      v8::Local<v8::Object> keep_alive_)
+      done_cb done_)
     : quic_buffer_chunk(buf_) {
     done = std::move(done_);
-    if (!keep_alive.IsEmpty())
-      keep_alive.Reset(keep_alive_->GetIsolate(), keep_alive_);
   }
 
   ~quic_buffer_chunk() override {
@@ -196,14 +190,11 @@ class QuicBuffer : public MemoryRetainer {
   // Push one or more uv_buf_t instances into the buffer.
   // the done_cb callback will be invoked when the last
   // uv_buf_t in the bufs array is consumed and popped out
-  // of the internal linked list. The keep_alive allows a reference to a
-  // JS object to be kept around until the final uv_buf_t
-  // is consumed.
+  // of the internal linked list.
   size_t Push(
       uv_buf_t* bufs,
       size_t nbufs,
-      done_cb done = default_quic_buffer_chunk_done,
-      v8::Local<v8::Object> keep_alive = v8::Local<v8::Object>()) {
+      done_cb done = default_quic_buffer_chunk_done) {
     size_t len = 0;
     if (nbufs == 0 || bufs == nullptr || IsEmptyBuffer(bufs[0])) {
       done(0);
@@ -223,26 +214,23 @@ class QuicBuffer : public MemoryRetainer {
     length_ += bufs[n].len;
     rlength_ += bufs[n].len;
     len += bufs[n].len;
-    Push(bufs[n], done, keep_alive);
+    Push(bufs[n], done);
     return len;
   }
 
   // Push a single malloc buf into the buffer.
   // The done_cb will be invoked when the buf is consumed
-  // and popped out of the internal linked list. The keep_alive allows a
-  // reference to a JS object to be kept around until the
-  // final uv_buf_t is consumed.
+  // and popped out of the internal linked list.
   size_t Push(
       MallocedBuffer<uint8_t>&& buffer,
-      done_cb done = default_quic_buffer_chunk_done,
-      v8::Local<v8::Object> keep_alive = v8::Local<v8::Object>()) {
+      done_cb done = default_quic_buffer_chunk_done) {
     if (buffer.size == 0) {
       done(0);
       return 0;
     }
     length_ += buffer.size;
     rlength_ += buffer.size;
-    Push(new quic_buffer_chunk(std::move(buffer), done, keep_alive));
+    Push(new quic_buffer_chunk(std::move(buffer), done));
     return buffer.size;
   }
 
@@ -384,8 +372,8 @@ class QuicBuffer : public MemoryRetainer {
     Push(new quic_buffer_chunk(buf));
   }
 
-  void Push(uv_buf_t buf, done_cb done, v8::Local<v8::Object> keep_alive) {
-    Push(new quic_buffer_chunk(buf, done, keep_alive));
+  void Push(uv_buf_t buf, done_cb done) {
+    Push(new quic_buffer_chunk(buf, done));
   }
 
   bool Pop(int status = 0) {
