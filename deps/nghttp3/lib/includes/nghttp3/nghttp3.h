@@ -84,13 +84,9 @@ typedef enum {
   NGHTTP3_ERR_HTTP_QPACK_DECOMPRESSION_FAILED = -402,
   NGHTTP3_ERR_HTTP_QPACK_ENCODER_STREAM_ERROR = -403,
   NGHTTP3_ERR_HTTP_QPACK_DECODER_STREAM_ERROR = -404,
-  NGHTTP3_ERR_HTTP_UNEXPECTED_FRAME = -408,
-  /* -409 through -664 are HTTP_MALFORMED_FRAME error -409-<N>, where
-      <N> represents frame type that causes this error.  Frame types
-      greater than 0xfe is -664. */
-  NGHTTP3_ERR_HTTP_MALFORMED_FRAME = -409,
+  NGHTTP3_ERR_HTTP_FRAME_UNEXPECTED = -408,
+  NGHTTP3_ERR_HTTP_FRAME_ERROR = -409,
   NGHTTP3_ERR_HTTP_MISSING_SETTINGS = -665,
-  NGHTTP3_ERR_HTTP_WRONG_STREAM = -666,
   NGHTTP3_ERR_HTTP_INTERNAL_ERROR = -667,
   NGHTTP3_ERR_HTTP_CLOSED_CRITICAL_STREAM = -668,
   NGHTTP3_ERR_HTTP_GENERAL_PROTOCOL_ERROR = -669,
@@ -102,29 +98,26 @@ typedef enum {
   NGHTTP3_ERR_CALLBACK_FAILURE = -902
 } nghttp3_lib_error;
 
-typedef enum {
-  NGHTTP3_HTTP_NO_ERROR = 0x0000,
-  NGHTTP3_HTTP_GENERAL_PROTOCOL_ERROR = 0x0001,
-  NGHTTP3_HTTP_INTERNAL_ERROR = 0x0003,
-  NGHTTP3_HTTP_REQUEST_CANCELLED = 0x0005,
-  NGHTTP3_HTTP_INCOMPLETE_REQUEST = 0x0006,
-  NGHTTP3_HTTP_CONNECT_ERROR = 0x0007,
-  NGHTTP3_HTTP_EXCESSIVE_LOAD = 0x0008,
-  NGHTTP3_HTTP_VERSION_FALLBACK = 0x0009,
-  NGHTTP3_HTTP_WRONG_STREAM = 0x000a,
-  NGHTTP3_HTTP_ID_ERROR = 0x000b,
-  NGHTTP3_HTTP_STREAM_CREATION_ERROR = 0x000d,
-  NGHTTP3_HTTP_CLOSED_CRITICAL_STREAM = 0x000f,
-  NGHTTP3_HTTP_EARLY_RESPONSE = 0x0011,
-  NGHTTP3_HTTP_MISSING_SETTINGS = 0x0012,
-  NGHTTP3_HTTP_UNEXPECTED_FRAME = 0x0013,
-  NGHTTP3_HTTP_REQUEST_REJECTED = 0x0014,
-  NGHTTP3_HTTP_SETTINGS_ERROR = 0x00ff,
-  NGHTTP3_HTTP_MALFORMED_FRAME = 0x0100,
-  NGHTTP3_HTTP_QPACK_DECOMPRESSION_FAILED = 0x0200,
-  NGHTTP3_HTTP_QPACK_ENCODER_STREAM_ERROR = 0x0201,
-  NGHTTP3_HTTP_QPACK_DECODER_STREAM_ERROR = 0x0202
-} nghttp3_error;
+#define NGHTTP3_HTTP_NO_ERROR 0x0100
+#define NGHTTP3_HTTP_GENERAL_PROTOCOL_ERROR 0x0101
+#define NGHTTP3_HTTP_INTERNAL_ERROR 0x0102
+#define NGHTTP3_HTTP_STREAM_CREATION_ERROR 0x0103
+#define NGHTTP3_HTTP_CLOSED_CRITICAL_STREAM 0x0104
+#define NGHTTP3_HTTP_FRAME_UNEXPECTED 0x0105
+#define NGHTTP3_HTTP_FRAME_ERROR 0x0106
+#define NGHTTP3_HTTP_EXCESSIVE_LOAD 0x0107
+#define NGHTTP3_HTTP_ID_ERROR 0x0108
+#define NGHTTP3_HTTP_SETTINGS_ERROR 0x0109
+#define NGHTTP3_HTTP_MISSING_SETTINGS 0x010a
+#define NGHTTP3_HTTP_REQUEST_REJECTED 0x010b
+#define NGHTTP3_HTTP_REQUEST_CANCELLED 0x010c
+#define NGHTTP3_HTTP_REQUEST_INCOMPLETE 0x010d
+#define NGHTTP3_HTTP_EARLY_RESPONSE 0x010e
+#define NGHTTP3_HTTP_CONNECT_ERROR 0x010f
+#define NGHTTP3_HTTP_VERSION_FALLBACK 0x0110
+#define NGHTTP3_HTTP_QPACK_DECOMPRESSION_FAILED 0x0200
+#define NGHTTP3_HTTP_QPACK_ENCODER_STREAM_ERROR 0x0201
+#define NGHTTP3_HTTP_QPACK_DECODER_STREAM_ERROR 0x0202
 
 /**
  * @functypedef
@@ -896,23 +889,21 @@ NGHTTP3_EXTERN ssize_t nghttp3_qpack_decoder_read_request(
  * `nghttp3_qpack_decoder_write_decoder` writes decoder stream into
  * |dbuf|.
  *
- * The buffer pointed by |dbuf| can be empty buffer.  It is fine to
- * pass a buffer initialized by nghttp3_buf_init(buf).  This function
- * allocates memory for these buffers as necessary.  In particular, it
- * frees and expands buffer if the current capacity of buffer is not
- * enough.  If begin field of any buffer is not NULL, it must be
- * allocated by the same memory allocator passed to
- * `nghttp3_qpack_encoder_new()`.
- *
- * This function returns 0 if it succeeds, or one of the following
- * negative error codes:
- *
- * :enum:`NGHTTP3_ERR_NOMEM`
- *     Out of memory
+ * The caller must ensure that nghttp3_buf_left(dbuf) >=
+ * nghttp3_qpack_decoder_get_decoder_streamlen(decoder).
  */
-NGHTTP3_EXTERN int
+NGHTTP3_EXTERN void
 nghttp3_qpack_decoder_write_decoder(nghttp3_qpack_decoder *decoder,
                                     nghttp3_buf *dbuf);
+
+/**
+ * @function
+ *
+ * `nghttp3_qpack_decoder_get_decoder_streamlen` returns the length of
+ * decoder stream.
+ */
+NGHTTP3_EXTERN size_t
+nghttp3_qpack_decoder_get_decoder_streamlen(nghttp3_qpack_decoder *decoder);
 
 /**
  * @function
@@ -1041,6 +1032,9 @@ typedef int (*nghttp3_stream_close)(nghttp3_conn *conn, int64_t stream_id,
  * |stream_id| is received.  |data| points to the received data and
  * its length is |datalen|.
  *
+ * The application is responsible for increasing flow control credit
+ * by |datalen| bytes.
+ *
  * The implementation of this callback must return 0 if it succeeds.
  * Returning :enum:`NGHTTP3_ERR_CALLBACK_FAILURE` will return to the
  * caller immediately.  Any values other than 0 is treated as
@@ -1056,7 +1050,9 @@ typedef int (*nghttp3_recv_data)(nghttp3_conn *conn, int64_t stream_id,
  * :type:`nghttp3_deferred_consume` is a callback function which is
  * invoked when the library consumed |consumed| bytes for a stream
  * identified by |stream_id|.  This callback is used to notify the
- * consumed bytes for stream blocked by QPACK decoder.
+ * consumed bytes for stream blocked by QPACK decoder.  The
+ * application is responsible for increasing flow control credit by
+ * |consumed| bytes.
  *
  * The implementation of this callback must return 0 if it succeeds.
  * Returning :enum:`NGHTTP3_ERR_CALLBACK_FAILURE` will return to the
@@ -1187,7 +1183,6 @@ typedef struct {
 
 typedef struct {
   uint64_t max_header_list_size;
-  uint64_t num_placeholders;
   uint64_t max_pushes;
   uint64_t qpack_max_table_capacity;
   uint64_t qpack_blocked_streams;
@@ -1248,7 +1243,6 @@ NGHTTP3_EXTERN int nghttp3_conn_bind_qpack_streams(nghttp3_conn *conn,
 typedef enum {
   NGHTTP3_FRAME_DATA = 0x00,
   NGHTTP3_FRAME_HEADERS = 0x01,
-  NGHTTP3_FRAME_PRIORITY = 0x02,
   NGHTTP3_FRAME_CANCEL_PUSH = 0x03,
   NGHTTP3_FRAME_SETTINGS = 0x04,
   NGHTTP3_FRAME_PUSH_PROMISE = 0x05,
@@ -1272,40 +1266,14 @@ typedef struct {
   size_t nvlen;
 } nghttp3_frame_headers;
 
-typedef enum {
-  NGHTTP3_PRI_ELEM_TYPE_REQUEST = 0x00,
-  NGHTTP3_PRI_ELEM_TYPE_PUSH = 0x01,
-  NGHTTP3_PRI_ELEM_TYPE_PLACEHOLDER = 0x02
-} nghttp3_pri_elem_type;
-
-typedef enum {
-  NGHTTP3_ELEM_DEP_TYPE_REQUEST = 0x00,
-  NGHTTP3_ELEM_DEP_TYPE_PUSH = 0x01,
-  NGHTTP3_ELEM_DEP_TYPE_PLACEHOLDER = 0x02,
-  NGHTTP3_ELEM_DEP_TYPE_ROOT = 0x03
-} nghttp3_elem_dep_type;
-
-typedef struct {
-  nghttp3_frame_hd hd;
-  nghttp3_pri_elem_type pt;
-  nghttp3_elem_dep_type dt;
-  int64_t pri_elem_id;
-  int64_t elem_dep_id;
-  uint32_t weight;
-  uint8_t exclusive;
-} nghttp3_frame_priority;
-
 typedef struct {
   nghttp3_frame_hd hd;
   int64_t push_id;
 } nghttp3_frame_cancel_push;
 
-typedef enum {
-  NGHTTP3_SETTINGS_ID_MAX_HEADER_LIST_SIZE = 0x06,
-  NGHTTP3_SETTINGS_ID_NUM_PLACEHOLDERS = 0x09,
-  NGHTTP3_SETTINGS_ID_QPACK_MAX_TABLE_CAPACITY = 0x01,
-  NGHTTP3_SETTINGS_ID_QPACK_BLOCKED_STREAMS = 0x07,
-} nghttp3_settings_id;
+#define NGHTTP3_SETTINGS_ID_MAX_HEADER_LIST_SIZE 0x06
+#define NGHTTP3_SETTINGS_ID_QPACK_MAX_TABLE_CAPACITY 0x01
+#define NGHTTP3_SETTINGS_ID_QPACK_BLOCKED_STREAMS 0x07
 
 typedef struct {
   uint64_t id;
@@ -1344,7 +1312,6 @@ typedef union {
   nghttp3_frame_hd hd;
   nghttp3_frame_data data;
   nghttp3_frame_headers headers;
-  nghttp3_frame_priority priority;
   nghttp3_frame_cancel_push cancel_push;
   nghttp3_frame_settings settings;
   nghttp3_frame_push_promise push_promise;
@@ -1377,7 +1344,8 @@ NGHTTP3_EXTERN ssize_t nghttp3_conn_read_stream(nghttp3_conn *conn,
  * application has to call `nghttp3_conn_add_write_offset` to inform
  * |conn| of the actual number of bytes that underlying QUIC stack
  * accepted.  |*pfin| will be nonzero if this is the last data to
- * send.
+ * send.  If there is no stream to write data or send fin, this
+ * function returns 0, and -1 is assigned to |*pstream_id|.
  */
 NGHTTP3_EXTERN ssize_t nghttp3_conn_writev_stream(nghttp3_conn *conn,
                                                   int64_t *pstream_id,
@@ -1389,6 +1357,11 @@ NGHTTP3_EXTERN ssize_t nghttp3_conn_writev_stream(nghttp3_conn *conn,
  *
  * `nghttp3_conn_add_write_offset` tells |conn| the number of bytes
  * |n| for stream denoted by |stream_id| QUIC stack accepted.
+ *
+ * If stream has no data to send but just sends fin (closing the write
+ * side of a stream), the number of bytes sent is 0.  It is important
+ * to call this function even if |n| is 0 in this case.  It is safe to
+ * call this function if |n| is 0.
  *
  * `nghttp3_conn_writev_stream` must be called before calling this
  * function to get data to send, and those data must be fed into QUIC
@@ -1492,11 +1465,11 @@ nghttp3_conn_set_max_client_streams_bidi(nghttp3_conn *conn,
  * when the library asks an application to provide stream data for a
  * stream denoted by |stream_id|.
  *
- * The application should store the pointer to data to |*pdata| and
- * the data length to |*pdatalen|.  They are initialized to NULL and 0
- * respectively.  The application must retain data until they are safe
- * to free.  It is notified by :type:`nghttp3_acked_stream_data`
- * callback.
+ * The library provides |vec| of length |veccnt| to the application.
+ * The application should fill data and its length to |vec|.  It has
+ * to return the number of the filled objects.  The application must
+ * retain data until they are safe to free.  It is notified by
+ * :type:`nghttp3_acked_stream_data` callback.
  *
  * If this is the last data to send (or there is no data to send
  * because all data have been sent already), set
@@ -1506,17 +1479,16 @@ nghttp3_conn_set_max_client_streams_bidi(nghttp3_conn *conn,
  * :enum:`NGHTTP3_ERR_WOULDBLOCK`.  When it is ready to provide
  * data, call `nghttp3_conn_resume_stream()`.
  *
- * The callback should return 0 if it succeeds, or
+ * The callback should return the number of objects in |vec| that the
+ * application filled if it succeeds, or
  * :enum:`NGHTTP3_ERR_CALLBACK_FAILURE`.
  *
  * TODO Add NGHTTP3_ERR_TEMPORAL_CALLBACK_FAILURE to reset just this
  * stream.
  */
-typedef int (*nghttp3_read_data_callback)(nghttp3_conn *conn, int64_t stream_id,
-                                          const uint8_t **pdata,
-                                          size_t *pdatalen, uint32_t *pflags,
-                                          void *conn_user_data,
-                                          void *stream_user_data);
+typedef ssize_t (*nghttp3_read_data_callback)(
+    nghttp3_conn *conn, int64_t stream_id, nghttp3_vec *vec, size_t veccnt,
+    uint32_t *pflags, void *conn_user_data, void *stream_user_data);
 
 /**
  * @struct
@@ -1633,43 +1605,12 @@ NGHTTP3_EXTERN int nghttp3_conn_cancel_push(nghttp3_conn *conn,
 /**
  * @function
  *
- * `nghttp3_conn_submit_priority` submits priority change to the
- * connection |conn|.  |pt| specifies the type of ID |pri_elem_id|.
- * |dt| specifies the type of ID |elem_dep_id|.  |weight| must be [1,
- * 256], inclusive.  function can be called with client |conn|.  This
- * function makes node identified by |pri_elem_id| depend on another
- * node identified by |elem_dep_id|.  It is an error to attempt to
- * make a dependency to itself.  If |exclusive| is nonzero, this makes
- * exclusive dependency.
- *
- * Before calling this function, control stream must be bound to a
- * stream ID using `nghttp3_conn_bind_control_stream()`.
- */
-NGHTTP3_EXTERN int nghttp3_conn_submit_priority(nghttp3_conn *conn,
-                                                nghttp3_pri_elem_type pt,
-                                                int64_t pri_elem_id,
-                                                nghttp3_elem_dep_type dt,
-                                                int64_t elem_dep_id,
-                                                uint32_t weight, int exclusive);
-
-/**
- * @function
- *
  * `nghttp3_conn_set_stream_user_data` sets |stream_user_data| to the
  * stream identified by |stream_id|.
  */
 NGHTTP3_EXTERN int nghttp3_conn_set_stream_user_data(nghttp3_conn *conn,
                                                      int64_t stream_id,
                                                      void *stream_user_data);
-
-/**
- * @function
- *
- * `nghttp3_conn_get_num_placeholders` returns the number of
- * placeholders that remote endpoint permits.
- */
-NGHTTP3_EXTERN uint64_t
-nghttp3_conn_get_remote_num_placeholders(nghttp3_conn *conn);
 
 /**
  * @function
@@ -1739,6 +1680,48 @@ NGHTTP3_EXTERN int nghttp3_check_header_name(const uint8_t *name, size_t len);
  * http://tools.ietf.org/html/rfc7230#section-3.2
  */
 NGHTTP3_EXTERN int nghttp3_check_header_value(const uint8_t *value, size_t len);
+
+/**
+ * @macro
+ *
+ * The age of :type:`nghttp3_info`
+ */
+#define NGHTTP3_VERSION_AGE 1
+
+/**
+ * @struct
+ *
+ * This struct is what `nghttp3_version()` returns.  It holds
+ * information about the particular nghttp3 version.
+ */
+typedef struct {
+  /**
+   * Age of this struct.  This instance of nghttp3 sets it to
+   * :macro:`NGHTTP3_VERSION_AGE` but a future version may bump it and
+   * add more struct fields at the bottom
+   */
+  int age;
+  /**
+   * the :macro:`NGHTTP3_VERSION_NUM` number (since age ==1)
+   */
+  int version_num;
+  /**
+   * points to the :macro:`NGHTTP3_VERSION` string (since age ==1)
+   */
+  const char *version_str;
+  /* -------- the above fields all exist when age == 1 */
+} nghttp3_info;
+
+/**
+ * @function
+ *
+ * Returns a pointer to a nghttp3_info struct with version information
+ * about the run-time library in use.  The |least_version| argument
+ * can be set to a 24 bit numerical value for the least accepted
+ * version number and if the condition is not met, this function will
+ * return a ``NULL``.  Pass in 0 to skip the version checking.
+ */
+NGHTTP3_EXTERN nghttp3_info *nghttp3_version(int least_version);
 
 #ifdef __cplusplus
 }

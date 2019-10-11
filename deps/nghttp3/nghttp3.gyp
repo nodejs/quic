@@ -55,6 +55,7 @@
   'lib/nghttp3_rcbuf.c',
   'lib/nghttp3_str.c',
   'lib/nghttp3_tnode.c',
+  'lib/nghttp3_version.c'
       ]
     }
   ]

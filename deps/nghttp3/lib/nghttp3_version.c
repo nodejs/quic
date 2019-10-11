@@ -22,13 +22,18 @@
  * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#ifndef NGHTTP3_ERR_H
-#define NGHTTP3_ERR_H
-
 #ifdef HAVE_CONFIG_H
 #  include <config.h>
 #endif /* HAVE_CONFIG_H */
 
 #include <nghttp3/nghttp3.h>
 
-#endif /* NGHTTP3_ERR_H */
+static nghttp3_info version = {NGHTTP3_VERSION_AGE, NGHTTP3_VERSION_NUM,
+                               NGHTTP3_VERSION};
+
+nghttp3_info *nghttp3_version(int least_version) {
+  if (least_version > NGHTTP3_VERSION_NUM) {
+    return NULL;
+  }
+  return &version;
+}
