@@ -307,11 +307,11 @@ class QuicSocket : public HandleWrap,
     // QuicSocket instance.
     uint64_t packets_sent;
 
-    // The total number of QuicServerSessions that have been
+    // The total number of server QuicSessions that have been
     // associated with this QuicSocket instance.
     uint64_t server_sessions;
 
-    // The total number of QuicClientSessions that have been
+    // The total number of client QuicSessions that have been
     // associated with this QuicSocket instance.
     uint64_t client_sessions;
   };

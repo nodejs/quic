@@ -29,14 +29,12 @@ namespace quic {
 
 using ConnectionPointer = DeleteFnPtr<ngtcp2_conn, ngtcp2_conn_del>;
 
-class QuicClientSession;
-class QuicServerSession;
 class QuicSocket;
 class QuicStream;
 
 // The QuicSessionConfig class holds the initial transport parameters and
 // configuration options set by the JavaScript side when either a
-// QuicClientSession or QuicServerSession is created. Instances are
+// client or server QuicSession is created. Instances are
 // stack created and use a combination of an AliasedBuffer to pass
 // the numeric settings quickly (see node_quic_state.h) and passed
 // in non-numeric settings (e.g. preferred_addr).
@@ -89,34 +87,34 @@ class QuicSessionConfig {
 };
 
 // Options to alter the behavior of various functions on the
-// QuicServerSession. These are set on the QuicSocket when
+// server QuicSession. These are set on the QuicSocket when
 // the listen() function is called and are passed to the
-// constructor of the QuicServerSession.
+// constructor of the server QuicSession.
 enum QuicServerSessionOptions : uint32_t {
-  // When set, instructs the QuicServerSession to reject
+  // When set, instructs the server QuicSession to reject
   // client authentication certs that cannot be verified.
   QUICSERVERSESSION_OPTION_REJECT_UNAUTHORIZED = 0x1,
 
-  // When set, instructs the QuicServerSession to request
+  // When set, instructs the server QuicSession to request
   // a client authentication cert
   QUICSERVERSESSION_OPTION_REQUEST_CERT = 0x2
 };
 
 // Options to alter the behavior of various functions on the
-// QuicClientSession. These are set on the QuicClientSession
+// client QuicSession. These are set on the client QuicSession
 // constructor.
 enum QuicClientSessionOptions : uint32_t {
-  // When set, instructs the QuicClientSession to include an
+  // When set, instructs the client QuicSession to include an
   // OCSP request in the initial TLS handshake
   QUICCLIENTSESSION_OPTION_REQUEST_OCSP = 0x1,
 
-  // When set, instructs the QuicClientSession to verify the
+  // When set, instructs the client QuicSession to verify the
   // hostname identity. This is required by QUIC and enabled
   // by default. We allow disabling it only for debugging
   // purposes.
   QUICCLIENTSESSION_OPTION_VERIFY_HOSTNAME_IDENTITY = 0x2,
 
-  // When set, instructs the QuicClientSession to perform
+  // When set, instructs the client QuicSession to perform
   // additional checks on TLS session resumption.
   QUICCLIENTSESSION_OPTION_RESUME = 0x4
 };
@@ -139,7 +137,7 @@ enum QuicSessionState : int {
   // The value will be either 1 or 0. When set to 1, the
   // native code will callout to the JavaScript side causing
   // the 'clientHello' event to be emitted. This is only
-  // used on QuicServerSession instances.
+  // used on server QuicSession instances.
   IDX_QUIC_SESSION_STATE_CLIENT_HELLO_ENABLED,
 
   // Communicates whether a 'cert' event listener has been
@@ -258,10 +256,10 @@ class QuicCryptoContext : public MemoryRetainer {
   std::vector<uint8_t> tx_secret_;
   std::vector<uint8_t> rx_secret_;
   QuicBuffer handshake_[3];
-  bool in_tls_callback_;
-  bool in_key_update_;
-  bool in_ocsp_request_;
-  bool in_client_hello_;
+  bool in_tls_callback_ = false;
+  bool in_key_update_ = false;
+  bool in_ocsp_request_ = false;
+  bool in_client_hello_ = false;
   uint32_t options_;
 
   v8::Global<v8::ArrayBufferView> ocsp_response_;
@@ -323,7 +321,7 @@ class QuicCryptoContext : public MemoryRetainer {
 
 
 // The QuicSession class is an virtual class that serves as
-// the basis for both QuicServerSession and QuicClientSession.
+// the basis for both client and server QuicSession.
 // It implements the functionality that is shared for both
 // QUIC clients and servers.
 //
@@ -341,6 +339,36 @@ class QuicCryptoContext : public MemoryRetainer {
 class QuicSession : public AsyncWrap,
                     public mem::NgLibMemoryManager<QuicSession, ngtcp2_mem> {
  public:
+  static void Initialize(
+      Environment* env,
+      v8::Local<v8::Object> target,
+      v8::Local<v8::Context> context);
+
+  static BaseObjectPtr<QuicSession> CreateServer(
+      QuicSocket* socket,
+      QuicSessionConfig* config,
+      const ngtcp2_cid* rcid,
+      const struct sockaddr* addr,
+      const ngtcp2_cid* dcid,
+      const ngtcp2_cid* ocid,
+      uint32_t version,
+      const std::string& alpn = NGTCP2_ALPN_H3,
+      uint32_t options = 0,
+      uint64_t initial_connection_close = NGTCP2_NO_ERROR);
+
+  static BaseObjectPtr<QuicSession> CreateClient(
+      QuicSocket* socket,
+      const struct sockaddr* addr,
+      crypto::SecureContext* context,
+      v8::Local<v8::Value> early_transport_params,
+      v8::Local<v8::Value> session_ticket,
+      v8::Local<v8::Value> dcid,
+      SelectPreferredAddressPolicy select_preferred_address_policy =
+          QUIC_PREFERRED_ADDRESS_IGNORE,
+      const std::string& alpn = NGTCP2_ALPN_H3,
+      const std::string& hostname = "",
+      uint32_t options = 0);
+
   static const int kInitialClientBufferLength = 4096;
 
   // The QuiSession::CryptoContext encapsulates all details of the
@@ -363,11 +391,55 @@ class QuicSession : public AsyncWrap,
       // is always required.
       const std::string& alpn,
       const std::string& hostname,
+      const ngtcp2_cid* rcid,
       uint32_t options = 0,
+      SelectPreferredAddressPolicy select_preferred_address_policy =
+          QUIC_PREFERRED_ADDRESS_ACCEPT,
       uint64_t initial_connection_close = NGTCP2_NO_ERROR);
+
+  // Server Constructor
+  QuicSession(
+      QuicSocket* socket,
+      QuicSessionConfig* config,
+      v8::Local<v8::Object> wrap,
+      const ngtcp2_cid* rcid,
+      const struct sockaddr* addr,
+      const ngtcp2_cid* dcid,
+      const ngtcp2_cid* ocid,
+      uint32_t version,
+      const std::string& alpn,
+      uint32_t options,
+      uint64_t initial_connection_close);
+
+  // Client Constructor
+  QuicSession(
+      QuicSocket* socket,
+      v8::Local<v8::Object> wrap,
+      const struct sockaddr* addr,
+      crypto::SecureContext* context,
+      v8::Local<v8::Value> early_transport_params,
+      v8::Local<v8::Value> session_ticket,
+      v8::Local<v8::Value> dcid,
+      SelectPreferredAddressPolicy select_preferred_address_policy,
+      const std::string& alpn,
+      const std::string& hostname,
+      uint32_t options);
+
   ~QuicSession() override;
 
   std::string diagnostic_name() const override;
+
+  enum InitialPacketResult : int {
+    PACKET_OK,
+    PACKET_IGNORE,
+    PACKET_VERSION
+  };
+
+  static InitialPacketResult Accept(
+    ngtcp2_pkt_hd* hd,
+    uint32_t version,
+    const uint8_t* data,
+    ssize_t nread);
 
   QuicCryptoContext* CryptoContext() { return crypto_context_.get(); }
 
@@ -409,11 +481,18 @@ class QuicSession : public AsyncWrap,
 
   const ngtcp2_cid* scid() const { return &scid_; }
 
+  // Only used with server sessions
+  ngtcp2_cid* pscid() { return &pscid_; }
+
+  // Only used with server sessions
+  const ngtcp2_cid* rcid() const { return &rcid_; }
+
   inline QuicSocket* Socket() const;
 
   ngtcp2_conn* Connection() { return connection_.get(); }
 
   void AddStream(BaseObjectPtr<QuicStream> stream);
+  void AddToSocket(QuicSocket* socket);
 
   // Immediately discards the state of the QuicSession
   // and renders the QuicSession instance completely
@@ -469,6 +548,7 @@ class QuicSession : public AsyncWrap,
       uint64_t offset);
 
   void RemoveStream(int64_t stream_id);
+  void RemoveFromSocket();
 
   // Causes pending ngtcp2 frames to be serialized and sent
   void SendPendingData();
@@ -485,6 +565,10 @@ class QuicSession : public AsyncWrap,
   inline void SetLastError(QuicErrorFamily family, int error_code);
 
   int SetRemoteTransportParams(ngtcp2_transport_params* params);
+  bool SetEarlyTransportParams(v8::Local<v8::Value> buffer);
+  bool SetSocket(QuicSocket* socket, bool nat_rebinding = false);
+  int SetSession(SSL_SESSION* session);
+  bool SetSession(v8::Local<v8::Value> buffer);
 
   // ShutdownStream will cause ngtcp2 to queue a
   // RESET_STREAM and STOP_SENDING frame, as appropriate,
@@ -517,16 +601,13 @@ class QuicSession : public AsyncWrap,
       int64_t stream_id,
       uint64_t error_code = NGTCP2_APP_NOERROR);
 
-  // Error handling for the QuicSession. QuicServerSession
-  // and QuicClientSession instances will do different things
-  // here, but ultimately an error means that the QuicSession
+  // Error handling for the QuicSession. client and server
+  // instances will do different things here, but ultimately
+  // an error means that the QuicSession
   // should be torn down.
-  virtual void HandleError();
+  void HandleError();
 
-  virtual void RemoveFromSocket();
-
-  virtual void AddToSocket(QuicSocket* socket) = 0;
-  virtual bool SendConnectionClose() = 0;
+  bool SendConnectionClose();
 
   // Implementation for mem::NgLibMemoryManager
   inline void CheckAllocatedSize(size_t previous_size) const;
@@ -556,8 +637,25 @@ class QuicSession : public AsyncWrap,
   };
 
   void MemoryInfo(MemoryTracker* tracker) const override;
+  SET_MEMORY_INFO_NAME(QuicSession)
+  SET_SELF_SIZE(QuicSession)
 
  private:
+  // Initialize the QuicSession as a server
+  void InitServer(
+      QuicSessionConfig* config,
+      const struct sockaddr* addr,
+      const ngtcp2_cid* dcid,
+      const ngtcp2_cid* ocid,
+      uint32_t version);
+
+  // Initialize the QuicSession as a client
+  bool InitClient(
+      const struct sockaddr* addr,
+      v8::Local<v8::Value> early_transport_params,
+      v8::Local<v8::Value> session_ticket,
+      v8::Local<v8::Value> dcid);
+
   // Returns true if the QuicSession has entered the
   // closing period following a call to ImmediateClose.
   // While true, the QuicSession is only permitted to
@@ -617,6 +715,7 @@ class QuicSession : public AsyncWrap,
   void SilentClose(bool stateless_reset = false);
   QuicStream* CreateStream(int64_t stream_id);
 
+  void DisassociateCID(const ngtcp2_cid* cid);
   void ExtendMaxStreamData(int64_t stream_id, uint64_t max_data);
   void ExtendMaxStreams(bool bidi, uint64_t max_streams);
   void ExtendMaxStreamsUni(uint64_t max_streams);
@@ -628,8 +727,12 @@ class QuicSession : public AsyncWrap,
     ngtcp2_path_validation_result res);
   bool ReceiveClientInitial(const ngtcp2_cid* dcid);
   bool ReceivePacket(QuicPath* path, const uint8_t* data, ssize_t nread);
+  bool ReceiveRetry();
   void RemoveConnectionID(const ngtcp2_cid* cid);
   void ScheduleRetransmit();
+  bool SelectPreferredAddress(
+    ngtcp2_addr* dest,
+    const ngtcp2_preferred_addr* paddr);
   bool SendPacket(const char* diagnostic_label = nullptr);
   void SetLocalAddress(const ngtcp2_addr* addr);
   void StreamClose(int64_t stream_id, uint64_t app_error_code);
@@ -641,16 +744,10 @@ class QuicSession : public AsyncWrap,
   bool WritePackets(const char* diagnostic_label = nullptr);
   void UpdateRecoveryStats();
 
-  virtual void DisassociateCID(const ngtcp2_cid* cid) {}
-  virtual bool ReceiveRetry() { return true; }
-  virtual bool SelectPreferredAddress(
-    ngtcp2_addr* dest,
-    const ngtcp2_preferred_addr* paddr) { return true; }
-  virtual void StoreRemoteTransportParams(ngtcp2_transport_params* params) {}
-  virtual void VersionNegotiation(
+  void VersionNegotiation(
       const ngtcp2_pkt_hd* hd,
       const uint32_t* sv,
-      size_t nsv) {}
+      size_t nsv);
 
   // static ngtcp2 callbacks
   static int OnClientInitial(
@@ -803,6 +900,7 @@ class QuicSession : public AsyncWrap,
   void UpdateRetransmitTimer(uint64_t timeout);
   void StopRetransmitTimer();
   void StopIdleTimer();
+  bool StartClosingPeriod();
 
   enum QuicSessionFlags : uint32_t {
     // Initial state when a QuicSession is created but nothing yet done.
@@ -818,6 +916,8 @@ class QuicSession : public AsyncWrap,
     // Set when the QuicSession has been destroyed (but not
     // yet freed)
     QUICSESSION_FLAG_DESTROYED = 0x8,
+
+    QUICSESSION_FLAG_HAS_TRANSPORT_PARAMS = 0x10,
 
     // Set while the QuicSession is executing an ngtcp2 callback
     QUICSESSION_FLAG_NGTCP2_CALLBACK = 0x100,
@@ -895,12 +995,14 @@ class QuicSession : public AsyncWrap,
   size_t connection_close_attempts_ = 0;
   size_t connection_close_limit_ = 1;
 
-  crypto::BIOPointer bio_trace_;
-
   TimerPointer idle_;
   TimerPointer retransmit_;
 
   ngtcp2_cid scid_;
+  ngtcp2_cid rcid_;
+  ngtcp2_cid pscid_{};
+  ngtcp2_transport_params transport_params_;
+  SelectPreferredAddressPolicy select_preferred_address_policy_;
 
   // The sendbuf_ is a temporary holding for data being collected
   // to send. On send, the contents of the sendbuf_ will be
@@ -911,6 +1013,8 @@ class QuicSession : public AsyncWrap,
   // to the QuicSocket. The data will remain in the txbuf_ until
   // it is successfully sent.
   QuicBuffer txbuf_;
+
+  MallocedBuffer<uint8_t> conn_closebuf_;
 
   std::map<int64_t, BaseObjectPtr<QuicStream>> streams_;
 
@@ -988,180 +1092,9 @@ class QuicSession : public AsyncWrap,
   AliasedBigUint64Array stats_buffer_;
   AliasedFloat64Array recovery_stats_buffer_;
 
-  template <typename... Members>
-  void IncrementSocketStat(
-      uint64_t amount,
-      session_stats* a,
-      Members... mems) {
-    IncrementStat<session_stats, Members...>(amount, a, mems...);
-  }
+  static const ngtcp2_conn_callbacks callbacks[2];
 
-  friend class QuicServerSession;
-  friend class QuicClientSession;
   friend class QuicCryptoContext;
-};
-
-class QuicServerSession : public QuicSession {
- public:
-  enum InitialPacketResult : int {
-    PACKET_OK,
-    PACKET_IGNORE,
-    PACKET_VERSION
-  };
-
-  static InitialPacketResult Accept(
-    ngtcp2_pkt_hd* hd,
-    uint32_t version,
-    const uint8_t* data,
-    ssize_t nread);
-
-  static void Initialize(
-      Environment* env,
-      v8::Local<v8::Object> target,
-      v8::Local<v8::Context> context);
-
-  static BaseObjectPtr<QuicSession> New(
-      QuicSocket* socket,
-      QuicSessionConfig* config,
-      const ngtcp2_cid* rcid,
-      const struct sockaddr* addr,
-      const ngtcp2_cid* dcid,
-      const ngtcp2_cid* ocid,
-      uint32_t version,
-      const std::string& alpn = NGTCP2_ALPN_H3,
-      uint32_t options = 0,
-      uint64_t initial_connection_close = NGTCP2_NO_ERROR);
-
-  void AddToSocket(QuicSocket* socket) override;
-  void Init(
-      QuicSessionConfig* config,
-      const struct sockaddr* addr,
-      const ngtcp2_cid* dcid,
-      const ngtcp2_cid* ocid,
-      uint32_t version);
-
-  // Serializes and sends a CONNECTION_CLOSE frame as appropriate.
-  bool SendConnectionClose() override;
-
-  const ngtcp2_cid* rcid() const { return &rcid_; }
-  ngtcp2_cid* pscid() { return &pscid_; }
-
-  void MemoryInfo(MemoryTracker* tracker) const override;
-
-  SET_MEMORY_INFO_NAME(QuicServerSession)
-  SET_SELF_SIZE(QuicServerSession)
-
-  QuicServerSession(
-      QuicSocket* socket,
-      QuicSessionConfig* config,
-      v8::Local<v8::Object> wrap,
-      const ngtcp2_cid* rcid,
-      const struct sockaddr* addr,
-      const ngtcp2_cid* dcid,
-      const ngtcp2_cid* ocid,
-      uint32_t version,
-      const std::string& alpn,
-      uint32_t options,
-      uint64_t initial_connection_close);
-
- private:
-  void DisassociateCID(const ngtcp2_cid* cid) override;
-  void RemoveFromSocket() override;
-
-  bool StartClosingPeriod();
-
-  ngtcp2_cid pscid_{};
-  ngtcp2_cid rcid_;
-
-  MallocedBuffer<uint8_t> conn_closebuf_;
-
-  static const ngtcp2_conn_callbacks callbacks;
-
-  friend class QuicSession;
-};
-
-class QuicClientSession : public QuicSession {
- public:
-  static void Initialize(
-      Environment* env,
-      v8::Local<v8::Object> target,
-      v8::Local<v8::Context> context);
-
-  static BaseObjectPtr<QuicSession> New(
-      QuicSocket* socket,
-      const struct sockaddr* addr,
-      uint32_t version,
-      crypto::SecureContext* context,
-      uint32_t port,
-      v8::Local<v8::Value> early_transport_params,
-      v8::Local<v8::Value> session_ticket,
-      v8::Local<v8::Value> dcid,
-      SelectPreferredAddressPolicy select_preferred_address_policy =
-          QUIC_PREFERRED_ADDRESS_IGNORE,
-      const std::string& alpn = NGTCP2_ALPN_H3,
-      const std::string& hostname = "",
-      uint32_t options = 0);
-
-  QuicClientSession(
-      QuicSocket* socket,
-      v8::Local<v8::Object> wrap,
-      const struct sockaddr* addr,
-      uint32_t version,
-      crypto::SecureContext* context,
-      uint32_t port,
-      v8::Local<v8::Value> early_transport_params,
-      v8::Local<v8::Value> session_ticket,
-      v8::Local<v8::Value> dcid,
-      SelectPreferredAddressPolicy select_preferred_address_policy,
-      const std::string& alpn,
-      const std::string& hostname,
-      uint32_t options);
-
-  void AddToSocket(QuicSocket* socket) override;
-
-  bool SetEarlyTransportParams(v8::Local<v8::Value> buffer);
-  bool SetSocket(QuicSocket* socket, bool nat_rebinding = false);
-  int SetSession(SSL_SESSION* session);
-  bool SetSession(v8::Local<v8::Value> buffer);
-
-  bool SendConnectionClose() override;
-
-  void MemoryInfo(MemoryTracker* tracker) const override;
-
-  SET_MEMORY_INFO_NAME(QuicClientSession)
-  SET_SELF_SIZE(QuicClientSession)
-
- private:
-  void HandleError() override;
-  bool ReceiveRetry() override;
-  bool SelectPreferredAddress(
-    ngtcp2_addr* dest,
-    const ngtcp2_preferred_addr* paddr) override;
-  void StoreRemoteTransportParams(ngtcp2_transport_params* params) override;
-  void VersionNegotiation(
-      const ngtcp2_pkt_hd* hd,
-      const uint32_t* sv,
-      size_t nsv) override;
-
-  bool Init(
-      const struct sockaddr* addr,
-      uint32_t version,
-      v8::Local<v8::Value> early_transport_params,
-      v8::Local<v8::Value> session_ticket,
-      v8::Local<v8::Value> dcid);
-  bool SetupInitialCryptoContext();
-
-  uint32_t version_;
-  uint32_t port_;
-  SelectPreferredAddressPolicy select_preferred_address_policy_;
-
-  ngtcp2_transport_params transport_params_;
-  bool has_transport_params_;
-
-
-  static const ngtcp2_conn_callbacks callbacks;
-
-  friend class QuicSession;
 };
 
 }  // namespace quic

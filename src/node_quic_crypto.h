@@ -44,14 +44,14 @@ void InitializeSecureContext(
     crypto::SecureContext* sc,
     ngtcp2_crypto_side side);
 
-// Called in the QuicServerSession::Init and
-// QuicClientSession::Init to configure the
+// Called in the QuicSession::InitServer and
+// QuicSession::InitClient to configure the
 // appropriate settings for the SSL* associated
 // with the session.
 void InitializeTLS(QuicSession* session);
 
-// Called when the QuicClientSession is created and
-// when the QuicServerSession first receives the
+// Called when the client QuicSession is created and
+// when the server QuicSession first receives the
 // client hello.
 bool DeriveAndInstallInitialKey(
     QuicSession* session,
@@ -72,8 +72,6 @@ const char* GetClientHelloALPN(QuicSession* session);
 const char* GetServerName(QuicSession* session);
 
 // Replaces the SecureContext to be used in the handshake.
-// This is currently used only within the QuicServerSession::OnCertDone
-// callback.
 int UseSNIContext(SSL* ssl, crypto::SecureContext* context);
 
 bool GenerateRetryToken(

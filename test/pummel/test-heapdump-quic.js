@@ -69,12 +69,11 @@ server.on('session', common.mustCall((session) => {
       }
     ], { loose: true });
 
-    state.validateSnapshotNodes('Node / QuicServerSession', [
+    state.validateSnapshotNodes('Node / QuicSession', [
       {
         children: [
           { node_name: 'QuicServerSession', edge_name: 'wrapped' },
-          { node_name: 'Node / rx_secret', edge_name: 'rx_secret' },
-          { node_name: 'Node / tx_secret', edge_name: 'tx_secret' },
+          { node_name: 'Node / QuicCryptoContext', edge_name: 'crypto_context' },
           { node_name: 'Node / HistogramBase', edge_name: 'crypto_rx_ack' },
           { node_name: 'Node / HistogramBase',
             edge_name: 'crypto_handshake_rate' },
@@ -82,27 +81,20 @@ server.on('session', common.mustCall((session) => {
           { node_name: 'Node / Timer', edge_name: 'idle' },
           { node_name: 'Node / QuicBuffer', edge_name: 'sendbuf' },
           { node_name: 'Node / QuicBuffer', edge_name: 'txbuf' },
-          { node_name: 'Node / QuicBuffer', edge_name: 'initial_crypto' },
-          { node_name: 'Node / QuicBuffer',
-            edge_name: 'handshake_crypto' },
-          { node_name: 'Node / QuicBuffer', edge_name: 'app_crypto' },
           { node_name: 'Float64Array', edge_name: 'recovery_stats_buffer' },
           { node_name: 'BigUint64Array', edge_name: 'stats_buffer' },
           { node_name: 'Node / current_ngtcp2_memory',
             edge_name: 'current_ngtcp2_memory' },
           { node_name: 'Node / streams', edge_name: 'streams' },
           { node_name: 'Node / std::basic_string', edge_name: 'alpn' },
+          { node_name: 'Node / std::basic_string', edge_name: 'hostname' },
           { node_name: 'Float64Array', edge_name: 'state' },
         ]
-      }
-    ], { loose: true });
-
-    state.validateSnapshotNodes('Node / QuicClientSession', [
+      },
       {
         children: [
           { node_name: 'QuicClientSession', edge_name: 'wrapped' },
-          { node_name: 'Node / rx_secret', edge_name: 'rx_secret' },
-          { node_name: 'Node / tx_secret', edge_name: 'tx_secret' },
+          { node_name: 'Node / QuicCryptoContext', edge_name: 'crypto_context' },
           { node_name: 'Node / HistogramBase', edge_name: 'crypto_rx_ack' },
           { node_name: 'Node / HistogramBase',
             edge_name: 'crypto_handshake_rate' },
@@ -110,17 +102,27 @@ server.on('session', common.mustCall((session) => {
           { node_name: 'Node / Timer', edge_name: 'idle' },
           { node_name: 'Node / QuicBuffer', edge_name: 'sendbuf' },
           { node_name: 'Node / QuicBuffer', edge_name: 'txbuf' },
-          { node_name: 'Node / QuicBuffer', edge_name: 'initial_crypto' },
-          { node_name: 'Node / QuicBuffer',
-            edge_name: 'handshake_crypto' },
-          { node_name: 'Node / QuicBuffer', edge_name: 'app_crypto' },
           { node_name: 'Float64Array', edge_name: 'recovery_stats_buffer' },
           { node_name: 'BigUint64Array', edge_name: 'stats_buffer' },
           { node_name: 'Node / current_ngtcp2_memory',
             edge_name: 'current_ngtcp2_memory' },
+          { node_name: 'Node / streams', edge_name: 'streams' },
           { node_name: 'Node / std::basic_string', edge_name: 'alpn' },
           { node_name: 'Node / std::basic_string', edge_name: 'hostname' },
           { node_name: 'Float64Array', edge_name: 'state' },
+        ]
+      }
+    ], { loose: true });
+
+    state.validateSnapshotNodes('Node / QuicCryptoContext', [
+      {
+        children: [
+          { node_name: 'Node / rx_secret', edge_name: 'rx_secret' },
+          { node_name: 'Node / tx_secret', edge_name: 'tx_secret' },
+          { node_name: 'Node / QuicBuffer', edge_name: 'initial_crypto' },
+          { node_name: 'Node / QuicBuffer',
+            edge_name: 'handshake_crypto' },
+          { node_name: 'Node / QuicBuffer', edge_name: 'app_crypto' },
         ]
       }
     ], { loose: true });
