@@ -379,16 +379,10 @@ void IncrementStat(
 class Timer final : public MemoryRetainer {
  public:
   explicit Timer(Environment* env, std::function<void()> fn)
-    : stopped_(false),
-      env_(env),
+    : env_(env),
       fn_(fn) {
     uv_timer_init(env_->event_loop(), &timer_);
     timer_.data = this;
-    env->AddCleanupHook(CleanupHook, this);
-  }
-
-  ~Timer() override {
-    env_->RemoveCleanupHook(CleanupHook, this);
   }
 
   // Stops the timer with the side effect of the timer no longer being usable.
@@ -421,9 +415,8 @@ class Timer final : public MemoryRetainer {
 
  private:
   static void OnTimeout(uv_timer_t* timer);
-  static void CleanupHook(void* data);
 
-  bool stopped_;
+  bool stopped_ = false;
   Environment* env_;
   std::function<void()> fn_;
   uv_timer_t timer_;

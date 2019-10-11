@@ -22,10 +22,6 @@ void Timer::OnTimeout(uv_timer_t* timer) {
   t->fn_();
 }
 
-void Timer::CleanupHook(void* data) {
-  Free(static_cast<Timer*>(data));
-}
-
 ngtcp2_crypto_level from_ossl_level(OSSL_ENCRYPTION_LEVEL ossl_level) {
   switch (ossl_level) {
   case ssl_encryption_initial:
