@@ -54,14 +54,6 @@ class QuicSessionConfig {
     settings_.initial_ts = uv_hrtime();
   }
 
-  uint64_t max_streams_bidi() const {
-    return settings_.max_streams_bidi;
-  }
-
-  uint64_t max_streams_uni() const {
-    return settings_.max_streams_uni;
-  }
-
   void ResetToDefaults();
 
   // QuicSessionConfig::Set() pulls values out of the AliasedBuffer
@@ -70,6 +62,8 @@ class QuicSessionConfig {
   // settings_.preferred_addr field
   void Set(Environment* env,
            const struct sockaddr* preferred_addr = nullptr);
+
+  void SetOriginalConnectionID(const ngtcp2_cid* ocid);
 
   // Generates the stateless reset token for the settings_
   void GenerateStatelessResetToken();

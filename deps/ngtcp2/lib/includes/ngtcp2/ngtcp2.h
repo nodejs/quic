@@ -131,7 +131,7 @@ typedef void *(*ngtcp2_realloc)(void *ptr, size_t size, void *mem_user_data);
  *       ...
  *     }
  */
-typedef struct {
+typedef struct ngtcp2_mem {
   /**
    * An arbitrary user supplied data.  This is passed to each
    * allocator function.
@@ -156,7 +156,7 @@ typedef struct {
 } ngtcp2_mem;
 
 /* NGTCP2_PROTO_VER is the supported QUIC protocol version. */
-#define NGTCP2_PROTO_VER 0xff000016u
+#define NGTCP2_PROTO_VER 0xff000017u
 /* NGTCP2_PROTO_VER_MAX is the highest QUIC version the library
    supports. */
 #define NGTCP2_PROTO_VER_MAX NGTCP2_PROTO_VER
@@ -164,7 +164,7 @@ typedef struct {
 /* NGTCP2_ALPN_H3 is a serialized form of HTTP/3 ALPN protocol
    identifier this library supports.  Notice that the first byte is
    the length of the following protocol identifier. */
-#define NGTCP2_ALPN_H3 "\x5h3-22"
+#define NGTCP2_ALPN_H3 "\x5h3-23"
 
 #define NGTCP2_MAX_PKTLEN_IPV4 1252
 #define NGTCP2_MAX_PKTLEN_IPV6 1232
@@ -178,14 +178,14 @@ typedef struct {
 #define NGTCP2_STATELESS_RESET_TOKENLEN 16
 
 /* NGTCP2_MIN_STATELESS_RESET_RANDLEN is the minimum length of random
-   bytes in Stateless Retry packet */
-#define NGTCP2_MIN_STATELESS_RESET_RANDLEN 25
+   bytes (Unpredictable Bits) in Stateless Retry packet */
+#define NGTCP2_MIN_STATELESS_RESET_RANDLEN 5
 
 /* NGTCP2_INITIAL_SALT is a salt value which is used to derive initial
    secret. */
 #define NGTCP2_INITIAL_SALT                                                    \
-  "\x7f\xbc\xdb\x0e\x7c\x66\xbb\xe9\x19\x3a\x96\xcd\x21\x51\x9e\xbd\x7a\x02"   \
-  "\x64\x4a"
+  "\xc3\xee\xf7\x12\xc7\x2e\xbb\x5a\x11\xa7\xd2\x43\x2b\xb4\x63\x65\xbe\xf9"   \
+  "\xf5\x02"
 
 /* NGTCP2_HP_MASKLEN is the length of header protection mask. */
 #define NGTCP2_HP_MASKLEN 5
@@ -248,14 +248,14 @@ typedef enum ngtcp2_lib_error {
   NGTCP2_ERR_INTERNAL = -238,
   NGTCP2_ERR_CRYPTO_BUFFER_EXCEEDED = -239,
   NGTCP2_ERR_WRITE_STREAM_MORE = -240,
-  NGTCP2_ERR_TLS_WANT_X509_LOOKUP = -241,
-  NGTCP2_ERR_TLS_WANT_CLIENT_HELLO_CB = -242,
+  NGTCP2_ERR_TLS_WANT_X509_LOOKUP = -301,
+  NGTCP2_ERR_TLS_WANT_CLIENT_HELLO_CB = -302,
   NGTCP2_ERR_FATAL = -500,
   NGTCP2_ERR_NOMEM = -501,
   NGTCP2_ERR_CALLBACK_FAILURE = -502,
 } ngtcp2_lib_error;
 
-typedef enum {
+typedef enum ngtcp2_pkt_flag {
   NGTCP2_PKT_FLAG_NONE = 0,
   NGTCP2_PKT_FLAG_LONG_FORM = 0x01,
   NGTCP2_PKT_FLAG_KEY_PHASE = 0x04
@@ -288,7 +288,6 @@ typedef enum ngtcp2_pkt_type {
 #define NGTCP2_FRAME_ENCODING_ERROR 0x7u
 #define NGTCP2_TRANSPORT_PARAMETER_ERROR 0x8u
 #define NGTCP2_PROTOCOL_VIOLATION 0xau
-#define NGTCP2_INVALID_MIGRATION 0xcu
 #define NGTCP2_CRYPTO_BUFFER_EXCEEDED 0xdu
 #define NGTCP2_CRYPTO_ERROR 0x100u
 
@@ -333,7 +332,7 @@ typedef struct ngtcp2_cid {
  * ngtcp2_vec is struct iovec compatible structure to reference
  * arbitrary array of bytes.
  */
-typedef struct {
+typedef struct ngtcp2_vec {
   /* base points to the data. */
   uint8_t *base;
   /* len is the number of bytes which the buffer pointed by base
@@ -373,7 +372,7 @@ typedef struct ngtcp2_pkt_hd {
 } ngtcp2_pkt_hd;
 
 typedef struct ngtcp2_pkt_stateless_reset {
-  const uint8_t *stateless_reset_token;
+  uint8_t stateless_reset_token[NGTCP2_STATELESS_RESET_TOKENLEN];
   const uint8_t *rand;
   size_t randlen;
 } ngtcp2_pkt_stateless_reset;
@@ -401,7 +400,7 @@ typedef enum ngtcp2_transport_param_id {
   NGTCP2_TRANSPORT_PARAM_INITIAL_MAX_STREAMS_UNI = 0x0009,
   NGTCP2_TRANSPORT_PARAM_ACK_DELAY_EXPONENT = 0x000a,
   NGTCP2_TRANSPORT_PARAM_MAX_ACK_DELAY = 0x000b,
-  NGTCP2_TRANSPORT_PARAM_DISABLE_MIGRATION = 0x000c,
+  NGTCP2_TRANSPORT_PARAM_DISABLE_ACTIVE_MIGRATION = 0x000c,
   NGTCP2_TRANSPORT_PARAM_PREFERRED_ADDRESS = 0x000d,
   NGTCP2_TRANSPORT_PARAM_ACTIVE_CONNECTION_ID_LIMIT = 0x000e,
   NGTCP2_TRANSPORT_PARAM_ID_MAX = UINT16_MAX
@@ -470,71 +469,61 @@ typedef struct ngtcp2_preferred_addr {
   uint8_t stateless_reset_token[NGTCP2_STATELESS_RESET_TOKENLEN];
 } ngtcp2_preferred_addr;
 
-typedef struct {
+typedef struct ngtcp2_transport_params {
   ngtcp2_preferred_addr preferred_address;
+  /* original_connection_id is the client initial connection ID.
+     Server must specify this field and set
+     original_connection_id_present to nonzero if it sent Retry
+     packet. */
   ngtcp2_cid original_connection_id;
+  /* initial_max_stream_data_bidi_local is the size of flow control
+     window of locally initiated stream.  This is the number of bytes
+     that the remote endpoint can send and the local endpoint must
+     ensure that it has enough buffer to receive them. */
   uint64_t initial_max_stream_data_bidi_local;
+  /* initial_max_stream_data_bidi_remote is the size of flow control
+     window of remotely initiated stream.  This is the number of bytes
+     that the remote endpoint can send and the local endpoint must
+     ensure that it has enough buffer to receive them. */
   uint64_t initial_max_stream_data_bidi_remote;
+  /* initial_max_stream_data_uni is the size of flow control window of
+     remotely initiated unidirectional stream.  This is the number of
+     bytes that the remote endpoint can send and the local endpoint
+     must ensure that it has enough buffer to receive them. */
   uint64_t initial_max_stream_data_uni;
+  /* initial_max_data is the connection level flow control window. */
   uint64_t initial_max_data;
+  /* initial_max_streams_bidi is the number of concurrent streams that
+     the remote endpoint can create. */
   uint64_t initial_max_streams_bidi;
+  /* initial_max_streams_uni is the number of concurrent
+     unidirectional streams that the remote endpoint can create. */
   uint64_t initial_max_streams_uni;
+  /* idle_timeout is specified in millisecond resolution */
   uint64_t idle_timeout;
   uint64_t max_packet_size;
   uint64_t active_connection_id_limit;
-  uint8_t stateless_reset_token[NGTCP2_STATELESS_RESET_TOKENLEN];
-  uint8_t stateless_reset_token_present;
   uint64_t ack_delay_exponent;
-  uint8_t disable_migration;
-  uint8_t original_connection_id_present;
   ngtcp2_duration max_ack_delay;
+  uint8_t stateless_reset_token_present;
+  uint8_t disable_active_migration;
+  uint8_t original_connection_id_present;
   uint8_t preferred_address_present;
+  uint8_t stateless_reset_token[NGTCP2_STATELESS_RESET_TOKENLEN];
 } ngtcp2_transport_params;
 
 /* user_data is the same object passed to ngtcp2_conn_client_new or
    ngtcp2_conn_server_new. */
 typedef void (*ngtcp2_printf)(void *user_data, const char *format, ...);
 
-typedef struct {
-  ngtcp2_preferred_addr preferred_address;
+typedef struct ngtcp2_settings {
+  /* transport_params is the QUIC transport parameters to send. */
+  ngtcp2_transport_params transport_params;
   /* initial_ts is an initial timestamp given to the library. */
   ngtcp2_tstamp initial_ts;
   /* log_printf is a function that the library uses to write logs.
      NULL means no logging output. */
   ngtcp2_printf log_printf;
-  /* max_stream_data_bidi_local is the size of flow control window of
-     locally initiated stream.  This is the number of bytes that the
-     remote endpoint can send and the local endpoint must ensure that
-     it has enough buffer to receive them. */
-  uint64_t max_stream_data_bidi_local;
-  /* max_stream_data_bidi_remote is the size of flow control window of
-     remotely initiated stream.  This is the number of bytes that the
-     remote endpoint can send and the local endpoint must ensure that
-     it has enough buffer to receive them. */
-  uint64_t max_stream_data_bidi_remote;
-  /* max_stream_data_uni is the size of flow control window of
-     remotely initiated unidirectional stream.  This is the number of
-     bytes that the remote endpoint can send and the local endpoint
-     must ensure that it has enough buffer to receive them. */
-  uint64_t max_stream_data_uni;
-  /* max_data is the connection level flow control window. */
-  uint64_t max_data;
-  /* max_streams_bidi is the number of concurrent streams that the
-     remote endpoint can create. */
-  uint64_t max_streams_bidi;
-  /* max_streams_uni is the number of concurrent unidirectional
-     streams that the remote endpoint can create. */
-  uint64_t max_streams_uni;
-  /* idle_timeout is specified in millisecond resolution */
-  uint64_t idle_timeout;
-  uint64_t max_packet_size;
-  uint64_t active_connection_id_limit;
-  uint8_t stateless_reset_token[NGTCP2_STATELESS_RESET_TOKENLEN];
-  uint8_t stateless_reset_token_present;
-  uint64_t ack_delay_exponent;
-  uint8_t disable_migration;
-  ngtcp2_duration max_ack_delay;
-  uint8_t preferred_address_present;
 } ngtcp2_settings;
 
 /**
@@ -545,23 +534,19 @@ typedef struct {
  *
  * Everything is NGTCP2_DURATION_TICK resolution.
  */
-typedef struct {
+typedef struct ngtcp2_rcvry_stat {
   ngtcp2_duration latest_rtt;
   ngtcp2_duration min_rtt;
   double smoothed_rtt;
   double rttvar;
   size_t pto_count;
-  size_t crypto_count;
   /* probe_pkt_left is the number of probe packet to sent */
   size_t probe_pkt_left;
   ngtcp2_tstamp loss_detection_timer;
   /* last_tx_pkt_ts corresponds to
      time_of_last_sent_ack_eliciting_packet in
-     draft-ietf-quic-recovery-17. */
+     draft-ietf-quic-recovery-23. */
   ngtcp2_tstamp last_tx_pkt_ts;
-  /* last_hs_tx_pkt_ts corresponds to
-     time_of_last_sent_handshake_packet. */
-  ngtcp2_tstamp last_hs_tx_pkt_ts;
 } ngtcp2_rcvry_stat;
 
 /**
@@ -598,7 +583,7 @@ typedef struct ngtcp2_path {
  * ngtcp2_path_storage is a convenient struct to have buffers to store
  * the longest addresses.
  */
-typedef struct {
+typedef struct ngtcp2_path_storage {
   uint8_t local_addrbuf[128];
   uint8_t remote_addrbuf[128];
   ngtcp2_path path;
@@ -1379,7 +1364,7 @@ typedef int (*ngtcp2_select_preferred_addr)(ngtcp2_conn *conn,
                                             const ngtcp2_preferred_addr *paddr,
                                             void *user_data);
 
-typedef struct {
+typedef struct ngtcp2_conn_callbacks {
   ngtcp2_client_initial client_initial;
   ngtcp2_recv_client_initial recv_client_initial;
   ngtcp2_recv_crypto_data recv_crypto_data;
@@ -1942,7 +1927,7 @@ NGTCP2_EXTERN int ngtcp2_conn_shutdown_stream_read(ngtcp2_conn *conn,
  * ngtcp2_write_stream_flag defines extra behaviour for
  * `ngtcp2_conn_writev_stream()`.
  */
-typedef enum {
+typedef enum ngtcp2_write_stream_flag {
   NGTCP2_WRITE_STREAM_FLAG_NONE = 0x00,
   /**
    * NGTCP2_WRITE_STREAM_FLAG_MORE indicates that more stream data may
@@ -2247,16 +2232,6 @@ NGTCP2_EXTERN void ngtcp2_conn_get_rcvry_stat(ngtcp2_conn *conn,
                                               ngtcp2_rcvry_stat *rcs);
 
 /**
- * @struct
- *
- * ngtcp2_iovec is a struct compatible to standard struct iovec.
- */
-typedef struct {
-  void *iov_base;
-  size_t iov_len;
-} ngtcp2_iovec;
-
-/**
  * @function
  *
  * `ngtcp2_conn_on_loss_detection_timer` should be called when a timer
@@ -2294,16 +2269,6 @@ NGTCP2_EXTERN int
 ngtcp2_conn_submit_crypto_data(ngtcp2_conn *conn,
                                ngtcp2_crypto_level crypto_level,
                                const uint8_t *data, const size_t datalen);
-
-/**
- * @function
- *
- * `ngtcp2_conn_set_retry_ocid` tells |conn| that application as a
- * server received |ocid| included in token from client.  |ocid| will
- * be sent in transport parameter.
- */
-NGTCP2_EXTERN void ngtcp2_conn_set_retry_ocid(ngtcp2_conn *conn,
-                                              const ngtcp2_cid *ocid);
 
 /**
  * @function
@@ -2523,7 +2488,7 @@ NGTCP2_EXTERN const ngtcp2_mem *ngtcp2_mem_default(void);
  * This struct is what `ngtcp2_version()` returns.  It holds
  * information about the particular ngtcp2 version.
  */
-typedef struct {
+typedef struct ngtcp2_info {
   /**
    * Age of this struct.  This instance of ngtcp2 sets it to
    * :macro:`NGTCP2_VERSION_AGE` but a future version may bump it and

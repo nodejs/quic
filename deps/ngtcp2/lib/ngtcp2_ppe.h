@@ -107,6 +107,12 @@ ssize_t ngtcp2_ppe_final(ngtcp2_ppe *ppe, const uint8_t **ppkt);
  */
 size_t ngtcp2_ppe_left(ngtcp2_ppe *ppe);
 
+/*
+ * ngtcp2_ppe_pktlen returns the provisional packet length.  It
+ * includes AEAD overhead.
+ */
+size_t ngtcp2_ppe_pktlen(ngtcp2_ppe *ppe);
+
 /**
  * @function
  *
@@ -124,6 +130,18 @@ size_t ngtcp2_ppe_padding(ngtcp2_ppe *ppe);
  * This function returns the number of bytes added as padding.
  */
 size_t ngtcp2_ppe_padding_hp_sample(ngtcp2_ppe *ppe);
+
+/*
+ * ngtcp2_ppe_padding_size adds PADDING frame so that the size of QUIC
+ * packet is at least |n| bytes long.  If it is unable to add PADDING
+ * in that way, this function still adds PADDING frame as much as
+ * possible.  This function should be called just before calling
+ * ngtcp2_ppe_final().  For Short packet, this function should be
+ * called instead of ngtcp2_ppe_padding_hp_sample.
+ *
+ * This function returns the number of bytes added as padding.
+ */
+size_t ngtcp2_ppe_padding_size(ngtcp2_ppe *ppe, size_t n);
 
 /*
  * ngtcp2_ppe_ensure_hp_sample returns nonzero if the buffer has
