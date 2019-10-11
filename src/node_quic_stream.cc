@@ -160,6 +160,7 @@ int QuicStream::DoWrite(
     return 0;
   }
 
+  BaseObjectPtr<AsyncWrap> strong_ref{req_wrap->GetAsyncWrap()};
   // The list of buffers will be appended onto streambuf_ without
   // copying. Those will remain in that buffer until the serialized
   // stream frames are acknowledged.
@@ -167,7 +168,7 @@ int QuicStream::DoWrite(
       streambuf_.Push(
           bufs,
           nbufs,
-          [req_wrap](int status) {
+          [req_wrap, strong_ref](int status) {
             // This callback function will be invoked once this
             // complete batch of buffers has been acknowledged
             // by the peer. This will have the side effect of
@@ -179,8 +180,7 @@ int QuicStream::DoWrite(
             // also means that writes will be significantly
             // less performant unless written in batches.
             req_wrap->Done(status);
-          },
-          req_wrap->object());
+          });
   Debug(this, "Queuing %" PRIu64 " bytes of data from %d buffers",
         length, nbufs);
   IncrementStat(length, &stream_stats_, &stream_stats::bytes_sent);
