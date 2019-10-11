@@ -319,6 +319,22 @@ class QuicCryptoContext : public MemoryRetainer {
   friend class QuicSession;
 };
 
+// A QuicApplication encapsulates the specific details of
+// working with a specific QUIC application (e.g. http/3).
+class QuicApplication {
+ public:
+  explicit QuicApplication(QuicSession* session);
+
+  virtual bool Initialize() = 0;
+ protected:
+  QuicSession* Session() { return session_; }
+  bool NeedsInit() { return needs_init_; }
+  void SetInitDone() { needs_init_ = false; }
+
+ private:
+  QuicSession* session_;
+  bool needs_init_ = true;
+};
 
 // The QuicSession class is an virtual class that serves as
 // the basis for both client and server QuicSession.
@@ -443,6 +459,9 @@ class QuicSession : public AsyncWrap,
 
   QuicCryptoContext* CryptoContext() { return crypto_context_.get(); }
 
+  QuicStream* FindStream(int64_t id);
+  inline bool HasStream(int64_t id);
+
   inline QuicError GetLastError() const;
 
   // Returns true if StartGracefulClose() has been called and the
@@ -564,6 +583,8 @@ class QuicSession : public AsyncWrap,
   inline void SetLastError(QuicErrorFamily family, uint64_t error_code);
   inline void SetLastError(QuicErrorFamily family, int error_code);
 
+  inline uint64_t GetMaxLocalStreamsUni();
+
   int SetRemoteTransportParams(ngtcp2_transport_params* params);
   bool SetEarlyTransportParams(v8::Local<v8::Value> buffer);
   bool SetSocket(QuicSocket* socket, bool nat_rebinding = false);
@@ -656,6 +677,8 @@ class QuicSession : public AsyncWrap,
       v8::Local<v8::Value> session_ticket,
       v8::Local<v8::Value> dcid);
 
+  void InitApplication();
+
   // Returns true if the QuicSession has entered the
   // closing period following a call to ImmediateClose.
   // While true, the QuicSession is only permitted to
@@ -672,8 +695,6 @@ class QuicSession : public AsyncWrap,
   // the idle timeout period elapses or until the
   // QuicSession is explicitly destroyed.
   inline bool IsInDrainingPeriod();
-  QuicStream* FindStream(int64_t id);
-  inline bool HasStream(int64_t id);
 
   void AckedStreamDataOffset(
       int64_t stream_id,
@@ -979,8 +1000,12 @@ class QuicSession : public AsyncWrap,
     return ngtcp2_conn_write_connection_close;
   }
 
+  // Select the QUIC Application based on the configured ALPN identifier
+  QuicApplication* SelectApplication(QuicSession* session);
+
   ngtcp2_mem alloc_info_;
   std::unique_ptr<QuicCryptoContext> crypto_context_;
+  std::unique_ptr<QuicApplication> application_;
   BaseObjectWeakPtr<QuicSocket> socket_;
   std::string alpn_;
   std::string hostname_;

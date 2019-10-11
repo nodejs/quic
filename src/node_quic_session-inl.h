@@ -24,6 +24,10 @@ void QuicSession::DecreaseAllocatedSize(size_t size) {
   current_ngtcp2_memory_ -= size;
 }
 
+uint64_t QuicSession::GetMaxLocalStreamsUni() {
+  return ngtcp2_conn_get_max_local_streams_uni(Connection());
+}
+
 void QuicSession::SetLastError(QuicError error) {
   last_error_ = error;
 }
