@@ -15,6 +15,8 @@
 #include "node_quic_stream.h"
 #include "node_quic_state.h"
 #include "node_quic_util.h"
+#include "node_quic_default_application.h"
+#include "node_quic_http3_application.h"
 #include "v8.h"
 #include "uv.h"
 
@@ -459,6 +461,11 @@ bool QuicCryptoContext::OnSecrets(
     const uint8_t* tx_secret,
     size_t secretlen) {
 
+  OnScopeLeave maybe_init_app([&]() {
+    if (level == NGTCP2_CRYPTO_LEVEL_APP)
+      session_->InitApplication();
+  });
+
   if (level == NGTCP2_CRYPTO_LEVEL_APP) {
     rx_secret_.assign(rx_secret, rx_secret + secretlen);
     tx_secret_.assign(tx_secret, tx_secret + secretlen);
@@ -640,6 +647,19 @@ void QuicCryptoContext::WriteHandshake(
   handshake_[level].Push(std::move(buffer));
 }
 
+QuicApplication::QuicApplication(QuicSession* session) : session_(session) {}
+
+QuicApplication* QuicSession::SelectApplication(QuicSession* session) {
+  std::string alpn = session->GetALPN();
+  if (alpn == NGTCP2_ALPN_H3)
+    return new Http3Application(session);
+  // In the future, we may end up supporting additional
+  // QUIC protocols. As they are added, extend the cases
+  // here to create and return them.
+
+  return new DefaultApplication(session);
+}
+
 // Server QuicSession Constructor
 QuicSession::QuicSession(
     QuicSocket* socket,
@@ -736,6 +756,7 @@ QuicSession::QuicSession(
         sizeof(recovery_stats_) / sizeof(double),
         reinterpret_cast<double*>(&recovery_stats_)) {
   crypto_context_.reset(new QuicCryptoContext(this, ctx, side, options));
+  application_.reset(SelectApplication(this));
   if (rcid != nullptr)
     rcid_ = *rcid;
 
@@ -948,6 +969,12 @@ void QuicSession::ImmediateClose() {
   // from being freed while the MakeCallback is running.
   BaseObjectPtr<QuicSession> ptr(this);
   MakeCallback(env()->quic_on_session_close_function(), arraysize(argv), argv);
+}
+
+void QuicSession::InitApplication() {
+  Debug(this, "Initializing application handler for ALPN %s",
+        GetALPN().c_str());
+  application_->Initialize();
 }
 
 // Creates a new stream object and passes it off to the javascript side.
