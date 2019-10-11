@@ -389,7 +389,7 @@ void QuicSocket::Receive(
       // It's not entirely clear how this should be implemented.
 
       // AcceptInitialPacket will first validate that the packet can be
-      // accepted, then create a new QuicServerSession instance if able
+      // accepted, then create a new server QuicSession instance if able
       // to do so. If a new instance cannot be created (for any reason),
       // the session shared_ptr will be empty on return.
       session = AcceptInitialPacket(
@@ -401,7 +401,7 @@ void QuicSocket::Receive(
           addr,
           flags);
 
-      // There are many reasons why a QuicServerSession could not be
+      // There are many reasons why a server QuicSession could not be
       // created. The most common will be invalid packets or incorrect
       // QUIC version. In any of these cases, however, to prevent a
       // potential attacker from causing us to consume resources,
@@ -409,7 +409,7 @@ void QuicSocket::Receive(
       // the AcceptInitialPacket sent a version negotiation packet,
       // or (in the future) a CONNECTION_CLOSE packet.
       if (!session) {
-        Debug(this, "Could not initialize a new QuicServerSession.");
+        Debug(this, "Could not initialize a new server QuicSession.");
         IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
         return;
       }
@@ -655,13 +655,13 @@ BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
 
   // Perform some initial checks on the packet to see if it is an
   // acceptable initial packet with the right QUIC version.
-  switch (QuicServerSession::Accept(&hd, version, data, nread)) {
-    case QuicServerSession::InitialPacketResult::PACKET_VERSION:
+  switch (QuicSession::Accept(&hd, version, data, nread)) {
+    case QuicSession::InitialPacketResult::PACKET_VERSION:
       SendVersionNegotiation(version, dcid, scid, addr);
       // Fall through
-    case QuicServerSession::InitialPacketResult::PACKET_IGNORE:
+    case QuicSession::InitialPacketResult::PACKET_IGNORE:
       return {};
-    case QuicServerSession::InitialPacketResult::PACKET_OK:
+    case QuicSession::InitialPacketResult::PACKET_OK:
       break;
   }
 
@@ -718,7 +718,7 @@ BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
   }
 
   BaseObjectPtr<QuicSession> session =
-      QuicServerSession::New(
+      QuicSession::CreateServer(
           this,
           &server_session_config_,
           **dcid,
@@ -733,8 +733,8 @@ BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
   MakeCallback(env()->quic_on_session_ready_function(), 1, &arg);
 
   // The above MakeCallback will notify the JavaScript side that a new
-  // QuicServerSession has been created in an event emitted on nextTick.
-  // The user may destroy() the QuicServerSession in that event but that
+  // server QuicSession has been created in an event emitted on nextTick.
+  // The user may destroy() the server QuicSession in that event but that
   // won't impact the code here.
 
   return session;

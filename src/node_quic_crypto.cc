@@ -126,7 +126,7 @@ bool GenerateRandData(uint8_t* buf, size_t len) {
 Local<Array> GetClientHelloCiphers(QuicSession* session) {
   const unsigned char* buf;
   Environment* env = session->env();
-  auto ctx = session->CryptoContext();
+  QuicCryptoContext* ctx = session->CryptoContext();
   size_t len = SSL_client_hello_get0_ciphers(**ctx, &buf);
   std::vector<Local<Value>> ciphers_array;
   for (size_t n = 0; n < len; n += 2) {
@@ -135,14 +135,14 @@ Local<Array> GetClientHelloCiphers(QuicSession* session) {
     const char* cipher_name = SSL_CIPHER_get_name(cipher);
     const char* cipher_version = SSL_CIPHER_get_version(cipher);
     Local<Object> obj = Object::New(env->isolate());
-    USE(obj->Set(
+    obj->Set(
         env->context(),
         env->name_string(),
-        OneByteString(env->isolate(), cipher_name)));
-    USE(obj->Set(
+        OneByteString(env->isolate(), cipher_name)).FromJust();
+    obj->Set(
         env->context(),
         env->version_string(),
-        OneByteString(env->isolate(), cipher_version)));
+        OneByteString(env->isolate(), cipher_version)).FromJust();
     ciphers_array.push_back(obj);
   }
   return Array::New(env->isolate(), ciphers_array.data(), ciphers_array.size());
@@ -153,7 +153,7 @@ const char* GetClientHelloServerName(QuicSession* session) {
     size_t len;
     size_t rem;
 
-    auto ctx = session->CryptoContext();
+    QuicCryptoContext* ctx = session->CryptoContext();
 
     if (!SSL_client_hello_get0_ext(
             **ctx,
@@ -187,7 +187,7 @@ const char* GetClientHelloALPN(QuicSession* session) {
     size_t len;
     size_t rem;
 
-    auto ctx = session->CryptoContext();
+    QuicCryptoContext* ctx = session->CryptoContext();
 
     if (!SSL_client_hello_get0_ext(
             **ctx,
@@ -707,7 +707,7 @@ int VerifyHostnameIdentity(SSL* ssl, const char* hostname) {
 }
 
 const char* GetServerName(QuicSession* session) {
-  auto ctx = session->CryptoContext();
+  QuicCryptoContext* ctx = session->CryptoContext();
   return SSL_get_servername(**ctx, TLSEXT_NAMETYPE_host_name);
 }
 
@@ -731,7 +731,7 @@ Local<Value> GetALPNProtocol(QuicSession* session) {
   Local<Value> alpn;
   const unsigned char* alpn_buf = nullptr;
   unsigned int alpnlen;
-  auto ctx = session->CryptoContext();
+  QuicCryptoContext* ctx = session->CryptoContext();
 
   SSL_get0_alpn_selected(**ctx, &alpn_buf, &alpnlen);
   if (alpnlen == sizeof(NGTCP2_ALPN_H3) - 2 &&
@@ -745,7 +745,7 @@ Local<Value> GetALPNProtocol(QuicSession* session) {
 
 Local<Value> GetCertificate(QuicSession* session) {
   crypto::ClearErrorOnReturn clear_error_on_return;
-  auto ctx = session->CryptoContext();
+  QuicCryptoContext* ctx = session->CryptoContext();
   Local<Value> value = v8::Undefined(session->env()->isolate());
   X509* cert = SSL_get_certificate(**ctx);
   if (cert != nullptr)
@@ -758,7 +758,7 @@ Local<Value> GetEphemeralKey(QuicSession* session) {
   Local<Context> context = env->context();
 
   Local<Object> info = Object::New(env->isolate());
-  auto ctx = session->CryptoContext();
+  QuicCryptoContext* ctx = session->CryptoContext();
 
   EVP_PKEY* raw_key;
   if (SSL_get_server_tmp_key(**ctx, &raw_key)) {
@@ -785,12 +785,18 @@ Local<Value> GetEphemeralKey(QuicSession* session) {
           } else {
             curve_name = OBJ_nid2sn(kid);
           }
-          USE(info->Set(context, env->type_string(),
-                    FIXED_ONE_BYTE_STRING(env->isolate(), "ECDH")));
-          USE(info->Set(context, env->name_string(),
-                    OneByteString(env->isolate(), curve_name)));
-          USE(info->Set(context, env->size_string(),
-                    Integer::New(env->isolate(), EVP_PKEY_bits(key.get()))));
+          info->Set(context, env->type_string(),
+                    FIXED_ONE_BYTE_STRING(
+                        env->isolate(),
+                        "ECDH")).FromJust();
+          info->Set(context, env->name_string(),
+                    OneByteString(
+                        env->isolate(),
+                        curve_name)).FromJust();
+          info->Set(context, env->size_string(),
+                    Integer::New(
+                        env->isolate(),
+                        EVP_PKEY_bits(key.get()))).FromJust();
         }
         break;
       default:
@@ -802,7 +808,7 @@ Local<Value> GetEphemeralKey(QuicSession* session) {
 
 Local<Value> GetCipherName(QuicSession* session) {
   Local<Value> cipher;
-  auto ctx = session->CryptoContext();
+  QuicCryptoContext* ctx = session->CryptoContext();
   const SSL_CIPHER* c = SSL_get_current_cipher(**ctx);
   if (c != nullptr) {
     const char* cipher_name = SSL_CIPHER_get_name(c);
@@ -813,7 +819,7 @@ Local<Value> GetCipherName(QuicSession* session) {
 
 Local<Value> GetCipherVersion(QuicSession* session) {
   Local<Value> version;
-  auto ctx = session->CryptoContext();
+  QuicCryptoContext* ctx = session->CryptoContext();
   const SSL_CIPHER* c = SSL_get_current_cipher(**ctx);
   if (c != nullptr) {
     const char* cipher_version = SSL_CIPHER_get_version(c);
@@ -839,7 +845,7 @@ Local<Value> GetPeerCertificate(
     bool abbreviated) {
   crypto::ClearErrorOnReturn clear_error_on_return;
 
-  auto ctx = session->CryptoContext();
+  QuicCryptoContext* ctx = session->CryptoContext();
 
   Local<Value> result = v8::Undefined(session->env()->isolate());
   Local<Object> issuer_chain;
@@ -955,8 +961,7 @@ int TLS_Status_Callback(SSL* ssl, void* arg) {
 }
 
 int New_Session_Callback(SSL* ssl, SSL_SESSION* session) {
-  QuicClientSession* s =
-      static_cast<QuicClientSession*>(SSL_get_app_data(ssl));
+  QuicSession* s = static_cast<QuicSession*>(SSL_get_app_data(ssl));
   return s->SetSession(session);
 }
 
@@ -1056,7 +1061,7 @@ SSL_QUIC_METHOD quic_method = SSL_QUIC_METHOD{
 }  // namespace
 
 void InitializeTLS(QuicSession* session) {
-  auto ctx = session->CryptoContext();
+  QuicCryptoContext* ctx = session->CryptoContext();
 
   SSL_set_app_data(**ctx, session);
   SSL_set_cert_cb(**ctx, CertCB, session);
@@ -1146,7 +1151,7 @@ bool SetCryptoSecrets(
   SessionIV tx_iv;
   SessionKey tx_hp;
 
-  auto ctx = session->CryptoContext();
+  QuicCryptoContext* ctx = session->CryptoContext();
 
   if (NGTCP2_ERR(ngtcp2_crypto_derive_and_install_key(
           session->Connection(),

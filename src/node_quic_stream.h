@@ -17,7 +17,6 @@ namespace node {
 namespace quic {
 
 class QuicSession;
-class QuicServerSession;
 
 // QuicStream's are simple data flows that, fortunately, do not
 // require much. They may be:
