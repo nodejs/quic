@@ -58,6 +58,10 @@ bool QuicSession::IsDestroyed() const {
   return IsFlagSet(QUICSESSION_FLAG_DESTROYED);
 }
 
+bool QuicSession::IsServer() const {
+  return crypto_context_->Side() == NGTCP2_CRYPTO_SIDE_SERVER;
+}
+
 void QuicSession::StartGracefulClose() {
   SetFlag(QUICSESSION_FLAG_GRACEFUL_CLOSING);
   session_stats_.closing_at = uv_hrtime();

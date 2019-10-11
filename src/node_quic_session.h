@@ -166,6 +166,162 @@ enum QuicSessionState : int {
   IDX_QUIC_SESSION_STATE_COUNT
 };
 
+class QuicCryptoContext : public MemoryRetainer {
+ public:
+  SSL* operator*() { return ssl_.get(); }
+
+  uint64_t Cancel();
+
+  void AcknowledgeCryptoData(ngtcp2_crypto_level level, size_t datalen);
+
+  void EnableTrace();
+
+  std::string GetOCSPResponse();
+
+  ngtcp2_crypto_level GetReadCryptoLevel();
+
+  ngtcp2_crypto_level GetWriteCryptoLevel();
+
+  bool IsOptionSet(uint32_t option) const {
+    return options_ & option;
+  }
+
+  void Keylog(const char* line);
+
+  int OnClientHello();
+
+  void OnClientHelloDone();
+
+  int OnOCSP();
+
+  void OnOCSPDone(
+      crypto::SecureContext* context,
+      v8::Local<v8::Value> ocsp_response);
+
+  bool OnSecrets(
+      ngtcp2_crypto_level level,
+      const uint8_t* rx_secret,
+      const uint8_t* tx_secret,
+      size_t secretlen);
+
+  int OnTLSStatus();
+
+  int Receive(
+      ngtcp2_crypto_level crypto_level,
+      uint64_t offset,
+      const uint8_t* data,
+      size_t datalen);
+
+  void ResumeHandshake();
+
+  void SetOption(uint32_t option, bool on = true) {
+    if (on)
+      options_ |= option;
+    else
+      options_ &= ~option;
+  }
+
+  bool SetSession(const unsigned char* data, size_t len);
+
+  void SetTLSAlert(int err);
+
+  bool SetupInitialKey(const ngtcp2_cid* dcid);
+
+  ngtcp2_crypto_side Side() const { return side_; }
+
+  SSL* ssl() { return ssl_.get(); }
+
+  void WriteHandshake(
+      ngtcp2_crypto_level level,
+      const uint8_t* data,
+      size_t datalen);
+
+  bool UpdateKey(bool initiate = true);
+
+  int VerifyPeerIdentity(const char* hostname);
+
+  void MemoryInfo(MemoryTracker* tracker) const override;
+
+  SET_MEMORY_INFO_NAME(QuicCryptoContext)
+  SET_SELF_SIZE(QuicCryptoContext)
+
+ private:
+  QuicCryptoContext(
+      QuicSession* session,
+      crypto::SecureContext* ctx,
+      ngtcp2_crypto_side side,
+      uint32_t options);
+
+  QuicSession* session_;
+  ngtcp2_crypto_side side_;
+  crypto::SSLPointer ssl_;
+  std::vector<uint8_t> tx_secret_;
+  std::vector<uint8_t> rx_secret_;
+  QuicBuffer handshake_[3];
+  bool in_tls_callback_;
+  bool in_key_update_;
+  bool in_ocsp_request_;
+  bool in_client_hello_;
+  uint32_t options_;
+
+  v8::Global<v8::ArrayBufferView> ocsp_response_;
+  crypto::BIOPointer bio_trace_;
+
+  class TLSCallbackScope {
+   public:
+    explicit TLSCallbackScope(QuicCryptoContext* context) :
+        context_(context) {
+      context_->in_tls_callback_ = true;
+    }
+
+    ~TLSCallbackScope() {
+      context_->in_tls_callback_ = false;
+    }
+
+    static bool IsInCallback(QuicCryptoContext* context) {
+      return context->in_tls_callback_;
+    }
+
+   private:
+    QuicCryptoContext* context_;
+  };
+
+  class TLSHandshakeScope {
+   public:
+    TLSHandshakeScope(
+        QuicCryptoContext* context,
+        bool* monitor) :
+        context_(context),
+        monitor_(monitor) {}
+
+    ~TLSHandshakeScope() {
+      if (!IsHandshakeSuspended())
+        return;
+
+      *monitor_ = false;
+      // Only continue the TLS handshake if we are not currently running
+      // synchronously within the TLS handshake function. This can happen
+      // when the callback function passed to the clientHello and cert
+      // event handlers is called synchronously. If the function is called
+      // asynchronously, then we have to manually continue the handshake.
+      if (!TLSCallbackScope::IsInCallback(context_))
+        context_->ResumeHandshake();
+    }
+
+   private:
+    bool IsHandshakeSuspended() const {
+      return context_->in_ocsp_request_ || context_->in_client_hello_;
+    }
+
+
+    QuicCryptoContext* context_;
+    bool* monitor_;
+  };
+
+  friend class QuicSession;
+};
+
+
 // The QuicSession class is an virtual class that serves as
 // the basis for both QuicServerSession and QuicClientSession.
 // It implements the functionality that is shared for both
@@ -187,6 +343,8 @@ class QuicSession : public AsyncWrap,
  public:
   static const int kInitialClientBufferLength = 4096;
 
+  // The QuiSession::CryptoContext encapsulates all details of the
+  // TLS context on behalf of the QuicSession.
   QuicSession(
       ngtcp2_crypto_side side,
       // The QuicSocket that created this session. Note that
@@ -211,19 +369,9 @@ class QuicSession : public AsyncWrap,
 
   std::string diagnostic_name() const override;
 
+  QuicCryptoContext* CryptoContext() { return crypto_context_.get(); }
+
   inline QuicError GetLastError() const;
-  void SetTLSAlert(int err);
-
-  // Enables verbose TLS tracing as provided by openssl.
-  void EnableTrace();
-
-  ngtcp2_crypto_level GetReadCryptoLevel() {
-    return from_ossl_level(SSL_quic_read_level(ssl()));
-  }
-
-  ngtcp2_crypto_level GetWriteCryptoLevel() {
-    return from_ossl_level(SSL_quic_write_level(ssl()));
-  }
 
   // Returns true if StartGracefulClose() has been called and the
   // QuicSession is currently in the process of a graceful close.
@@ -232,6 +380,8 @@ class QuicSession : public AsyncWrap,
   // Returns true if Destroy() has been called and the
   // QuicSession is no longer usable.
   inline bool IsDestroyed() const;
+
+  inline bool IsServer() const;
 
   // Starting a GracefulClose disables the ability to open or accept
   // new streams for this session. Existing streams are allowed to
@@ -242,7 +392,13 @@ class QuicSession : public AsyncWrap,
   // once ImmediateClose() is called.
   inline void StartGracefulClose();
 
+  // Get the ALPN protocol identifier configured for this QuicSession.
+  // For server sessions, this will be compared against the client requested
+  // ALPN identifier to determine if there is a protocol match.
   const std::string& GetALPN() const { return alpn_; }
+
+  // Get the hostname configured for this QuicSession. This is generally
+  // only used by client sessions.
   const std::string& GetHostname() const { return hostname_; }
 
   // Returns the associated peer's address. Note that this
@@ -254,8 +410,6 @@ class QuicSession : public AsyncWrap,
   const ngtcp2_cid* scid() const { return &scid_; }
 
   inline QuicSocket* Socket() const;
-
-  SSL* ssl() { return ssl_.get(); }
 
   ngtcp2_conn* Connection() { return connection_.get(); }
 
@@ -278,9 +432,6 @@ class QuicSession : public AsyncWrap,
   // The QUIC version that has been negotiated for this session
   uint32_t GetNegotiatedVersion();
 
-  // A key update causes the encryption keys to be cycled
-  bool InitiateUpdateKey();
-
   // True only if ngtcp2 considers the TLS handshake to be completed
   bool IsHandshakeCompleted();
 
@@ -290,14 +441,6 @@ class QuicSession : public AsyncWrap,
   // Called when the session has been determined to have been
   // idle for too long and needs to be torn down.
   void OnIdleTimeout();
-
-  // Called when openssl has calculated RX and TX secrets for
-  // the specified crypto level.
-  bool OnSecrets(
-      ngtcp2_crypto_level level,
-      const uint8_t* rx_secret,
-      const uint8_t* tx_secret,
-      size_t secretlen);
 
   bool OpenBidirectionalStream(int64_t* stream_id);
   bool OpenUnidirectionalStream(int64_t* stream_id);
@@ -374,37 +517,15 @@ class QuicSession : public AsyncWrap,
       int64_t stream_id,
       uint64_t error_code = NGTCP2_APP_NOERROR);
 
-  ngtcp2_crypto_side Side() const { return side_; }
-
-  // Used during the TLS handshake to buffer local (outgoing)
-  // handshake data that needs to be serialized and sent.
-  void WriteHandshake(
-      ngtcp2_crypto_level level,
-      const uint8_t* data,
-      size_t datalen);
-
   // Error handling for the QuicSession. QuicServerSession
   // and QuicClientSession instances will do different things
   // here, but ultimately an error means that the QuicSession
   // should be torn down.
   virtual void HandleError();
 
-  // Used only if the clientHello event handler is registered
-  // on the javascript side. Allows javascript code to
-  // early intercept the handshake to change some details
-  virtual int OnClientHello() { return 0; }
-  virtual void OnClientHelloDone() {}
-
-  // Used only if OCSP is requested by the client
-  virtual int OnCert() { return 1; }
-  virtual void OnCertDone(
-      crypto::SecureContext* context,
-      v8::Local<v8::Value> ocsp_response) {}
-
   virtual void RemoveFromSocket();
 
   virtual void AddToSocket(QuicSocket* socket) = 0;
-  virtual int OnTLSStatus() = 0;
   virtual bool SendConnectionClose() = 0;
 
   // Implementation for mem::NgLibMemoryManager
@@ -436,10 +557,6 @@ class QuicSession : public AsyncWrap,
 
   void MemoryInfo(MemoryTracker* tracker) const override;
 
-  bool IsOptionSet(uint32_t option) const {
-    return options_ & option;
-  }
-
  private:
   // Returns true if the QuicSession has entered the
   // closing period following a call to ImmediateClose.
@@ -460,14 +577,6 @@ class QuicSession : public AsyncWrap,
   QuicStream* FindStream(int64_t id);
   inline bool HasStream(int64_t id);
 
-  bool IsHandshakeSuspended() const {
-    return IsFlagSet(QUICSESSION_FLAG_CERT_CB_RUNNING) ||
-           IsFlagSet(QUICSESSION_FLAG_CLIENT_HELLO_CB_RUNNING);
-  }
-
-  void AckedCryptoOffset(
-      ngtcp2_crypto_level level,
-      size_t datalen);
   void AckedStreamDataOffset(
       int64_t stream_id,
       uint64_t offset,
@@ -514,16 +623,10 @@ class QuicSession : public AsyncWrap,
   void ExtendMaxStreamsBidi(uint64_t max_streams);
   int GetNewConnectionID(ngtcp2_cid* cid, uint8_t* token, size_t cidlen);
   void HandshakeCompleted();
-  void Keylog(const char* line);
   void PathValidation(
     const ngtcp2_path* path,
     ngtcp2_path_validation_result res);
   bool ReceiveClientInitial(const ngtcp2_cid* dcid);
-  int ReceiveCryptoData(
-      ngtcp2_crypto_level crypto_level,
-      uint64_t offset,
-      const uint8_t* data,
-      size_t datalen);
   bool ReceivePacket(QuicPath* path, const uint8_t* data, ssize_t nread);
   void RemoveConnectionID(const ngtcp2_cid* cid);
   void ScheduleRetransmit();
@@ -535,7 +638,6 @@ class QuicSession : public AsyncWrap,
       int64_t stream_id,
       uint64_t final_size,
       uint64_t app_error_code);
-  bool UpdateKey();
   bool WritePackets(const char* diagnostic_label = nullptr);
   void UpdateRecoveryStats();
 
@@ -549,8 +651,6 @@ class QuicSession : public AsyncWrap,
       const ngtcp2_pkt_hd* hd,
       const uint32_t* sv,
       size_t nsv) {}
-
-  virtual int VerifyPeerIdentity(const char* hostname);
 
   // static ngtcp2 callbacks
   static int OnClientInitial(
@@ -694,7 +794,6 @@ class QuicSession : public AsyncWrap,
       const uint32_t* sv,
       size_t nsv,
       void* user_data);
-  static void OnKeylog(const SSL* ssl, const char* line);
   static int OnStatelessReset(
       ngtcp2_conn* conn,
       const ngtcp2_pkt_stateless_reset* sr,
@@ -719,18 +818,6 @@ class QuicSession : public AsyncWrap,
     // Set when the QuicSession has been destroyed (but not
     // yet freed)
     QUICSESSION_FLAG_DESTROYED = 0x8,
-
-    // Set while the QuicSession is in a KeyUpdate (to prevent reentrance)
-    QUICSESSION_FLAG_KEYUPDATE = 0x10,
-
-    // Set while the QuicSession is in the cert callback
-    QUICSESSION_FLAG_CERT_CB_RUNNING = 0x20,
-
-    // Set while the QuicSession is in the client hello callback
-    QUICSESSION_FLAG_CLIENT_HELLO_CB_RUNNING = 0x40,
-
-    // Set while the QuicSession is executing a TLS callback
-    QUICSESSION_FLAG_TLS_CALLBACK = 0x80,
 
     // Set while the QuicSession is executing an ngtcp2 callback
     QUICSESSION_FLAG_NGTCP2_CALLBACK = 0x100,
@@ -760,13 +847,6 @@ class QuicSession : public AsyncWrap,
 
   bool IsFlagSet(QuicSessionFlags flag) const {
     return (flags_ & flag) == flag;
-  }
-
-  void SetOption(uint32_t option, bool on = true) {
-    if (on)
-      options_ |= option;
-    else
-      options_ &= ~option;
   }
 
   void IncrementConnectionCloseAttempts() {
@@ -800,23 +880,16 @@ class QuicSession : public AsyncWrap,
   }
 
   ngtcp2_mem alloc_info_;
-
-  ngtcp2_crypto_side side_;
+  std::unique_ptr<QuicCryptoContext> crypto_context_;
   BaseObjectWeakPtr<QuicSocket> socket_;
   std::string alpn_;
   std::string hostname_;
-
   QuicError last_error_ = { QUIC_ERROR_SESSION, NGTCP2_NO_ERROR };
-
-  crypto::SSLPointer ssl_;
   ConnectionPointer connection_;
   SocketAddress remote_address_;
-
   uint32_t flags_ = 0;
-  uint32_t options_;
-  uint64_t initial_connection_close_;
+  uint64_t initial_connection_close_ = NGTCP2_NO_ERROR;
   size_t max_pktlen_ = 0;
-  size_t ncread_ = 0;
   size_t max_crypto_buffer_ = DEFAULT_MAX_CRYPTO_BUFFER;
   size_t current_ngtcp2_memory_ = 0;
   size_t connection_close_attempts_ = 0;
@@ -827,19 +900,12 @@ class QuicSession : public AsyncWrap,
   TimerPointer idle_;
   TimerPointer retransmit_;
 
-  std::vector<uint8_t> tx_secret_;
-  std::vector<uint8_t> rx_secret_;
   ngtcp2_cid scid_;
 
   // The sendbuf_ is a temporary holding for data being collected
   // to send. On send, the contents of the sendbuf_ will be
   // transfered to the txbuf_
   QuicBuffer sendbuf_;
-
-  // The handshake_ is a temporary holding for outbound TLS handshake
-  // data. On send, the contents of the handshake_ will be
-  // transfered to the txbuf_. There is one buffer per crypto level
-  QuicBuffer handshake_[3];
 
   // The txbuf_ contains all of the data that has been passed off
   // to the QuicSocket. The data will remain in the txbuf_ until
@@ -930,64 +996,9 @@ class QuicSession : public AsyncWrap,
     IncrementStat<session_stats, Members...>(amount, a, mems...);
   }
 
-  class TLSHandshakeCallbackScope {
-   public:
-    explicit TLSHandshakeCallbackScope(QuicSession* session) :
-        session_(session) {
-      session_->SetFlag(QUICSESSION_FLAG_TLS_CALLBACK);
-    }
-
-    ~TLSHandshakeCallbackScope() {
-      session_->SetFlag(QUICSESSION_FLAG_TLS_CALLBACK, false);
-    }
-
-    static bool IsInTLSHandshakeCallback(QuicSession* session) {
-      return session->IsFlagSet(QUICSESSION_FLAG_TLS_CALLBACK);
-    }
-
-   private:
-    QuicSession* session_;
-  };
-
-  class TLSHandshakeScope {
-   public:
-    TLSHandshakeScope(
-        ngtcp2_crypto_level level,
-        QuicSession* session,
-        QuicSessionFlags monitor) :
-        level_{level},
-        session_{session},
-        monitor_(monitor) {}
-
-    ~TLSHandshakeScope() {
-      if (session_->IsHandshakeSuspended()) {
-        // There are a couple of monitor fields in QuicSession
-        // (cert_cb_running_ and client_hello_cb_running_).
-        // When one of those are true, IsHandshakeSuspended
-        // will be true. We set the monitor to false so we
-        // can keep the handshake going when the TLS Handshake
-        // is continued.
-        session_->SetFlag(monitor_, false);
-        // Only continue the TLS handshake if we are not currently running
-        // synchronously within the TLS handshake function. This can happen
-        // when the callback function passed to the clientHello and cert
-        // event handlers is called synchronously. If the function is called
-        // asynchronously, then we have to manually continue the handshake.
-        if (!TLSHandshakeCallbackScope::IsInTLSHandshakeCallback(session_)) {
-          session_->ReceiveCryptoData(level_, 0, nullptr, 0);
-          session_->SendPendingData();
-        }
-      }
-    }
-
-   private:
-    ngtcp2_crypto_level level_;
-    QuicSession* session_;
-    QuicSessionFlags monitor_;
-  };
-
   friend class QuicServerSession;
   friend class QuicClientSession;
+  friend class QuicCryptoContext;
 };
 
 class QuicServerSession : public QuicSession {
@@ -1028,13 +1039,6 @@ class QuicServerSession : public QuicSession {
       const ngtcp2_cid* dcid,
       const ngtcp2_cid* ocid,
       uint32_t version);
-  int OnCert() override;
-  void OnCertDone(
-      crypto::SecureContext* context,
-      v8::Local<v8::Value> ocsp_response) override;
-  int OnClientHello() override;
-  void OnClientHelloDone() override;
-  int OnTLSStatus() override;
 
   // Serializes and sends a CONNECTION_CLOSE frame as appropriate.
   bool SendConnectionClose() override;
@@ -1070,7 +1074,6 @@ class QuicServerSession : public QuicSession {
   ngtcp2_cid rcid_;
 
   MallocedBuffer<uint8_t> conn_closebuf_;
-  v8::Global<v8::ArrayBufferView> ocsp_response_;
 
   static const ngtcp2_conn_callbacks callbacks;
 
@@ -1115,7 +1118,6 @@ class QuicClientSession : public QuicSession {
       uint32_t options);
 
   void AddToSocket(QuicSocket* socket) override;
-  int OnTLSStatus() override;
 
   bool SetEarlyTransportParams(v8::Local<v8::Value> buffer);
   bool SetSocket(QuicSocket* socket, bool nat_rebinding = false);
@@ -1136,7 +1138,6 @@ class QuicClientSession : public QuicSession {
     ngtcp2_addr* dest,
     const ngtcp2_preferred_addr* paddr) override;
   void StoreRemoteTransportParams(ngtcp2_transport_params* params) override;
-  int VerifyPeerIdentity(const char* hostname) override;
   void VersionNegotiation(
       const ngtcp2_pkt_hd* hd,
       const uint32_t* sv,
