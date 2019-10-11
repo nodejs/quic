@@ -48,7 +48,7 @@ void InitializeSecureContext(
 // QuicClientSession::Init to configure the
 // appropriate settings for the SSL* associated
 // with the session.
-void InitializeTLS(QuicSession* session, SSL* ssl);
+void InitializeTLS(QuicSession* session);
 
 // Called when the QuicClientSession is created and
 // when the QuicServerSession first receives the
@@ -64,10 +64,12 @@ bool UpdateAndInstallKey(
     std::vector<uint8_t>* current_tx_secret);
 
 // Get the server name identified in the client hello
-const char* GetClientHelloServerName(SSL* ssl);
+const char* GetClientHelloServerName(QuicSession* session);
 
 // Get the alpn protocol identified in the client hello
-const char* GetClientHelloALPN(SSL* ssl);
+const char* GetClientHelloALPN(QuicSession* session);
+
+const char* GetServerName(QuicSession* session);
 
 // Replaces the SecureContext to be used in the handshake.
 // This is currently used only within the QuicServerSession::OnCertDone
@@ -98,6 +100,13 @@ int VerifyHostnameIdentity(SSL* ssl, const char* hostname);
 v8::Local<v8::Value> GetValidationErrorReason(Environment* env, int err);
 v8::Local<v8::Value> GetValidationErrorCode(Environment* env, int err);
 
+v8::Local<v8::Value> GetCertificate(QuicSession* session);
+v8::Local<v8::Value> GetEphemeralKey(QuicSession* session);
+
+bool SetTLSSession(SSL* ssl, const unsigned char* buf, size_t length);
+
+std::string GetSSLOCSPResponse(SSL* ssl);
+
 // Get the SNI hostname requested by the client for the session
 v8::Local<v8::Value> GetServerName(
     Environment* env,
@@ -105,18 +114,16 @@ v8::Local<v8::Value> GetServerName(
     const char* host_name);
 
 // Get the list of cipher algorithms advertised in the client hello
-v8::Local<v8::Array> GetClientHelloCiphers(
-    Environment* env,
-    SSL* ssl);
+v8::Local<v8::Array> GetClientHelloCiphers(QuicSession* Session);
 
 // Get the ALPN protocol identifier that was negotiated for the session
-v8::Local<v8::Value> GetALPNProtocol(Environment* env, SSL* ssl);
+v8::Local<v8::Value> GetALPNProtocol(QuicSession* session);
 
 // Get the negotiated cipher name for the TLS session
-v8::Local<v8::Value> GetCipherName(Environment* env, SSL* ssl);
+v8::Local<v8::Value> GetCipherName(QuicSession* session);
 
 // Get the negotiated cipher version for the TLS session
-v8::Local<v8::Value> GetCipherVersion(Environment* env, SSL* ssl);
+v8::Local<v8::Value> GetCipherVersion(QuicSession* session);
 
 // Get a JavaScript rendering of the X509 certificate provided by the peer
 // TODO(@jasnell): This currently only works for the Client side

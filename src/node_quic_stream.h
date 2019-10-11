@@ -185,7 +185,7 @@ class QuicStream : public AsyncWrap, public StreamBase {
   // ever be sent from the local peer, including final stream frames.
   inline bool WasEverWritable() const {
     if (GetDirection() == QUIC_STREAM_UNIDIRECTIONAL) {
-      return session_->Side() == NGTCP2_CRYPTO_SIDE_SERVER ?
+      return session_->IsServer() ?
           GetOrigin() == QUIC_STREAM_SERVER :
           GetOrigin() == QUIC_STREAM_CLIENT;
     }
@@ -207,7 +207,7 @@ class QuicStream : public AsyncWrap, public StreamBase {
   // peer.
   inline bool WasEverReadable() const {
     if (GetDirection() == QUIC_STREAM_UNIDIRECTIONAL) {
-      return session_->Side() == NGTCP2_CRYPTO_SIDE_SERVER ?
+      return session_->IsServer() ?
           GetOrigin() == QUIC_STREAM_CLIENT :
           GetOrigin() == QUIC_STREAM_SERVER;
     }

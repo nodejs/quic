@@ -136,7 +136,7 @@ void QuicSocket::AddSession(
   IncrementSocketAddressCounter(**session->GetRemoteAddress());
   IncrementSocketStat(
       1, &socket_stats_,
-      session->Side() == NGTCP2_CRYPTO_SIDE_SERVER ?
+      session->IsServer() ?
           &socket_stats::server_sessions :
           &socket_stats::client_sessions);
 }
