@@ -4,6 +4,7 @@
 #include "uv.h"
 
 namespace node {
+
 namespace quic {
 
 void Timer::Free(Timer* timer) {

@@ -12,14 +12,17 @@
 #include "v8.h"
 #include "uv.h"
 
+#include <array>
 #include <algorithm>
 #include <limits>
 
 namespace node {
 
+using v8::Array;
 using v8::Context;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
+using v8::Integer;
 using v8::Isolate;
 using v8::Local;
 using v8::Object;
@@ -229,13 +232,6 @@ void QuicStream::Commit(ssize_t amount) {
   streambuf_.SeekHeadOffset(amount);
 }
 
-size_t QuicStream::DrainInto(std::vector<ngtcp2_vec>* vec) {
-  CHECK(!IsDestroyed());
-  size_t length = 0;
-  streambuf_.DrainInto(vec, &length);
-  return length;
-}
-
 inline void QuicStream::IncrementAvailableOutboundLength(size_t amount) {
   available_outbound_length_ += amount;
 }
@@ -379,12 +375,73 @@ BaseObjectPtr<QuicStream> QuicStream::New(
   return stream;
 }
 
+void QuicStream::BeginHeaders(QuicStreamHeadersKind kind) {
+  Debug(this, "Beginning Headers");
+  // Upon start of a new block of headers, ensure that any
+  // previously collected ones are cleaned up.
+  headers_.clear();
+  SetHeadersKind(kind);
+}
+
+void QuicStream::SetHeadersKind(QuicStreamHeadersKind kind) {
+  headers_kind_ = kind;
+}
+
+bool QuicStream::AddHeader(std::unique_ptr<Header> header) {
+  Debug(this, "Header Added");
+  headers_.emplace_back(std::move(header));
+  // TODO(@jasnell): We need to limit the maximum number of headers.
+  // If the maximum count is reached, return false here instead.
+  return true;
+}
+
+void QuicStream::EndHeaders() {
+  Debug(this, "End Headers");
+  // Upon completion of a block of headers, convert the
+  // vector of Header objects into an array of name+value
+  // pairs, then call the on_stream_headers function.
+  std::vector<Local<Value>> headers;
+  for (const auto& header : headers_) {
+    // name and value should never be empty here, and if
+    // they are, there's an actual bug so go ahead and crash
+    Local<Value> pair[] = {
+      header->GetName(env()).ToLocalChecked(),
+      header->GetValue(env()).ToLocalChecked()
+    };
+    headers.push_back(Array::New(env()->isolate(), pair, arraysize(pair)));
+  }
+  Local<Value> argv[] = {
+      Array::New(
+          env()->isolate(),
+          headers.data(),
+          headers.size()),
+      Integer::New(
+          env()->isolate(),
+          headers_kind_)
+  };
+  headers_.clear();
+  BaseObjectPtr<QuicStream> ptr(this);
+  MakeCallback(env()->quic_on_stream_headers_function(), arraysize(argv), argv);
+}
+
 void QuicStream::MemoryInfo(MemoryTracker* tracker) const {
   tracker->TrackField("buffer", &streambuf_);
   tracker->TrackField("data_rx_rate", data_rx_rate_);
   tracker->TrackField("data_rx_size", data_rx_size_);
   tracker->TrackField("data_rx_ack", data_rx_ack_);
   tracker->TrackField("stats_buffer", stats_buffer_);
+}
+
+bool QuicStream::SubmitInformation(v8::Local<v8::Array> headers) {
+  return session_->SubmitInformation(GetID(), headers);
+}
+
+bool QuicStream::SubmitHeaders(v8::Local<v8::Array> headers, uint32_t flags) {
+  return session_->SubmitHeaders(GetID(), headers, flags);
+}
+
+bool QuicStream::SubmitTrailers(v8::Local<v8::Array> headers) {
+  return session_->SubmitTrailers(GetID(), headers);
 }
 
 // JavaScript API
@@ -442,6 +499,41 @@ void QuicStreamShutdown(const FunctionCallbackInfo<Value>& args) {
       family == QUIC_ERROR_APPLICATION ?
           code : static_cast<uint64_t>(NGTCP2_NO_ERROR));
 }
+
+// Requests transmission of a block of informational headers. Not all
+// QUIC Applications will support headers. If headers are not supported,
+// This will set the return value to false, otherwise the return value
+// is set to true
+void QuicStreamSubmitInformation(const FunctionCallbackInfo<Value>& args) {
+  QuicStream* stream;
+  ASSIGN_OR_RETURN_UNWRAP(&stream, args.Holder());
+  CHECK(args[0]->IsArray());
+  args.GetReturnValue().Set(stream->SubmitInformation(args[0].As<Array>()));
+}
+
+// Requests transmission of a block of initial headers. Not all
+// QUIC Applications will support headers. If headers are not supported,
+// this will set the return value to false, otherwise the return value
+// is set to true. For http/3, these may be request or response headers.
+void QuicStreamSubmitHeaders(const FunctionCallbackInfo<Value>& args) {
+  QuicStream* stream;
+  ASSIGN_OR_RETURN_UNWRAP(&stream, args.Holder());
+  CHECK(args[0]->IsArray());
+  uint32_t flags = QUICSTREAM_HEADER_FLAGS_NONE;
+  CHECK(args[1]->Uint32Value(stream->env()->context()).To(&flags));
+  args.GetReturnValue().Set(stream->SubmitHeaders(args[0].As<Array>(), flags));
+}
+
+// Requests transmission of a block of trailing headers. Not all
+// QUIC Applications will support headers. If headers are not supported,
+// this will set the return value to false, otherwise the return value
+// is set to true.
+void QuicStreamSubmitTrailers(const FunctionCallbackInfo<Value>& args) {
+  QuicStream* stream;
+  ASSIGN_OR_RETURN_UNWRAP(&stream, args.Holder());
+  CHECK(args[0]->IsArray());
+  args.GetReturnValue().Set(stream->SubmitTrailers(args[0].As<Array>()));
+}
 }  // namespace
 
 void QuicStream::Initialize(
@@ -460,6 +552,9 @@ void QuicStream::Initialize(
   env->SetProtoMethod(stream, "destroy", QuicStreamDestroy);
   env->SetProtoMethod(stream, "shutdownStream", QuicStreamShutdown);
   env->SetProtoMethod(stream, "id", QuicStreamGetID);
+  env->SetProtoMethod(stream, "submitInformation", QuicStreamSubmitInformation);
+  env->SetProtoMethod(stream, "submitHeaders", QuicStreamSubmitHeaders);
+  env->SetProtoMethod(stream, "submitTrailers", QuicStreamSubmitTrailers);
   env->set_quicserverstream_constructor_template(streamt);
   target->Set(env->context(),
               class_name,

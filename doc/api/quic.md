@@ -1026,7 +1026,7 @@ added: REPLACEME
 added: REPLACEME
 -->
 
-Emitted when the `QuicStream` is close abruptly before the readable
+Emitted when the `QuicStream` is closed abruptly before the readable
 or writable side has closed naturally.
 
 The callback is invoked with two arguments:
@@ -1039,6 +1039,9 @@ The callback is invoked with two arguments:
 <!-- YAML
 added: REPLACEME
 -->
+
+Emitted when the `QuicStream` has is completely closed and the underlying
+resources have been freed.
 
 ### Event: `'data'`
 <!-- YAML
@@ -1054,6 +1057,70 @@ added: REPLACEME
 <!-- YAML
 added: REPLACEME
 -->
+
+### Event: `'informationalHeaders'`
+<!-- YAML
+added: REPLACEME
+-->
+
+Emitted when the `QuicStream` has received a block of informational headers.
+
+Support for headers depends entirely on the QUIC Application used as identified
+by the `alpn` configuration option. In QUIC Applications that support headers,
+informational header blocks typically come before initial headers.
+
+The event handler is invoked with a single argument representing the block of
+Headers as an object.
+
+```js
+stream('informationalHeaders', (headers) => {
+  // Use headers
+});
+```
+
+### Event: `'initialHeaders'`
+<!-- YAML
+added: REPLACEME
+-->
+
+Emitted when the `QuicStream` has received a block of initial headers.
+
+Support for headers depends entirely on the QUIC Application used as identified
+by the `alpn` configuration option. HTTP/3, for instance, supports two kinds of
+initial headers: request headers for HTTP request messages and response headers
+for HTTP response messages. For HTTP/3 QUIC streams, request and response
+headers are each emitted using the `'initialHeaders'` event.
+
+The event handler is invoked with a single argument representing the block of
+Headers as an object.
+
+```js
+stream('initialHeaders', (headers) => {
+  // Use headers
+});
+```
+
+### Event: `'trailingHeaders'`
+<!-- YAML
+added: REPLACEME
+-->
+
+Emitted when the `QuicStream` has received a block of trailing headers.
+
+Support for headers depends entirely on the QUIC Application used as identified
+by the `alpn` configuration option. Trailing headers typically follow any data
+transmitted on the `QuicStream`, and therefore typically emit sometime after the
+last `'data'` event but before the `'close'` event. The precise timing may
+vary from one QUIC application to another.
+
+The event handler is invoked with a single argument representing the block of
+Headers as an object.
+
+```js
+stream('trailingHeaders', (headers) => {
+  // Use headers
+});
+```
 
 ### Event: `'readable'`
 <!-- YAML

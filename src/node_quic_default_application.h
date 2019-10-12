@@ -16,6 +16,20 @@ class DefaultApplication : public QuicApplication {
   explicit DefaultApplication(QuicSession* session);
 
   bool Initialize() override;
+
+  bool ReceiveStreamData(
+      int64_t stream_id,
+      int fin,
+      const uint8_t* data,
+      size_t datalen,
+      uint64_t offset) override;
+  void AcknowledgeStreamData(
+      int64_t stream_id,
+      uint64_t offset,
+      size_t datalen) override;
+
+  bool SendPendingData() override;
+  bool SendStreamData(QuicStream* stream) override;
 };
 
 }  // namespace quic
