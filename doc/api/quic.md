@@ -84,6 +84,7 @@ added: REPLACEME
     recently validated addresses are remembered. Setting `validateAddressLRU`
     to `true`, will enable the `validateAddress` option as well. Default:
     `false`.
+  * `ipv6Only` {boolean}
 
 Creates a new `QuicSocket` instance.
 
@@ -1118,8 +1119,8 @@ added: REPLACEME
   * `length` {number} The amount of data from the fd to send.
     Default: `-1`.
 
-Instead of using a `Quicstream` as a writable stream, send data from a given file
-descriptor.
+Instead of using a `Quicstream` as a writable stream, send data from a given
+file descriptor.
 
 If `offset` is set to a non-negative number, reading starts from that position
 and the file offset will not be advanced.
@@ -1146,8 +1147,8 @@ added: REPLACEME
   * `length` {number} The amount of data from the fd to send.
     Default: `-1`.
 
-Instead of using a `QuicStream` as a writable stream, send data from a given file
-path.
+Instead of using a `QuicStream` as a writable stream, send data from a given
+file path.
 
 The `options.onError` callback will be called if the file could not be opened.
 If `offset` is set to a non-negative number, reading starts from that position.
