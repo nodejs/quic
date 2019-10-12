@@ -524,6 +524,7 @@
         'src/js_native_api_v8.h',
         'src/js_native_api_v8_internals.h',
         'src/js_stream.cc',
+        'src/js_udp_wrap.cc',
         'src/module_wrap.cc',
         'src/node.cc',
         'src/node_api.cc',
