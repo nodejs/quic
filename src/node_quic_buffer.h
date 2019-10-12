@@ -11,12 +11,15 @@
 #include "uv.h"
 #include "v8.h"
 
+#include <array>
 #include <algorithm>
 #include <functional>
 #include <vector>
 
 namespace node {
 namespace quic {
+
+constexpr size_t MAX_VECTOR_COUNT = 16;
 
 // QuicBuffer an internal linked list of uv_buf_t instances
 // representing data that is to be sent. All data in the
@@ -268,15 +271,40 @@ class QuicBuffer : public MemoryRetainer {
   // Drain the remaining buffers into the given vector.
   // The function will return the number of positions the
   // read head_ can be advanced.
-  size_t DrainInto(std::vector<uv_buf_t>* list, size_t* length = nullptr) {
-    return DrainInto([&](uv_buf_t buf) { list->push_back(buf); }, length);
+  size_t DrainInto(
+      std::vector<uv_buf_t>* list,
+      size_t* length = nullptr,
+      size_t max_count = MAX_VECTOR_COUNT) {
+    return DrainInto(
+        [&](uv_buf_t buf) { list->push_back(buf); },
+        length,
+        max_count);
   }
 
-  size_t DrainInto(std::vector<ngtcp2_vec>* list, size_t* length = nullptr) {
+  template <typename T>
+  size_t DrainInto(
+      std::vector<T>* list,
+      size_t* length = nullptr,
+      size_t max_count = MAX_VECTOR_COUNT) {
     return DrainInto([&](uv_buf_t buf) {
-      list->push_back(ngtcp2_vec {
+      list->push_back(T {
         reinterpret_cast<uint8_t*>(buf.base), buf.len });
-    }, length);
+    }, length, max_count);
+  }
+
+  template <typename T>
+  size_t DrainInto(
+      T* list,
+      size_t* count,
+      size_t* length = nullptr,
+      size_t max_count = MAX_VECTOR_COUNT) {
+    *count = 0;
+    return DrainInto([&](uv_buf_t buf) {
+      list[*count]->base = reinterpret_cast<uint8_t*>(buf.base);
+      list[*count]->len = buf.len;
+      *count += 1;
+    }, length, max_count);
+    CHECK_LE(*count, max_count);
   }
 
   // Returns the current read head or an empty buffer if
@@ -335,14 +363,16 @@ class QuicBuffer : public MemoryRetainer {
 
  private:
   template <typename Fn>
-  size_t DrainInto(Fn&& add_to_list, size_t* length) {
+  size_t DrainInto(Fn&& add_to_list, size_t* length, size_t max_count) {
     size_t len = 0;
+    size_t count = 0;
     bool seen_head = false;
     quic_buffer_chunk* pos = head_;
     if (pos == nullptr)
       return 0;
     if (length != nullptr) *length = 0;
-    while (pos != nullptr) {
+    while (pos != nullptr && count < max_count) {
+      count++;
       size_t datalen = pos->buf.len - pos->roffset;
       if (length != nullptr) *length += datalen;
       add_to_list(uv_buf_init(pos->buf.base + pos->roffset, datalen));

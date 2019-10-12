@@ -73,7 +73,8 @@ server.on('session', common.mustCall((session) => {
       {
         children: [
           { node_name: 'QuicServerSession', edge_name: 'wrapped' },
-          { node_name: 'Node / QuicCryptoContext', edge_name: 'crypto_context' },
+          { node_name: 'Node / QuicCryptoContext',
+            edge_name: 'crypto_context' },
           { node_name: 'Node / HistogramBase', edge_name: 'crypto_rx_ack' },
           { node_name: 'Node / HistogramBase',
             edge_name: 'crypto_handshake_rate' },
@@ -94,7 +95,8 @@ server.on('session', common.mustCall((session) => {
       {
         children: [
           { node_name: 'QuicClientSession', edge_name: 'wrapped' },
-          { node_name: 'Node / QuicCryptoContext', edge_name: 'crypto_context' },
+          { node_name: 'Node / QuicCryptoContext',
+            edge_name: 'crypto_context' },
           { node_name: 'Node / HistogramBase', edge_name: 'crypto_rx_ack' },
           { node_name: 'Node / HistogramBase',
             edge_name: 'crypto_handshake_rate' },

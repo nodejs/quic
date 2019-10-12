@@ -477,8 +477,10 @@ bool QuicCryptoContext::OnSecrets(
     size_t secretlen) {
 
   OnScopeLeave maybe_init_app([&]() {
-    if (level == NGTCP2_CRYPTO_LEVEL_APP)
+    if (level == NGTCP2_CRYPTO_LEVEL_APP) {
+      // TODO(@jasnell): Fail if init returns false
       session_->InitApplication();
+    }
   });
 
   if (level == NGTCP2_CRYPTO_LEVEL_APP) {
@@ -660,6 +662,47 @@ void QuicCryptoContext::WriteHandshake(
           buffer.data,
           datalen), 0);
   handshake_[level].Push(std::move(buffer));
+}
+
+void QuicApplication::StreamClose(
+    int64_t stream_id,
+    uint64_t app_error_code) {
+
+  Environment* env = Session()->env();
+  Local<Value> argv[] = {
+    Number::New(env->isolate(), static_cast<double>(stream_id)),
+    Number::New(env->isolate(), static_cast<double>(app_error_code))
+  };
+
+  // Grab a shared pointer to this to prevent the QuicSession
+  // from being freed while the MakeCallback is running.
+  BaseObjectPtr<QuicSession> ptr(Session());
+  Session()->MakeCallback(
+      env->quic_on_stream_close_function(),
+      arraysize(argv),
+      argv);
+}
+
+void QuicApplication::StreamReset(
+    int64_t stream_id,
+    uint64_t final_size,
+    uint64_t app_error_code) {
+  Environment* env = Session()->env();
+  HandleScope scope(env->isolate());
+  Context::Scope context_scope(env->context());
+
+  Local<Value> argv[] = {
+    Number::New(env->isolate(), static_cast<double>(stream_id)),
+    Number::New(env->isolate(), static_cast<double>(app_error_code)),
+    Number::New(env->isolate(), static_cast<double>(final_size))
+  };
+  // Grab a shared pointer to this to prevent the QuicSession
+  // from being freed while the MakeCallback is running.
+  BaseObjectPtr<QuicSession> ptr(Session());
+  Session()->MakeCallback(
+      env->quic_on_stream_reset_function(),
+      arraysize(argv),
+      argv);
 }
 
 QuicApplication::QuicApplication(QuicSession* session) : session_(session) {}
@@ -874,12 +917,7 @@ void QuicSession::AckedStreamDataOffset(
         " bytes of stream %" PRId64 " data",
         datalen, stream_id);
 
-  QuicStream* stream = FindStream(stream_id);
-  // It is possible that the QuicStream has already been destroyed and
-  // removed from the collection. In such cases, we want to ignore the
-  // callback as there is nothing further to do.
-  if (LIKELY(stream != nullptr))
-    stream->AckedDataOffset(offset, datalen);
+  application_->AcknowledgeStreamData(stream_id, offset, datalen);
 }
 
 void QuicSession::AddToSocket(QuicSocket* socket) {
@@ -1070,6 +1108,19 @@ void QuicSession::ExtendMaxStreamData(int64_t stream_id, uint64_t max_data) {
   Debug(this,
         "Extending max stream %" PRId64 " data to %" PRIu64,
         stream_id, max_data);
+  application_->ExtendMaxStreamData(stream_id, max_data);
+}
+
+void QuicSession::ExtendMaxStreamsRemoteUni(uint64_t max_streams) {
+  Debug(this, "Extend remote max unidirectional streams: %" PRIu64,
+        max_streams);
+  application_->ExtendMaxStreamsRemoteUni(max_streams);
+}
+
+void QuicSession::ExtendMaxStreamsRemoteBidi(uint64_t max_streams) {
+  Debug(this, "Extend remote max bidirectional streams: %" PRIu64,
+        max_streams);
+  application_->ExtendMaxStreamsRemoteBidi(max_streams);
 }
 
 void QuicSession::ExtendMaxStreamsUni(uint64_t max_streams) {
@@ -1085,12 +1136,17 @@ void QuicSession::ExtendMaxStreamsBidi(uint64_t max_streams) {
 }
 
 void QuicSession::ExtendStreamOffset(QuicStream* stream, size_t amount) {
-  Debug(this, "Extending max stream %" PRId64 " offset by %d bytes",
+  Debug(this, "Extending max stream %" PRId64 " offset by %" PRId64 " bytes",
         stream->GetID(), amount);
   ngtcp2_conn_extend_max_stream_offset(
       Connection(),
       stream->GetID(),
       amount);
+}
+
+void QuicSession::ExtendOffset(size_t amount) {
+  Debug(this, "Extending session offset by %" PRId64 " bytes", amount);
+  ngtcp2_conn_extend_max_offset(Connection(), amount);
 }
 
 // Copies the local transport params into the given struct for serialization.
@@ -1476,53 +1532,35 @@ bool QuicSession::ReceivePacket(
 // Called by ngtcp2 when a chunk of stream data has been received. If
 // the stream does not yet exist, it is created, then the data is
 // forwarded on.
-void QuicSession::ReceiveStreamData(
+bool QuicSession::ReceiveStreamData(
     int64_t stream_id,
     int fin,
     const uint8_t* data,
     size_t datalen,
     uint64_t offset) {
+  OnScopeLeave leave([&]() {
+    // This extends the flow control window for the entire session
+    // but not for the individual Stream. Stream flow control is
+    // only expanded as data is read on the JavaScript side.
+    ExtendOffset(datalen);
+  });
+
   // QUIC does not permit zero-length stream packets if
   // fin is not set. ngtcp2 prevents these from coming
   // through but just in case of regression in that impl,
   // let's double check and simply ignore such packets
   // so we do not commit any resources.
   if (UNLIKELY(fin == 0 && datalen == 0))
-    return;
+    return true;
 
   if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
-    return;
-
-  OnScopeLeave leave([&]() {
-    // This extends the flow control window for the entire session
-    // but not for the individual Stream. Stream flow control is
-    // only expanded as data is read on the JavaScript side.
-    ngtcp2_conn_extend_max_offset(Connection(), datalen);
-  });
+    return false;
 
   HandleScope scope(env()->isolate());
   Context::Scope context_scope(env()->context());
 
-  QuicStream* stream = FindStream(stream_id);
-  if (stream == nullptr) {
-    // Shutdown the stream explicitly if the session is being closed.
-    if (IsFlagSet(QUICSESSION_FLAG_GRACEFUL_CLOSING)) {
-      ngtcp2_conn_shutdown_stream(Connection(), stream_id, NGTCP2_ERR_CLOSING);
-      return;
-    }
-
-    // One potential DOS attack vector is to send a bunch of
-    // empty stream frames to commit resources. Check that
-    // here. Essentially, we only want to create a new stream
-    // if the datalen is greater than 0, otherwise, we ignore
-    // the packet.
-    if (datalen == 0)
-      return;
-
-    stream = CreateStream(stream_id);
-  }
-  CHECK_NOT_NULL(stream);
-  stream->ReceiveData(fin, data, datalen, offset);
+  // From here, we defer to the QuicApplication specific processing logic
+  return application_->ReceiveStreamData(stream_id, fin, data, datalen, offset);
 }
 
 // Removes the given connection id from the QuicSession.
@@ -1593,31 +1631,6 @@ void QuicSession::UpdateRetransmitTimer(uint64_t timeout) {
   DCHECK_NOT_NULL(retransmit_);
   retransmit_->Update(timeout);
 }
-
-namespace {
-void Consume(ngtcp2_vec** pvec, size_t* pcnt, size_t len) {
-  ngtcp2_vec* v = *pvec;
-  size_t cnt = *pcnt;
-
-  for (; cnt > 0; --cnt, ++v) {
-    if (v->len > len) {
-      v->len -= len;
-      v->base += len;
-      break;
-    }
-    len -= v->len;
-  }
-
-  *pvec = v;
-  *pcnt = cnt;
-}
-
-int IsEmpty(const ngtcp2_vec* vec, size_t cnt) {
-  size_t i;
-  for (i = 0; i < cnt && vec[i].len == 0; ++i) {}
-  return i == cnt;
-}
-}  // anonymous namespace
 
 // Transmits either a protocol or application connection
 // close to the peer. The choice of which is send is
@@ -1723,6 +1736,15 @@ bool QuicSession::SelectPreferredAddress(
   return true;
 }
 
+bool QuicSession::SendPacket(
+  MallocedBuffer<uint8_t> buf,
+  QuicPathStorage* path) {
+  sendbuf_.Push(std::move(buf));
+  // TODO(@jasnell): Update the local endpoint also?
+  remote_address_.Update(&path->path.remote);
+  return SendPacket("stream data");
+}
+
 // Sends buffered stream data.
 bool QuicSession::SendStreamData(QuicStream* stream) {
   // Because SendStreamData calls ngtcp2_conn_writev_streams,
@@ -1737,120 +1759,16 @@ bool QuicSession::SendStreamData(QuicStream* stream) {
   //   - the QuicSession is in the draining period,
   //   - the QuicSession is in the closing period, or
   //   - we are blocked from sending any data because of flow control
-  if (IsFlagSet(QUICSESSION_FLAG_DESTROYED) ||
+  if (IsDestroyed() ||
       !stream->WasEverWritable() ||
       stream->HasSentFin() ||
       IsInDrainingPeriod() ||
       IsInClosingPeriod() ||
-      ngtcp2_conn_get_max_data_left(Connection()) == 0) {
+      GetMaxDataLeft() == 0) {
     return true;
   }
 
-  ssize_t ndatalen = 0;
-  QuicPathStorage path;
-
-  std::vector<ngtcp2_vec> vec;
-
-  // remaining is the total number of bytes stored in the vector
-  // that are remaining to be serialized.
-  size_t remaining = stream->DrainInto(&vec);
-  Debug(stream, "Sending %d bytes of stream data. Still writable? %s",
-        remaining,
-        stream->IsWritable()?"yes":"no");
-
-  // c and v are used to track the current serialization position
-  // for each iteration of the for(;;) loop below.
-  size_t c = vec.size();
-  ngtcp2_vec* v = vec.data();
-
-  // If there is no stream data and we're not sending fin,
-  // Just return without doing anything.
-  if (c == 0 && stream->IsWritable()) {
-    Debug(stream, "There is no stream data to send");
-    return true;
-  }
-
-  for (;;) {
-    Debug(stream, "Starting packet serialization. Remaining? %d", remaining);
-    MallocedBuffer<uint8_t> dest(max_pktlen_);
-    ssize_t nwrite =
-        ngtcp2_conn_writev_stream(
-            Connection(),
-            &path.path,
-            dest.data,
-            max_pktlen_,
-            &ndatalen,
-            NGTCP2_WRITE_STREAM_FLAG_NONE,
-            stream->GetID(),
-            stream->IsWritable() ? 0 : 1,
-            reinterpret_cast<const ngtcp2_vec*>(v),
-            c,
-            uv_hrtime());
-
-    if (nwrite <= 0) {
-      switch (nwrite) {
-        case 0:
-          // If zero is returned, we've hit congestion limits. We need to stop
-          // serializing data and try again later to empty the queue once the
-          // congestion window has expanded.
-          Debug(stream, "Congestion limit reached");
-          return true;
-        case NGTCP2_ERR_PKT_NUM_EXHAUSTED:
-          // There is a finite number of packets that can be sent
-          // per connection. Once those are exhausted, there's
-          // absolutely nothing we can do except immediately
-          // and silently tear down the QuicSession. This has
-          // to be silent because we can't even send a
-          // CONNECTION_CLOSE since even those require a
-          // packet number.
-          SilentClose();
-          return false;
-        case NGTCP2_ERR_STREAM_DATA_BLOCKED:
-          Debug(stream, "Stream data blocked");
-          return true;
-        case NGTCP2_ERR_STREAM_SHUT_WR:
-          Debug(stream, "Stream writable side is closed");
-          return true;
-        case NGTCP2_ERR_STREAM_NOT_FOUND:
-          Debug(stream, "Stream does not exist");
-          return true;
-        default:
-          Debug(stream, "Error writing packet. Code %" PRIu64, nwrite);
-          SetLastError(QUIC_ERROR_SESSION, static_cast<int>(nwrite));
-          return false;
-      }
-    }
-
-    if (ndatalen > 0) {
-      remaining -= ndatalen;
-      Debug(stream,
-            "%" PRIu64 " stream bytes serialized into packet. %d remaining",
-            ndatalen,
-            remaining);
-      Consume(&v, &c, ndatalen);
-      stream->Commit(ndatalen);
-    }
-
-    Debug(stream, "Sending %" PRIu64 " bytes in serialized packet", nwrite);
-    dest.Realloc(nwrite);
-    sendbuf_.Push(std::move(dest));
-    remote_address_.Update(&path.path.remote);
-
-    if (!SendPacket("stream data"))
-      return false;
-
-    if (IsEmpty(v, c)) {
-      // fin will have been set if all of the data has been
-      // encoded in the packet and IsWritable() returns false.
-      if (!stream->IsWritable()) {
-        Debug(stream, "Final stream has been sent");
-        stream->SetFinSent();
-      }
-      break;
-    }
-  }
-
-  return true;
+  return application_->SendStreamData(stream);
 }
 
 // Transmits the current contents of the internal sendbuf_ to the peer.
@@ -1904,24 +1822,9 @@ void QuicSession::SendPendingData() {
     return HandleError();
   }
 
-  // Try purging any pending stream data
-  // TODO(@jasnell): Right now this iterates through the streams
-  // in the order they were created. Later, we'll want to implement
-  // a prioritization scheme to allow higher priority streams to
-  // be serialized first.
-  for (const auto& stream : streams_) {
-    if (!SendStreamData(stream.second.get())) {
-      Debug(this, "Error sending stream data");
-      return HandleError();
-    }
-
-    // Check to make sure QuicSession state did not change in this
-    // iteration
-    if (IsInDrainingPeriod() ||
-        IsInClosingPeriod() ||
-        IsFlagSet(QUICSESSION_FLAG_DESTROYED)) {
-      return;
-    }
+  if (!application_->SendPendingData()) {
+    Debug(this, "Error sending QUIC application data");
+    HandleError();
   }
 
   // Otherwise, serialize and send any packets waiting in the queue.
@@ -2049,7 +1952,7 @@ bool QuicSession::SetSocket(QuicSocket* socket, bool nat_rebinding) {
   return true;
 }
 
-int QuicSession::ShutdownStream(int64_t stream_id, uint64_t code) {
+void QuicSession::ShutdownStream(int64_t stream_id, uint64_t code) {
   // First, update the internal ngtcp2 state of the given stream
   // and schedule the STOP_SENDING and RESET_STREAM frames as
   // appropriate.
@@ -2064,8 +1967,6 @@ int QuicSession::ShutdownStream(int64_t stream_id, uint64_t code) {
   // RESET_STREAM and STOP_SENDING frames to be transmitted.
   if (!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this))
     SendPendingData();
-
-  return 0;
 }
 
 // Silent Close must start with the JavaScript side, which must
@@ -2152,25 +2053,13 @@ void QuicSession::StreamClose(int64_t stream_id, uint64_t app_error_code) {
   if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return;
 
-  if (!HasStream(stream_id))
-    return;
-
   Debug(this, "Closing stream %" PRId64 " with code %" PRIu64,
         stream_id,
         app_error_code);
 
-  HandleScope scope(env()->isolate());
-  Context::Scope context_scope(env()->context());
-
-  Local<Value> argv[] = {
-    Number::New(env()->isolate(), static_cast<double>(stream_id)),
-    Number::New(env()->isolate(), static_cast<double>(app_error_code))
-  };
-
-  // Grab a shared pointer to this to prevent the QuicSession
-  // from being freed while the MakeCallback is running.
-  BaseObjectPtr<QuicSession> ptr(this);
-  MakeCallback(env()->quic_on_stream_close_function(), arraysize(argv), argv);
+  // If the stream does not actually exist, just ignore
+  if (HasStream(stream_id))
+    application_->StreamClose(stream_id, app_error_code);
 }
 
 void QuicSession::StopIdleTimer() {
@@ -2195,7 +2084,8 @@ void QuicSession::StreamOpen(int64_t stream_id) {
         stream_id,
         NGTCP2_ERR_CLOSING);
   }
-  Debug(this, "Stream %" PRId64 " opened but not yet created.", stream_id);
+  Debug(this, "Stream %" PRId64 " opened", stream_id);
+  return application_->StreamOpen(stream_id);
 }
 
 // Called when the QuicSession has received a RESET_STREAM frame from the
@@ -2223,9 +2113,6 @@ void QuicSession::StreamReset(
   if (IsFlagSet(QUICSESSION_FLAG_DESTROYED))
     return;
 
-  if (!HasStream(stream_id))
-    return;
-
   Debug(this,
         "Reset stream %" PRId64 " with code %" PRIu64
         " and final size %" PRIu64,
@@ -2233,18 +2120,8 @@ void QuicSession::StreamReset(
         app_error_code,
         final_size);
 
-  HandleScope scope(env()->isolate());
-  Context::Scope context_scope(env()->context());
-
-  Local<Value> argv[] = {
-    Number::New(env()->isolate(), static_cast<double>(stream_id)),
-    Number::New(env()->isolate(), static_cast<double>(app_error_code)),
-    Number::New(env()->isolate(), static_cast<double>(final_size))
-  };
-  // Grab a shared pointer to this to prevent the QuicSession
-  // from being freed while the MakeCallback is running.
-  BaseObjectPtr<QuicSession> ptr(this);
-  MakeCallback(env()->quic_on_stream_reset_function(), arraysize(argv), argv);
+ if (HasStream(stream_id))
+   application_->StreamReset(stream_id, final_size, app_error_code);
 }
 
 void QuicSession::UpdateIdleTimer() {
@@ -2352,6 +2229,25 @@ bool QuicSession::WritePackets(const char* diagnostic_label) {
     if (!SendPacket(diagnostic_label))
       return false;
   }
+}
+
+bool QuicSession::SubmitInformation(
+    int64_t stream_id,
+    v8::Local<v8::Array> headers) {
+  return application_->SubmitInformation(stream_id, headers);
+}
+
+bool QuicSession::SubmitHeaders(
+    int64_t stream_id,
+    v8::Local<v8::Array> headers,
+    uint32_t flags) {
+  return application_->SubmitHeaders(stream_id, headers, flags);
+}
+
+bool QuicSession::SubmitTrailers(
+    int64_t stream_id,
+    v8::Local<v8::Array> headers) {
+  return application_->SubmitTrailers(stream_id, headers);
 }
 
 void QuicSession::MemoryInfo(MemoryTracker* tracker) const {
@@ -2712,6 +2608,26 @@ int QuicSession::OnExtendMaxStreamsUni(
   return 0;
 }
 
+int QuicSession::OnExtendMaxStreamsRemoteUni(
+    ngtcp2_conn* conn,
+    uint64_t max_streams,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
+  session->ExtendMaxStreamsRemoteUni(max_streams);
+  return 0;
+}
+
+int QuicSession::OnExtendMaxStreamsRemoteBidi(
+    ngtcp2_conn* conn,
+    uint64_t max_streams,
+    void* user_data) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+  QuicSession::Ngtcp2CallbackScope callback_scope(session);
+  session->ExtendMaxStreamsRemoteUni(max_streams);
+  return 0;
+}
+
 int QuicSession::OnExtendMaxStreamData(
     ngtcp2_conn* conn,
     int64_t stream_id,
@@ -2759,8 +2675,8 @@ int QuicSession::OnReceiveStreamData(
     void* stream_user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
   QuicSession::Ngtcp2CallbackScope callback_scope(session);
-  session->ReceiveStreamData(stream_id, fin, data, datalen, offset);
-  return 0;
+  return session->ReceiveStreamData(stream_id, fin, data, datalen, offset) ?
+      0 : NGTCP2_ERR_CALLBACK_FAILURE;
 }
 
 // Called by ngtcp2 when a new stream has been opened
@@ -2959,8 +2875,8 @@ const ngtcp2_conn_callbacks QuicSession::callbacks[2] = {
     OnPathValidation,
     OnSelectPreferredAddress,
     OnStreamReset,
-    OnExtendMaxStreamsBidi,
-    OnExtendMaxStreamsUni,
+    OnExtendMaxStreamsRemoteBidi,
+    OnExtendMaxStreamsRemoteUni,
     OnExtendMaxStreamData
   },
   // NGTCP2_CRYPTO_SIDE_SERVER
@@ -2989,8 +2905,8 @@ const ngtcp2_conn_callbacks QuicSession::callbacks[2] = {
     OnPathValidation,
     nullptr,  // select_preferred_addr
     OnStreamReset,
-    OnExtendMaxStreamsBidi,
-    OnExtendMaxStreamsUni,
+    OnExtendMaxStreamsRemoteBidi,
+    OnExtendMaxStreamsRemoteUni,
     OnExtendMaxStreamData
   }
 };

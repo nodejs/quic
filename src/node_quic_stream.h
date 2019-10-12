@@ -11,12 +11,31 @@
 #include "stream_base-inl.h"
 #include "v8.h"
 
-#include <deque>
+#include <vector>
 
 namespace node {
 namespace quic {
 
 class QuicSession;
+
+enum QuicStreamHeaderFlags : uint32_t {
+  // No flags
+  QUICSTREAM_HEADER_FLAGS_NONE = 0,
+
+  // Set if the initial headers are considered
+  // terminal (that is, the stream should be closed
+  // after transmitting the headers). If headers are
+  // not supported by the QUIC Application, flag is
+  // ignored.
+  QUICSTREAM_HEADER_FLAGS_TERMINAL = 1
+};
+
+enum QuicStreamHeadersKind : int {
+  QUICSTREAM_HEADERS_KIND_NONE = 0,
+  QUICSTREAM_HEADERS_KIND_INFORMATIONAL,
+  QUICSTREAM_HEADERS_KIND_INITIAL,
+  QUICSTREAM_HEADERS_KIND_TRAILING
+};
 
 // QuicStream's are simple data flows that, fortunately, do not
 // require much. They may be:
@@ -86,6 +105,20 @@ class QuicSession;
 // ngtcp2 level.
 class QuicStream : public AsyncWrap, public StreamBase {
  public:
+  // Header is a base class for implementing QUIC application
+  // specific headers. Each type of QUIC application may have
+  // different internal representations for a header name+value
+  // pair. QuicApplication implementations that support headers
+  // per stream must create a specialization of the Header class.
+  class Header {
+   public:
+    Header() {}
+
+    virtual ~Header() {}
+    virtual v8::MaybeLocal<v8::String> GetName(Environment* env) const = 0;
+    virtual v8::MaybeLocal<v8::String> GetValue(Environment* env) const = 0;
+  };
+
   enum QuicStreamStates : uint32_t {
     // QuicStream is fully open. Readable and Writable
     QUICSTREAM_FLAG_INITIAL = 0x0,
@@ -278,6 +311,10 @@ class QuicStream : public AsyncWrap, public StreamBase {
       size_t datalen,
       uint64_t offset);
 
+  bool SubmitInformation(v8::Local<v8::Array> headers);
+  bool SubmitHeaders(v8::Local<v8::Array> headers, uint32_t flags);
+  bool SubmitTrailers(v8::Local<v8::Array> headers);
+
   // Required for StreamBase
   int ReadStart() override;
 
@@ -291,9 +328,44 @@ class QuicStream : public AsyncWrap, public StreamBase {
 
   void Commit(ssize_t amount);
 
-  size_t DrainInto(std::vector<ngtcp2_vec>* vec);
+  template <typename T>
+  inline size_t DrainInto(
+      std::vector<T>* vec,
+      size_t max_count = MAX_VECTOR_COUNT) {
+    CHECK(!IsDestroyed());
+    size_t length = 0;
+    streambuf_.DrainInto(vec, &length, max_count);
+    return length;
+  }
+
+  template <typename T>
+  inline size_t DrainInto(
+      T* vec,
+      size_t* count,
+      size_t max_count = MAX_VECTOR_COUNT) {
+    CHECK(!IsDestroyed());
+    size_t length = 0;
+    streambuf_.DrainInto(vec, count, &length, max_count);
+    return length;
+  }
 
   AsyncWrap* GetAsyncWrap() override { return this; }
+
+  // Some QUIC applications support headers, others do not.
+  // The following methods allow consistent handling of
+  // headers at the QuicStream level regardless of the
+  // protocol. For applications that do not support headers,
+  // these are simply not used.
+  void BeginHeaders(QuicStreamHeadersKind kind = QUICSTREAM_HEADERS_KIND_NONE);
+
+  // Returns false if the header cannot be added. This will
+  // typically only happen if a maximimum number of headers
+  // has been reached.
+  bool AddHeader(std::unique_ptr<Header> header);
+  void EndHeaders();
+
+  // Sets the kind of headers currently being processed.
+  void SetHeadersKind(QuicStreamHeadersKind kind);
 
   void MemoryInfo(MemoryTracker* tracker) const override;
 
@@ -355,6 +427,9 @@ class QuicStream : public AsyncWrap, public StreamBase {
   QuicBuffer streambuf_;
   size_t available_outbound_length_ = 0;
   size_t inbound_consumed_data_while_paused_ = 0;
+
+  std::vector<std::unique_ptr<Header>> headers_;
+  QuicStreamHeadersKind headers_kind_;
 
   struct stream_stats {
     // The timestamp at which the stream was created

@@ -3,6 +3,7 @@
 
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
+#include "node.h"
 #include "node_quic_buffer.h"
 #include "string_bytes.h"
 #include "uv.h"

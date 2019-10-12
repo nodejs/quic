@@ -318,8 +318,43 @@ class QuicCryptoContext : public MemoryRetainer {
 class QuicApplication {
  public:
   explicit QuicApplication(QuicSession* session);
+  virtual ~QuicApplication() = default;
 
   virtual bool Initialize() = 0;
+  virtual bool ReceiveStreamData(
+      int64_t stream_id,
+      int fin,
+      const uint8_t* data,
+      size_t datalen,
+      uint64_t offset) = 0;
+  virtual void AcknowledgeStreamData(
+      int64_t stream_id,
+      uint64_t offset,
+      size_t datalen) = 0;
+  virtual void ExtendMaxStreamsRemoteUni(uint64_t max_streams) {}
+  virtual void ExtendMaxStreamsRemoteBidi(uint64_t max_streams) {}
+  virtual void ExtendMaxStreamData(int64_t stream_id, uint64_t max_data) {}
+  virtual bool SendPendingData() = 0;
+  virtual bool SendStreamData(QuicStream* stream) = 0;
+  virtual void StreamClose(
+      int64_t stream_id,
+      uint64_t app_error_code);
+  virtual void StreamOpen(int64_t stream_id) {}
+  virtual void StreamReset(
+      int64_t stream_id,
+      uint64_t final_size,
+      uint64_t app_error_code);
+  virtual bool SubmitInformation(
+      int64_t stream_id,
+      v8::Local<v8::Array> headers) { return false; }
+  virtual bool SubmitHeaders(
+      int64_t stream_id,
+      v8::Local<v8::Array> headers,
+      uint32_t flags) { return false; }
+  virtual bool SubmitTrailers(
+      int64_t stream_id,
+      v8::Local<v8::Array> headers) { return false; }
+
  protected:
   QuicSession* Session() { return session_; }
   bool NeedsInit() { return needs_init_; }
@@ -453,6 +488,7 @@ class QuicSession : public AsyncWrap,
 
   QuicCryptoContext* CryptoContext() { return crypto_context_.get(); }
 
+  QuicStream* CreateStream(int64_t id);
   QuicStream* FindStream(int64_t id);
   inline bool HasStream(int64_t id);
 
@@ -465,6 +501,25 @@ class QuicSession : public AsyncWrap,
   // Returns true if Destroy() has been called and the
   // QuicSession is no longer usable.
   inline bool IsDestroyed() const;
+
+  inline size_t GetMaxPacketLength() const;
+
+  // Returns true if the QuicSession has entered the
+  // closing period following a call to ImmediateClose.
+  // While true, the QuicSession is only permitted to
+  // transmit CONNECTION_CLOSE frames until either the
+  // idle timeout period elapses or until the QuicSession
+  // is explicitly destroyed.
+  inline bool IsInClosingPeriod();
+
+  // Returns true if the QuicSession has received a
+  // CONNECTION_CLOSE frame from the peer. Once in
+  // the draining period, the QuicSession is not
+  // permitted to send any frames to the peer. The
+  // QuicSession will be silently closed after either
+  // the idle timeout period elapses or until the
+  // QuicSession is explicitly destroyed.
+  inline bool IsInDrainingPeriod();
 
   inline bool IsServer() const;
 
@@ -517,6 +572,9 @@ class QuicSession : public AsyncWrap,
   // want to allow the peer to send more data.
   void ExtendStreamOffset(QuicStream* stream, size_t amount);
 
+  // Extends the QUIC session flow control window
+  void ExtendOffset(size_t amount);
+
   // Retrieve the local transport parameters established for
   // this ngtcp2_conn
   void GetLocalTransportParams(ngtcp2_transport_params* params);
@@ -553,7 +611,7 @@ class QuicSession : public AsyncWrap,
       unsigned int flags);
 
   // Receive a chunk of QUIC stream data received from the peer
-  void ReceiveStreamData(
+  bool ReceiveStreamData(
       int64_t stream_id,
       int fin,
       const uint8_t* data,
@@ -568,6 +626,10 @@ class QuicSession : public AsyncWrap,
 
   // Causes pending QuicStream data to be serialized and sent
   bool SendStreamData(QuicStream* stream);
+
+  bool SendPacket(MallocedBuffer<uint8_t> buf, QuicPathStorage* path);
+
+  inline uint64_t GetMaxDataLeft();
 
   inline void SetLastError(
       QuicError error = {
@@ -584,6 +646,10 @@ class QuicSession : public AsyncWrap,
   bool SetSocket(QuicSocket* socket, bool nat_rebinding = false);
   int SetSession(SSL_SESSION* session);
   bool SetSession(v8::Local<v8::Value> buffer);
+
+  std::map<int64_t, BaseObjectPtr<QuicStream>>* GetStreams() {
+    return &streams_;
+  }
 
   // ShutdownStream will cause ngtcp2 to queue a
   // RESET_STREAM and STOP_SENDING frame, as appropriate,
@@ -612,9 +678,31 @@ class QuicSession : public AsyncWrap,
   // Likewise, an idle timeout may cause the stream
   // to be silently destroyed without calling
   // ShutdownStream.
-  int ShutdownStream(
+  void ShutdownStream(
       int64_t stream_id,
       uint64_t error_code = NGTCP2_APP_NOERROR);
+
+  // Submits informational headers to the QUIC Application
+  // implementation. If headers are not supported, false
+  // will be returned. Otherwise, returns true
+  bool SubmitInformation(
+      int64_t stream_id,
+      v8::Local<v8::Array> headers);
+
+  // Submits initial headers to the QUIC Application
+  // implementation. If headers are not supported, false
+  // will be returned. Otherwise, returns true
+  bool SubmitHeaders(
+      int64_t stream_id,
+      v8::Local<v8::Array> headers,
+      uint32_t flags);
+
+  // Submits trailing headers to the QUIC Application
+  // implementation. If headers are not supported, false
+  // will be returned. Otherwise, returns true
+  bool SubmitTrailers(
+      int64_t stream_id,
+      v8::Local<v8::Array> headers);
 
   // Error handling for the QuicSession. client and server
   // instances will do different things here, but ultimately
@@ -628,6 +716,39 @@ class QuicSession : public AsyncWrap,
   inline void CheckAllocatedSize(size_t previous_size) const;
   inline void IncreaseAllocatedSize(size_t size);
   inline void DecreaseAllocatedSize(size_t size);
+
+  // Immediately close the QuicSession. All currently open
+  // streams are implicitly reset and closed with RESET_STREAM
+  // and STOP_SENDING frames transmitted as necessary. A
+  // CONNECTION_CLOSE frame will be sent and the session
+  // will enter the closing period until either the idle
+  // timeout period elapses or until the QuicSession is
+  // explicitly destroyed. During the closing period,
+  // the only frames that may be transmitted to the peer
+  // are repeats of the already sent CONNECTION_CLOSE.
+  //
+  // The CONNECTION_CLOSE will use the error code set using
+  // the most recent call to SetLastError()
+  void ImmediateClose();
+
+  // Silently, and immediately close the QuicSession. This is
+  // generally only done during an idle timeout. That is, per
+  // the QUIC specification, if the session remains idle for
+  // longer than both the advertised idle timeout and three
+  // times the current probe timeout (PTO). In such cases, all
+  // currently open streams are implicitly reset and closed
+  // without sending corresponding RESET_STREAM and
+  // STOP_SENDING frames, the connection state is
+  // discarded, and the QuicSession is destroyed without
+  // sending a CONNECTION_CLOSE frame.
+  //
+  // Silent close may also be used to explicitly destroy
+  // a QuicSession that has either already entered the
+  // closing or draining periods; or in response to user
+  // code requests to forcefully terminate a QuicSession
+  // without transmitting any additional frames to the
+  // peer.
+  void SilentClose(bool stateless_reset = false);
 
   // Tracks whether or not we are currently within an ngtcp2 callback
   // function. Certain ngtcp2 APIs are not supposed to be called when
@@ -673,68 +794,19 @@ class QuicSession : public AsyncWrap,
 
   void InitApplication();
 
-  // Returns true if the QuicSession has entered the
-  // closing period following a call to ImmediateClose.
-  // While true, the QuicSession is only permitted to
-  // transmit CONNECTION_CLOSE frames until either the
-  // idle timeout period elapses or until the QuicSession
-  // is explicitly destroyed.
-  inline bool IsInClosingPeriod();
-
-  // Returns true if the QuicSession has received a
-  // CONNECTION_CLOSE frame from the peer. Once in
-  // the draining period, the QuicSession is not
-  // permitted to send any frames to the peer. The
-  // QuicSession will be silently closed after either
-  // the idle timeout period elapses or until the
-  // QuicSession is explicitly destroyed.
-  inline bool IsInDrainingPeriod();
-
   void AckedStreamDataOffset(
       int64_t stream_id,
       uint64_t offset,
       size_t datalen);
   void AssociateCID(ngtcp2_cid* cid);
 
-  // Immediately close the QuicSession. All currently open
-  // streams are implicitly reset and closed with RESET_STREAM
-  // and STOP_SENDING frames transmitted as necessary. A
-  // CONNECTION_CLOSE frame will be sent and the session
-  // will enter the closing period until either the idle
-  // timeout period elapses or until the QuicSession is
-  // explicitly destroyed. During the closing period,
-  // the only frames that may be transmitted to the peer
-  // are repeats of the already sent CONNECTION_CLOSE.
-  //
-  // The CONNECTION_CLOSE will use the error code set using
-  // the most recent call to SetLastError()
-  void ImmediateClose();
-
-  // Silently, and immediately close the QuicSession. This is
-  // generally only done during an idle timeout. That is, per
-  // the QUIC specification, if the session remains idle for
-  // longer than both the advertised idle timeout and three
-  // times the current probe timeout (PTO). In such cases, all
-  // currently open streams are implicitly reset and closed
-  // without sending corresponding RESET_STREAM and
-  // STOP_SENDING frames, the connection state is
-  // discarded, and the QuicSession is destroyed without
-  // sending a CONNECTION_CLOSE frame.
-  //
-  // Silent close may also be used to explicitly destroy
-  // a QuicSession that has either already entered the
-  // closing or draining periods; or in response to user
-  // code requests to forcefully terminate a QuicSession
-  // without transmitting any additional frames to the
-  // peer.
-  void SilentClose(bool stateless_reset = false);
-  QuicStream* CreateStream(int64_t stream_id);
-
   void DisassociateCID(const ngtcp2_cid* cid);
   void ExtendMaxStreamData(int64_t stream_id, uint64_t max_data);
   void ExtendMaxStreams(bool bidi, uint64_t max_streams);
   void ExtendMaxStreamsUni(uint64_t max_streams);
   void ExtendMaxStreamsBidi(uint64_t max_streams);
+  void ExtendMaxStreamsRemoteUni(uint64_t max_streams);
+  void ExtendMaxStreamsRemoteBidi(uint64_t max_streams);
   int GetNewConnectionID(ngtcp2_cid* cid, uint8_t* token, size_t cidlen);
   void HandshakeCompleted();
   void PathValidation(
@@ -909,6 +981,14 @@ class QuicSession : public AsyncWrap,
   static int OnStatelessReset(
       ngtcp2_conn* conn,
       const ngtcp2_pkt_stateless_reset* sr,
+      void* user_data);
+  static int OnExtendMaxStreamsRemoteUni(
+      ngtcp2_conn* conn,
+      uint64_t max_streams,
+      void* user_data);
+  static int OnExtendMaxStreamsRemoteBidi(
+      ngtcp2_conn* conn,
+      uint64_t max_streams,
       void* user_data);
 
   void UpdateIdleTimer();
