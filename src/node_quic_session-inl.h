@@ -83,6 +83,10 @@ QuicSocket* QuicSession::Socket() const {
   return socket_.get();
 }
 
+Environment* QuicApplication::env() const {
+  return Session()->env();
+}
+
 }  // namespace quic
 }  // namespace node
 

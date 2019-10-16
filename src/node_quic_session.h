@@ -315,7 +315,7 @@ class QuicCryptoContext : public MemoryRetainer {
 
 // A QuicApplication encapsulates the specific details of
 // working with a specific QUIC application (e.g. http/3).
-class QuicApplication {
+class QuicApplication : public MemoryRetainer {
  public:
   explicit QuicApplication(QuicSession* session);
   virtual ~QuicApplication() = default;
@@ -355,9 +355,11 @@ class QuicApplication {
       int64_t stream_id,
       v8::Local<v8::Array> headers) { return false; }
 
+  inline Environment* env() const;
+
  protected:
-  QuicSession* Session() { return session_; }
-  bool NeedsInit() { return needs_init_; }
+  QuicSession* Session() const { return session_; }
+  bool NeedsInit() const { return needs_init_; }
   void SetInitDone() { needs_init_ = false; }
 
  private:

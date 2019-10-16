@@ -1,11 +1,11 @@
 #include "node.h"
 #include "debug_utils.h"
-#include "node_http_common.h"
+#include "node_mem-inl.h"
 #include "node_quic_http3_application.h"
 #include "node_quic_session-inl.h"
 #include "node_quic_stream.h"
 #include "node_quic_util.h"
-#include "node_http_common.h"
+#include "node_http_common-inl.h"
 
 #include <nghttp3/nghttp3.h>
 #include <algorithm>
@@ -72,8 +72,9 @@ MaybeLocal<String> Http3Header::GetValue(Environment* env) const {
 }
 
 Http3Application::Http3Application(
-    QuicSession* session) :
-    QuicApplication(session) {
+    QuicSession* session)
+  : QuicApplication(session),
+    alloc_info_(MakeAllocator()) {
 }
 
 bool Http3Application::SubmitInformation(
@@ -137,8 +138,24 @@ bool Http3Application::SubmitTrailers(
       nva.length()) == 0;
 }
 
+void Http3Application::CheckAllocatedSize(size_t previous_size) const {
+  CHECK_GE(current_nghttp3_memory_, previous_size);
+}
+
+void Http3Application::IncreaseAllocatedSize(size_t size) {
+  current_nghttp3_memory_ += size;
+}
+
+void Http3Application::DecreaseAllocatedSize(size_t size) {
+  current_nghttp3_memory_ -= size;
+}
+
+void Http3Application::MemoryInfo(MemoryTracker* tracker) const {
+  tracker->TrackFieldWithSize("current_nghttp3_memory",
+                              current_nghttp3_memory_);
+}
+
 nghttp3_conn* Http3Application::CreateConnection(
-    Http3Application* app,
     nghttp3_conn_settings* settings) {
 
   // nghttp3_conn_server_new and nghttp3_conn_client_new share
@@ -149,13 +166,13 @@ nghttp3_conn* Http3Application::CreateConnection(
     nghttp3_conn_server_new,  // NGTCP2_CRYPTO_SIDE_SERVER
   };
 
-  // TODO(@jasnell): Reconcile with http2 and quic allocator logic
-  const nghttp3_mem* mem = nghttp3_mem_default();
-  ngtcp2_crypto_side side = app->Session()->CryptoContext()->Side();
+  ngtcp2_crypto_side side = Session()->CryptoContext()->Side();
   nghttp3_conn* conn;
 
-  if (new_fns[side](&conn, &callbacks_[side], settings, mem, app) != 0)
+  if (new_fns[side](
+          &conn, &callbacks_[side], settings, &alloc_info_, this) != 0) {
     return nullptr;
+  }
 
   return conn;
 }
@@ -197,7 +214,7 @@ bool Http3Application::Initialize() {
   settings.qpack_max_table_capacity = DEFAULT_QPACK_MAX_TABLE_CAPACITY;
   settings.qpack_blocked_streams = DEFAULT_QPACK_BLOCKED_STREAMS;
 
-  connection_.reset(CreateConnection(this, &settings));
+  connection_.reset(CreateConnection(&settings));
   CHECK(connection_);
 
   ngtcp2_transport_params params;
