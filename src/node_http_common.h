@@ -367,19 +367,18 @@ class NgRcBufPointer : public MemoryRetainer {
     static v8::MaybeLocal<v8::String> New(
         Environment* env,
         NgRcBufPointer<T> ptr) {
-      // TODO(@jasnell): Reconcile with http2 logic so we don't duplicate
-      // if (ptr->IsStatic()) {
-      //   auto& static_str_map = env->isolate_data()->http2_static_strs;
-      //   v8::Eternal<v8::String>& eternal = static_str_map[buf];
-      //   if (eternal.IsEmpty()) {
-      //     Local<String> str =
-      //         GetInternalizedString(env, nghttp2_rcbuf_get_buf(buf))
-      //             .ToLocalChecked();
-      //     eternal.Set(env->isolate(), str);
-      //     return str;
-      //   }
-      //   return eternal.Get(env->isolate());
-      // }
+      if (ptr.IsStatic()) {
+        auto& static_str_map = env->isolate_data()->http_static_strs;
+        v8::Eternal<v8::String>& eternal = static_str_map[ptr.get()];
+        if (eternal.IsEmpty()) {
+          v8::Local<v8::String> str =
+              GetInternalizedString(env, ptr).ToLocalChecked();
+          eternal.Set(env->isolate(), str);
+          return str;
+        }
+        return eternal.Get(env->isolate());
+      }
+
       size_t len = ptr.len();
 
       if (len == 0) {

@@ -129,7 +129,8 @@ class Http3Application final :
   bool CreateAndBindControlStream();
   bool CreateAndBindQPackStreams();
 
-  bool StreamCommit(QuicStream* stream, ssize_t datalen);
+  bool StreamCommit(int64_t stream_id, ssize_t datalen);
+  void SetStreamFin(int64_t stream_id);
 
   ssize_t H3ReadData(
       int64_t stream_id,

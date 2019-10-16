@@ -646,7 +646,7 @@ int nghttp3_stream_write_data(nghttp3_stream *stream, int *peof,
 
   datalen = nghttp3_vec_len(vec, (size_t)sveccnt);
 
-  assert(datalen || flags & NGHTTP3_DATA_FLAG_EOF);
+    assert(datalen || flags & NGHTTP3_DATA_FLAG_EOF);
 
   if (flags & NGHTTP3_DATA_FLAG_EOF) {
     *peof = 1;
