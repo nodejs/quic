@@ -52,7 +52,6 @@ const { once } = require('events');
     }
   });
 
-  let done = 0;
   for (const server of servers) {
     const req = client.connect({
       address: 'localhost',
@@ -61,7 +60,7 @@ const { once } = require('events');
 
     const [ stream ] = await once(req, 'stream');
     stream.resume();
-    await(stream, 'end');
+    await once(stream, 'end');
 
     server.close();
     req.close();

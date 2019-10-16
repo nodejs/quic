@@ -1,6 +1,9 @@
 // Flags: --expose-internals
 'use strict';
 const common = require('../common');
+if (!common.hasQuic)
+  common.skip('missing quic');
+
 const { makeUDPPair } = require('../common/udppair');
 const assert = require('assert');
 const quic = require('quic');

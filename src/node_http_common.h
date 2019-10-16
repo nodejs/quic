@@ -367,7 +367,6 @@ class NgRcBufPointer : public MemoryRetainer {
     static v8::MaybeLocal<v8::String> New(
         Environment* env,
         NgRcBufPointer<T> ptr) {
-
       // TODO(@jasnell): Reconcile with http2 logic so we don't duplicate
       // if (ptr->IsStatic()) {
       //   auto& static_str_map = env->isolate_data()->http2_static_strs;
@@ -394,14 +393,14 @@ class NgRcBufPointer : public MemoryRetainer {
         return ret;
       }
 
-       External* h_str = new External(std::move(ptr));
-       v8::MaybeLocal<v8::String> str =
-           v8::String::NewExternalOneByte(env->isolate(), h_str);
-       if (str.IsEmpty())
-         delete h_str;
+      External* h_str = new External(std::move(ptr));
+      v8::MaybeLocal<v8::String> str =
+          v8::String::NewExternalOneByte(env->isolate(), h_str);
+      if (str.IsEmpty())
+        delete h_str;
 
-       return str;
-   }
+      return str;
+    }
 
    private:
     NgRcBufPointer<T> ptr_;
@@ -416,4 +415,4 @@ class NgRcBufPointer : public MemoryRetainer {
 
 #endif  // defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
-#endif  // SRC_NODE_HTTP2_H_
+#endif  // SRC_NODE_HTTP_COMMON_H_
