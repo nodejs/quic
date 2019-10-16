@@ -12,6 +12,7 @@
 
 namespace node {
 
+using v8::Eternal;
 using v8::MaybeLocal;
 using v8::Number;
 using v8::String;
@@ -54,9 +55,20 @@ Http3Header::Http3Header(
 MaybeLocal<String> Http3Header::GetName(Environment* env) const {
   const char* header_name = to_http_header_name(token_);
 
-  // TODO(@jasnell): Can possibly just make these env strings.
-  if (header_name != nullptr)
-    return OneByteString(env->isolate(), header_name);
+  // If header_name is not nullptr, then it is a known header with
+  // a statically defined name. We can safely internalize it here.
+  if (header_name != nullptr) {
+    auto& static_str_map = env->isolate_data()->http_static_strs;
+    Eternal<String> eternal =
+        static_str_map[
+            const_cast<void*>(static_cast<const void*>(header_name))];
+    if (eternal.IsEmpty()) {
+      Local<String> str = OneByteString(env->isolate(), header_name);
+      eternal.Set(env->isolate(), str);
+      return str;
+    }
+    return eternal.Get(env->isolate());
+  }
 
   if (UNLIKELY(!name_))
     return String::Empty(env->isolate());
@@ -82,6 +94,11 @@ bool Http3Application::SubmitInformation(
     v8::Local<v8::Array> headers) {
   Http3Headers nva(Session()->env(), headers);
   // TODO(@jasnell): Do we need more granularity on error conditions?
+  Debug(
+      Session(),
+      "Submitting %d informational headers for stream %" PRId64,
+      nva.length(),
+      stream_id);
   return nghttp3_conn_submit_info(
       Connection(),
       stream_id,
@@ -99,13 +116,18 @@ bool Http3Application::SubmitHeaders(
   // so the stream will be terminated immediately after submitting
   // the headers.
   nghttp3_data_reader reader = { Http3Application::OnReadData };
-  nghttp3_data_reader* reader_ptr;
+  nghttp3_data_reader* reader_ptr = nullptr;
   if (!(flags & QUICSTREAM_HEADER_FLAGS_TERMINAL))
     reader_ptr = &reader;
 
   // TODO(@jasnell): Do we need more granularity on error conditions?
   switch (Session()->CryptoContext()->Side()) {
     case NGTCP2_CRYPTO_SIDE_CLIENT:
+      Debug(
+          Session(),
+          "Submitting %d request headers for stream %" PRId64,
+          nva.length(),
+          stream_id);
       return nghttp3_conn_submit_request(
           Connection(),
           stream_id,
@@ -114,6 +136,11 @@ bool Http3Application::SubmitHeaders(
           reader_ptr,
           nullptr) == 0;
     case NGTCP2_CRYPTO_SIDE_SERVER:
+      Debug(
+          Session(),
+          "Submitting %d response headers for stream %" PRId64,
+          nva.length(),
+          stream_id);
       return nghttp3_conn_submit_response(
           Connection(),
           stream_id,
@@ -131,6 +158,11 @@ bool Http3Application::SubmitTrailers(
     v8::Local<v8::Array> headers) {
   Http3Headers nva(Session()->env(), headers);
   // TODO(@jasnell): Do we need more granularity on error conditions?
+  Debug(
+      Session(),
+      "Submitting %d trailing headers for stream %" PRId64,
+      nva.length(),
+      stream_id);
   return nghttp3_conn_submit_trailers(
       Connection(),
       stream_id,
@@ -180,6 +212,10 @@ nghttp3_conn* Http3Application::CreateConnection(
 bool Http3Application::CreateAndBindControlStream() {
   if (!Session()->OpenUnidirectionalStream(&control_stream_id_))
     return false;
+  Debug(
+      Session(),
+      "Open stream %" PRId64 " and bind as control stream",
+      control_stream_id_);
   return nghttp3_conn_bind_control_stream(
       Connection(),
       control_stream_id_) == 0;
@@ -190,7 +226,11 @@ bool Http3Application::CreateAndBindQPackStreams() {
       !Session()->OpenUnidirectionalStream(&qpack_dec_stream_id_)) {
     return false;
   }
-
+  Debug(
+      Session(),
+      "Open streams %" PRId64 " and %" PRId64 " and bind as qpack streams",
+      qpack_enc_stream_id_,
+      qpack_dec_stream_id_);
   return nghttp3_conn_bind_qpack_streams(
       Connection(),
       qpack_enc_stream_id_,
@@ -216,13 +256,16 @@ bool Http3Application::Initialize() {
 
   connection_.reset(CreateConnection(&settings));
   CHECK(connection_);
+  Debug(Session(), "HTTP/3 connection created");
 
   ngtcp2_transport_params params;
   Session()->GetLocalTransportParams(&params);
 
-  nghttp3_conn_set_max_client_streams_bidi(
-      Connection(),
-      params.initial_max_streams_bidi);
+  if (Session()->IsServer()) {
+    nghttp3_conn_set_max_client_streams_bidi(
+        Connection(),
+        params.initial_max_streams_bidi);
+  }
 
   if (!CreateAndBindControlStream() ||
       !CreateAndBindQPackStreams()) {
@@ -289,18 +332,29 @@ void Http3Application::ExtendMaxStreamData(
   nghttp3_conn_unblock_stream(Connection(), stream_id);
 }
 
-bool Http3Application::StreamCommit(QuicStream* stream, ssize_t datalen) {
+bool Http3Application::StreamCommit(int64_t stream_id, ssize_t datalen) {
   CHECK_GT(datalen, 0);
-  stream->Commit(datalen);
+  if (!IsControlStream(stream_id)) {
+    QuicStream* stream = Session()->FindStream(stream_id);
+    stream->Commit(datalen);
+  }
   int err = nghttp3_conn_add_write_offset(
       Connection(),
-      stream->GetID(),
+      stream_id,
       datalen);
   if (err != 0) {
     Session()->SetLastError(QUIC_ERROR_APPLICATION, err);
     return false;
   }
   return true;
+}
+
+void Http3Application::SetStreamFin(int64_t stream_id) {
+  if (!IsControlStream(stream_id)) {
+    QuicStream* stream = Session()->FindStream(stream_id);
+    if (stream != nullptr)
+      stream->SetFinSent();
+  }
 }
 
 bool Http3Application::SendPendingData() {
@@ -321,16 +375,19 @@ bool Http3Application::SendPendingData() {
               &fin,
               vec.data(),
               vec.size());
+
       if (sveccnt < 0)
         return false;
     }
 
-    QuicStream* stream = Session()->FindStream(stream_id);
-    CHECK_NOT_NULL(stream);
+    Debug(Session(), "Serializing packets for stream id %" PRId64, stream_id);
+
     ssize_t ndatalen;
     nghttp3_vec* v = vec.data();
     size_t vcnt = static_cast<size_t>(sveccnt);
 
+    // TODO(@jasnell): Support the use of the NGTCP2_WRITE_STREAM_FLAG_MORE
+    // flag to allow more efficient coallescing of packets.
     MallocedBuffer<uint8_t> dest(Session()->GetMaxPacketLength());
     ssize_t nwrite =
         ngtcp2_conn_writev_stream(
@@ -345,6 +402,7 @@ bool Http3Application::SendPendingData() {
             reinterpret_cast<const ngtcp2_vec *>(v),
             vcnt,
             uv_hrtime());
+
     if (nwrite < 0) {
       switch (nwrite) {
         case NGTCP2_ERR_STREAM_DATA_BLOCKED:
@@ -358,32 +416,39 @@ bool Http3Application::SendPendingData() {
             return false;
           }
           continue;
-        case NGTCP2_ERR_WRITE_STREAM_MORE:
-          if (!StreamCommit(stream, ndatalen))
-            return false;
-          continue;
+        // TODO(@jasnell): Once we support the use of the
+        // NGTCP2_WRITE_STREAM_FLAG_MORE flag, uncomment out
+        // the following case to properly handle it.
+        // case NGTCP2_ERR_WRITE_STREAM_MORE:
+        //   if (stream && !StreamCommit(stream_id, ndatalen)) {
+        //     return false;
+        //   }
+        //   continue;
       }
+      //Session()->SetLastError(QUIC_ERROR_APPLICATION, nwrite);
       return false;
     }
 
     if (nwrite == 0)
       return true;  // Congestion limited
 
-    if (!StreamCommit(stream, ndatalen))
+    if (ndatalen >= 0 && !StreamCommit(stream_id, ndatalen))
       return false;
 
-    Debug(stream, "Sending %" PRIu64 "bytes in serialized packet", nwrite);
+    Debug(Session(), "Sending %" PRIu64 " bytes in serialized packet", nwrite);
     dest.Realloc(nwrite);
     if (!Session()->SendPacket(std::move(dest), &path))
       return false;
 
     if (fin)
-      stream->SetFinSent();
+      SetStreamFin(stream_id);
   }
   return true;
 }
 
 bool Http3Application::SendStreamData(QuicStream* stream) {
+  // Data is available now, so resume the stream.
+  nghttp3_conn_resume_stream(Connection(), stream->GetID());
   return SendPendingData();
 }
 
@@ -393,14 +458,25 @@ ssize_t Http3Application::H3ReadData(
     size_t veccnt,
     uint32_t* pflags) {
   QuicStream* stream = Session()->FindStream(stream_id);
+  CHECK_NOT_NULL(stream);
+
   size_t count = 0;
-  if (stream) {
-    stream->DrainInto(&vec, &count, std::min(veccnt, MAX_VECTOR_COUNT));
-    CHECK_LE(count, MAX_VECTOR_COUNT);
-    if (!stream->IsWritable())
-      *pflags |= NGHTTP3_DATA_FLAG_EOF;
+
+  stream->DrainInto(&vec, &count, std::min(veccnt, MAX_VECTOR_COUNT));
+  CHECK_LE(count, MAX_VECTOR_COUNT);
+
+  Debug(
+      Session(),
+      "Sending %" PRIu64 " bytes in %d vectors for stream %" PRId64,
+      nghttp3_vec_len(vec, count), count, stream_id);
+
+  if (!stream->IsWritable()) {
+    Debug(Session(), "Ending stream %" PRId64, stream_id);
+    *pflags |= NGHTTP3_DATA_FLAG_EOF;
+    return count;
   }
-  return count;
+
+  return count == 0 ? NGHTTP3_ERR_WOULDBLOCK : count;
 }
 
 void Http3Application::H3AckedStreamData(

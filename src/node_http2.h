@@ -1012,7 +1012,7 @@ class ExternalHeader :
   static MaybeLocal<String> New(Http2Session* session, nghttp2_rcbuf* buf) {
     Environment* env = session->env();
     if (nghttp2_rcbuf_is_static(buf)) {
-      auto& static_str_map = env->isolate_data()->http2_static_strs;
+      auto& static_str_map = env->isolate_data()->http_static_strs;
       v8::Eternal<v8::String>& eternal = static_str_map[buf];
       if (eternal.IsEmpty()) {
         Local<String> str =

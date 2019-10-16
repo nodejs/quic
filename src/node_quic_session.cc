@@ -708,12 +708,15 @@ QuicApplication::QuicApplication(QuicSession* session) : session_(session) {}
 
 QuicApplication* QuicSession::SelectApplication(QuicSession* session) {
   std::string alpn = session->GetALPN();
-  if (alpn == NGTCP2_ALPN_H3)
+  if (alpn == NGTCP2_ALPN_H3) {
+    Debug(this, "Selecting HTTP/3 Application");
     return new Http3Application(session);
+  }
   // In the future, we may end up supporting additional
   // QUIC protocols. As they are added, extend the cases
   // here to create and return them.
 
+  Debug(this, "Selecting Default Application");
   return new DefaultApplication(session);
 }
 
