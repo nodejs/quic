@@ -1,7 +1,9 @@
+#ifndef SRC_NODE_HTTP_COMMON_INL_H_
+#define SRC_NODE_HTTP_COMMON_INL_H_
+
 #include "node_http_common.h"
 #include "node.h"
 #include "env-inl.h"
-#include "v8.h"
 
 namespace node {
 
@@ -67,3 +69,5 @@ NgHeaders<T>::NgHeaders(Environment* env, Local<Array> headers) {
 }
 
 }  // namespace node
+
+#endif  // SRC_NODE_HTTP_COMMON_INL_H_

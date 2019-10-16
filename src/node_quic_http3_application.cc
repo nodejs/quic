@@ -1,11 +1,11 @@
 #include "node.h"
 #include "debug_utils.h"
-#include "node_http_common.h"
+#include "node_mem-inl.h"
 #include "node_quic_http3_application.h"
 #include "node_quic_session-inl.h"
 #include "node_quic_stream.h"
 #include "node_quic_util.h"
-#include "node_http_common.h"
+#include "node_http_common-inl.h"
 
 #include <nghttp3/nghttp3.h>
 #include <algorithm>
@@ -540,9 +540,9 @@ const nghttp3_conn_callbacks Http3Application::callbacks_[2] = {
     OnBeginHeaders,
     OnReceiveHeader,
     OnEndHeaders,
-    OnBeginTrailers, // Begin Trailers
-    OnReceiveHeader, // Receive Trailer
-    OnEndHeaders,    // End Trailers
+    OnBeginTrailers,  // Begin Trailers
+    OnReceiveHeader,  // Receive Trailer
+    OnEndHeaders,     // End Trailers
     OnBeginPushPromise,
     OnReceivePushPromise,
     OnEndPushPromise,
@@ -561,8 +561,8 @@ const nghttp3_conn_callbacks Http3Application::callbacks_[2] = {
     OnReceiveHeader,
     OnEndHeaders,
     OnBeginTrailers,  // Begin Trailers
-    OnReceiveHeader, // Receive Trailer
-    OnEndHeaders,    // End Trailers
+    OnReceiveHeader,  // Receive Trailer
+    OnEndHeaders,     // End Trailers
     OnBeginPushPromise,
     OnReceivePushPromise,
     OnEndPushPromise,
