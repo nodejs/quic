@@ -1952,7 +1952,7 @@ bool QuicSession::SetSocket(QuicSocket* socket, bool nat_rebinding) {
   return true;
 }
 
-void QuicSession::ShutdownStream(int64_t stream_id, uint64_t code) {
+void QuicSession::ResetStream(int64_t stream_id, uint64_t code) {
   // First, update the internal ngtcp2 state of the given stream
   // and schedule the STOP_SENDING and RESET_STREAM frames as
   // appropriate.

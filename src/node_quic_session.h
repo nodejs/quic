@@ -653,7 +653,7 @@ class QuicSession : public AsyncWrap,
     return &streams_;
   }
 
-  // ShutdownStream will cause ngtcp2 to queue a
+  // ResetStream will cause ngtcp2 to queue a
   // RESET_STREAM and STOP_SENDING frame, as appropriate,
   // for the given stream_id. For a locally-initiated
   // unidirectional stream, only a RESET_STREAM frame
@@ -680,7 +680,7 @@ class QuicSession : public AsyncWrap,
   // Likewise, an idle timeout may cause the stream
   // to be silently destroyed without calling
   // ShutdownStream.
-  void ShutdownStream(
+  void ResetStream(
       int64_t stream_id,
       uint64_t error_code = NGTCP2_APP_NOERROR);
 
