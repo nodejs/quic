@@ -557,9 +557,9 @@ const nghttp3_conn_callbacks Http3Application::callbacks_[2] = {
     OnBeginHeaders,
     OnReceiveHeader,
     OnEndHeaders,
-    OnBeginTrailers, // Begin Trailers
-    OnReceiveHeader, // Receive Trailer
-    OnEndHeaders,    // End Trailers
+    OnBeginTrailers,  // Begin Trailers
+    OnReceiveHeader,  // Receive Trailer
+    OnEndHeaders,     // End Trailers
     OnBeginPushPromise,
     OnReceivePushPromise,
     OnEndPushPromise,
@@ -578,8 +578,8 @@ const nghttp3_conn_callbacks Http3Application::callbacks_[2] = {
     OnReceiveHeader,
     OnEndHeaders,
     OnBeginTrailers,  // Begin Trailers
-    OnReceiveHeader, // Receive Trailer
-    OnEndHeaders,    // End Trailers
+    OnReceiveHeader,  // Receive Trailer
+    OnEndHeaders,     // End Trailers
     OnBeginPushPromise,
     OnReceivePushPromise,
     OnEndPushPromise,

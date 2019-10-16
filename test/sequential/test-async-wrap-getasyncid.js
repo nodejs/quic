@@ -48,8 +48,10 @@ const { getSystemErrorName } = require('util');
     // TODO(danbev): Test for these
     delete providers.QUICCLIENTSESSION;
     delete providers.QUICSERVERSESSION;
+    delete providers.QUICSENDWRAP;
     delete providers.QUICSOCKET;
     delete providers.QUICSTREAM;
+    delete providers.JSUDPWRAP;
     if (!common.isMainThread)
       delete providers.INSPECTORJSBINDING;
     delete providers.KEYPAIRGENREQUEST;

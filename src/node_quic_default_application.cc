@@ -5,11 +5,6 @@
 #include <ngtcp2/ngtcp2.h>
 
 namespace node {
-
-using v8::Context;
-using v8::HandleScope;
-using v8::Number;
-
 namespace quic {
 
 DefaultApplication::DefaultApplication(
@@ -61,12 +56,12 @@ void DefaultApplication::AcknowledgeStreamData(
     int64_t stream_id,
     uint64_t offset,
     size_t datalen) {
-   QuicStream* stream = Session()->FindStream(stream_id);
-   Debug(Session(), "Default QUIC Application acknowledging stream data");
-   // It's possible that the stream has already been destroyed and
-   // removed. If so, just silently ignore the ack
-   if (stream)
-     stream->AckedDataOffset(offset, datalen);
+  QuicStream* stream = Session()->FindStream(stream_id);
+  Debug(Session(), "Default QUIC Application acknowledging stream data");
+  // It's possible that the stream has already been destroyed and
+  // removed. If so, just silently ignore the ack
+  if (stream)
+    stream->AckedDataOffset(offset, datalen);
 }
 
 bool DefaultApplication::SendPendingData() {

@@ -2120,8 +2120,8 @@ void QuicSession::StreamReset(
         app_error_code,
         final_size);
 
- if (HasStream(stream_id))
-   application_->StreamReset(stream_id, final_size, app_error_code);
+  if (HasStream(stream_id))
+    application_->StreamReset(stream_id, final_size, app_error_code);
 }
 
 void QuicSession::UpdateIdleTimer() {
