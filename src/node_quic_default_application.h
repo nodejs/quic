@@ -11,7 +11,7 @@ namespace node {
 
 namespace quic {
 
-class DefaultApplication : public QuicApplication {
+class DefaultApplication final : public QuicApplication {
  public:
   explicit DefaultApplication(QuicSession* session);
 
@@ -30,6 +30,10 @@ class DefaultApplication : public QuicApplication {
 
   bool SendPendingData() override;
   bool SendStreamData(QuicStream* stream) override;
+
+  SET_SELF_SIZE(DefaultApplication)
+  SET_MEMORY_INFO_NAME(DefaultApplication)
+  SET_NO_MEMORY_INFO()
 };
 
 }  // namespace quic

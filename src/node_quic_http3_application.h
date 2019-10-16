@@ -4,7 +4,8 @@
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
 #include "node.h"
-#include "node_http_common-inl.h"
+#include "node_http_common.h"
+#include "node_mem.h"
 #include "node_quic_session.h"
 #include "node_quic_stream.h"
 #include "node_quic_util.h"
@@ -65,7 +66,9 @@ class Http3Header : public QuicStream::Header {
   Http3RcBufferPointer value_;
 };
 
-class Http3Application : public QuicApplication {
+class Http3Application final :
+    public QuicApplication,
+    public mem::NgLibMemoryManager<Http3Application, nghttp3_mem> {
  public:
   explicit Http3Application(QuicSession* session);
 
@@ -109,6 +112,15 @@ class Http3Application : public QuicApplication {
 
   bool SendPendingData() override;
   bool SendStreamData(QuicStream* stream) override;
+
+  // Implementation for mem::NgLibMemoryManager
+  void CheckAllocatedSize(size_t previous_size) const;
+  void IncreaseAllocatedSize(size_t size);
+  void DecreaseAllocatedSize(size_t size);
+
+  SET_SELF_SIZE(Http3Application)
+  SET_MEMORY_INFO_NAME(Http3Application)
+  void MemoryInfo(MemoryTracker* tracker) const;
 
  private:
   nghttp3_conn* Connection() { return connection_.get(); }
@@ -159,14 +171,14 @@ class Http3Application : public QuicApplication {
            stream_id == qpack_enc_stream_id_;
   }
 
+  nghttp3_mem alloc_info_;
   Http3ConnectionPointer connection_;
   int64_t control_stream_id_;
   int64_t qpack_enc_stream_id_;
   int64_t qpack_dec_stream_id_;
+  size_t current_nghttp3_memory_ = 0;
 
-  static nghttp3_conn* CreateConnection(
-      Http3Application* application,
-      nghttp3_conn_settings* settings);
+  nghttp3_conn* CreateConnection(nghttp3_conn_settings* settings);
 
   static const nghttp3_conn_callbacks callbacks_[2];
 

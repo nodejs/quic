@@ -2266,6 +2266,7 @@ void QuicSession::MemoryInfo(MemoryTracker* tracker) const {
   tracker->TrackField("recovery_stats_buffer", recovery_stats_buffer_);
   tracker->TrackFieldWithSize("current_ngtcp2_memory", current_ngtcp2_memory_);
   tracker->TrackField("conn_closebuf", conn_closebuf_);
+  tracker->TrackField("application", application_);
 }
 
 QuicSession::InitialPacketResult QuicSession::Accept(
