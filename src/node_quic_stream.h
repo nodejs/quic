@@ -324,7 +324,7 @@ class QuicStream : public AsyncWrap, public StreamBase {
   // Required for StreamBase
   int DoShutdown(ShutdownWrap* req_wrap) override;
 
-  void Shutdown(uint64_t app_error_code);
+  void ResetStream(uint64_t app_error_code);
 
   void Commit(ssize_t amount);
 
