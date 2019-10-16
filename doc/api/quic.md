@@ -688,7 +688,9 @@ added: REPLACEME
     be `'udp4'`, indicating UDP over IPv4, or `'udp6'`, indicating UDP over
     IPv6. Defaults to `'udp4'`.
 
-Create a new `QuicClientSession`.
+Create a new `QuicClientSession`. This function can be called multiple times
+to create sessions associated with different endpoints on the same
+client endpoint.
 
 ### quicsocket.destroy([error])
 <!-- YAML
