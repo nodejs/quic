@@ -533,84 +533,6 @@ bool CheckCertNames(
   return true;
 }
 
-int VerifyHostnameIdentity(
-    const char* hostname,
-    const std::string& cert_cn,
-    const std::unordered_multimap<std::string, std::string>& altnames) {
-
-  int err = X509_V_ERR_HOSTNAME_MISMATCH;
-
-  // 1. If the hostname is an IP address (v4 or v6), the certificate is valid
-  //    if and only if there is an 'IP Address:' alt name specifying the same
-  //    IP address. The IP address must be canonicalized to ensure a proper
-  //    check. It's possible that the X509_check_ip_asc covers this. If so,
-  //    we can remove this check.
-
-  if (SocketAddress::numeric_host(hostname)) {
-    auto ips = altnames.equal_range("ip");
-    for (auto ip = ips.first; ip != ips.second; ++ip) {
-      if (ip->second.compare(hostname) == 0) {
-        // Success!
-        return 0;
-      }
-    }
-    // No match, and since the hostname is an IP address, skip any
-    // further checks
-    return err;
-  }
-
-  auto dns_names = altnames.equal_range("dns");
-  auto uri_names = altnames.equal_range("uri");
-
-  size_t dns_count = std::distance(dns_names.first, dns_names.second);
-  size_t uri_count = std::distance(uri_names.first, uri_names.second);
-
-  std::vector<std::string> host_parts;
-  SplitHostname(hostname, &host_parts);
-
-  // 2. If there no 'DNS:' or 'URI:' Alt names, if the certificate has a
-  //    Subject, then we need to extract the CN field from the Subject. and
-  //    check that the hostname matches the CN, taking into consideration
-  //    the possibility of a wildcard in the CN. If there is a match, congrats,
-  //    we have a valid certificate. Return and be happy.
-
-  if (dns_count == 0 && uri_count == 0) {
-    if (cert_cn.length() > 0 && CheckCertNames(host_parts, cert_cn))
-        return 0;
-    // No match, and since there are no dns or uri entries, return
-    return err;
-  }
-
-  // 3. If, however, there are 'DNS:' and 'URI:' Alt names, things become more
-  //    complicated. Essentially, we need to iterate through each 'DNS:' and
-  //    'URI:' Alt name to find one that matches. The 'DNS:' Alt names are
-  //    relatively simple but may include wildcards. The 'URI:' Alt names
-  //    require the name to be parsed as a URL, then extract the hostname from
-  //    the URL, which is then checked against the hostname. If you find a
-  //    match, yay! Return and be happy. (Note, it's possible that the 'DNS:'
-  //    check in this step is redundant to the X509_check_host check. If so,
-  //    we can simplify by removing those checks here.)
-
-  // First, let's check dns names
-  for (auto name = dns_names.first; name != dns_names.second; ++name) {
-    if (name->first.length() > 0 &&
-        CheckCertNames(host_parts, name->second)) {
-      return 0;
-    }
-  }
-
-  // Then, check uri names
-  for (auto name = uri_names.first; name != uri_names.second; ++name) {
-    if (name->first.length() > 0 &&
-        CheckCertNames(host_parts, name->second, false)) {
-      return 0;
-    }
-  }
-
-  // 4. Failing all of the previous checks, we assume the certificate is
-  //    invalid for an unspecified reason.
-  return err;
-}
 
 const char* X509ErrorCode(int err) {
   const char* code = "UNSPECIFIED";
@@ -704,6 +626,85 @@ int VerifyHostnameIdentity(SSL* ssl, const char* hostname) {
       hostname,
       GetCertificateCN(cert.get()),
       GetCertificateAltNames(cert.get()));
+}
+
+int VerifyHostnameIdentity(
+    const char* hostname,
+    const std::string& cert_cn,
+    const std::unordered_multimap<std::string, std::string>& altnames) {
+
+  int err = X509_V_ERR_HOSTNAME_MISMATCH;
+
+  // 1. If the hostname is an IP address (v4 or v6), the certificate is valid
+  //    if and only if there is an 'IP Address:' alt name specifying the same
+  //    IP address. The IP address must be canonicalized to ensure a proper
+  //    check. It's possible that the X509_check_ip_asc covers this. If so,
+  //    we can remove this check.
+
+  if (SocketAddress::numeric_host(hostname)) {
+    auto ips = altnames.equal_range("ip");
+    for (auto ip = ips.first; ip != ips.second; ++ip) {
+      if (ip->second.compare(hostname) == 0) {
+        // Success!
+        return 0;
+      }
+    }
+    // No match, and since the hostname is an IP address, skip any
+    // further checks
+    return err;
+  }
+
+  auto dns_names = altnames.equal_range("dns");
+  auto uri_names = altnames.equal_range("uri");
+
+  size_t dns_count = std::distance(dns_names.first, dns_names.second);
+  size_t uri_count = std::distance(uri_names.first, uri_names.second);
+
+  std::vector<std::string> host_parts;
+  SplitHostname(hostname, &host_parts);
+
+  // 2. If there no 'DNS:' or 'URI:' Alt names, if the certificate has a
+  //    Subject, then we need to extract the CN field from the Subject. and
+  //    check that the hostname matches the CN, taking into consideration
+  //    the possibility of a wildcard in the CN. If there is a match, congrats,
+  //    we have a valid certificate. Return and be happy.
+
+  if (dns_count == 0 && uri_count == 0) {
+    if (cert_cn.length() > 0 && CheckCertNames(host_parts, cert_cn))
+        return 0;
+    // No match, and since there are no dns or uri entries, return
+    return err;
+  }
+
+  // 3. If, however, there are 'DNS:' and 'URI:' Alt names, things become more
+  //    complicated. Essentially, we need to iterate through each 'DNS:' and
+  //    'URI:' Alt name to find one that matches. The 'DNS:' Alt names are
+  //    relatively simple but may include wildcards. The 'URI:' Alt names
+  //    require the name to be parsed as a URL, then extract the hostname from
+  //    the URL, which is then checked against the hostname. If you find a
+  //    match, yay! Return and be happy. (Note, it's possible that the 'DNS:'
+  //    check in this step is redundant to the X509_check_host check. If so,
+  //    we can simplify by removing those checks here.)
+
+  // First, let's check dns names
+  for (auto name = dns_names.first; name != dns_names.second; ++name) {
+    if (name->first.length() > 0 &&
+        CheckCertNames(host_parts, name->second)) {
+      return 0;
+    }
+  }
+
+  // Then, check uri names
+  for (auto name = uri_names.first; name != uri_names.second; ++name) {
+    if (name->first.length() > 0 &&
+        CheckCertNames(host_parts, name->second, false)) {
+      return 0;
+    }
+  }
+
+  // 4. Failing all of the previous checks, we assume the certificate is
+  //    invalid for an unspecified reason.
+  return err;
 }
 
 const char* GetServerName(QuicSession* session) {

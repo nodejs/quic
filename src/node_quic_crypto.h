@@ -94,6 +94,10 @@ bool InvalidRetryToken(
 int VerifyPeerCertificate(SSL* ssl);
 
 int VerifyHostnameIdentity(SSL* ssl, const char* hostname);
+int VerifyHostnameIdentity(
+    const char* hostname,
+    const std::string& cert_cn,
+    const std::unordered_multimap<std::string, std::string>& altnames);
 
 v8::Local<v8::Value> GetValidationErrorReason(Environment* env, int err);
 v8::Local<v8::Value> GetValidationErrorCode(Environment* env, int err);
