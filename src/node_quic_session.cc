@@ -1590,7 +1590,6 @@ bool QuicSession::SendConnectionClose() {
 
   switch (crypto_context_->Side()) {
     case NGTCP2_CRYPTO_SIDE_SERVER: {
-
       // If we're not already in the closing period,
       // first attempt to write any pending packets, then
       // start the closing period. If closing period has
