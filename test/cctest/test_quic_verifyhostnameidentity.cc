@@ -10,9 +10,6 @@
 #include <unordered_map>
 #include <vector>
 
-// This test has recently been broken.
-#if 0
-
 using node::quic::VerifyHostnameIdentity;
 
 enum altname_type {
@@ -348,4 +345,3 @@ TEST(QuicCrypto, BasicCN_41_Fail) {
           std::string("xn--*.example.com"), altnames),
       X509_V_ERR_HOSTNAME_MISMATCH);
 }
-#endif
