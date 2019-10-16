@@ -350,7 +350,7 @@ inline void QuicStream::IncrementStats(size_t datalen) {
   data_rx_size_->Record(len);
 }
 
-void QuicStream::Shutdown(uint64_t app_error_code) {
+void QuicStream::ResetStream(uint64_t app_error_code) {
   // On calling shutdown, the stream will no longer be
   // readable or writable, all any pending data in the
   // streambuf_ will be canceled, and all data pending
@@ -358,7 +358,7 @@ void QuicStream::Shutdown(uint64_t app_error_code) {
   // abandoned.
   SetReadClose();
   SetWriteClose();
-  session_->ShutdownStream(GetID(), app_error_code);
+  session_->ResetStream(GetID(), app_error_code);
 }
 
 BaseObjectPtr<QuicStream> QuicStream::New(
@@ -486,7 +486,7 @@ void QuicStreamDestroy(const FunctionCallbackInfo<Value>& args) {
   stream->Destroy();
 }
 
-void QuicStreamShutdown(const FunctionCallbackInfo<Value>& args) {
+void QuicStreamReset(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   QuicStream* stream;
   ASSIGN_OR_RETURN_UNWRAP(&stream, args.Holder());
@@ -495,7 +495,7 @@ void QuicStreamShutdown(const FunctionCallbackInfo<Value>& args) {
   uint64_t code = ExtractErrorCode(env, args[0]);
   if (!args[1]->Uint32Value(env->context()).To(&family)) return;
 
-  stream->Shutdown(
+  stream->ResetStream(
       family == QUIC_ERROR_APPLICATION ?
           code : static_cast<uint64_t>(NGTCP2_NO_ERROR));
 }
@@ -550,7 +550,7 @@ void QuicStream::Initialize(
   streamt->SetInternalFieldCount(StreamBase::kStreamBaseFieldCount);
   streamt->Set(env->owner_symbol(), Null(env->isolate()));
   env->SetProtoMethod(stream, "destroy", QuicStreamDestroy);
-  env->SetProtoMethod(stream, "shutdownStream", QuicStreamShutdown);
+  env->SetProtoMethod(stream, "resetStream", QuicStreamReset);
   env->SetProtoMethod(stream, "id", QuicStreamGetID);
   env->SetProtoMethod(stream, "submitInformation", QuicStreamSubmitInformation);
   env->SetProtoMethod(stream, "submitHeaders", QuicStreamSubmitHeaders);

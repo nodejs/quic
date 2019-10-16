@@ -513,7 +513,7 @@ void Http3Application::H3CancelPush(
 void Http3Application::H3SendStopSending(
     int64_t stream_id,
     uint64_t app_error_code) {
-  Session()->ShutdownStream(stream_id, app_error_code);
+  Session()->ResetStream(stream_id, app_error_code);
 }
 
 int Http3Application::H3PushStream(
