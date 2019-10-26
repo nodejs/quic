@@ -1102,6 +1102,15 @@ stream('initialHeaders', (headers) => {
 });
 ```
 
+### Event: `'ready'`
+<!-- YAML
+added: REPLACEME
+-->
+
+Emitted when the underlying `QuicSession` has emitted its `secure` event
+this stream has received its id, which is accessible as `stream.id` once this
+event is emitted.
+
 ### Event: `'trailingHeaders'`
 <!-- YAML
 added: REPLACEME
@@ -1156,6 +1165,16 @@ added: REPLACEME
 * Type: {number}
 
 The numeric identifier of the `QuicStream`.
+
+### quicstream.pending
+<!-- YAML
+added: REPLACEME
+-->
+
+* {boolean}
+
+This property is `true` if the underlying session is not finished yet,
+i.e. before the `'ready'` event is emitted.
 
 ### quicstream.serverInitiated
 <!-- YAML
