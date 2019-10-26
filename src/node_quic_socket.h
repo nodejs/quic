@@ -250,8 +250,8 @@ class QuicSocket : public AsyncWrap,
   // value reaches the value of max_connections_per_host_,
   // attempts to create new connections will be ignored
   // until the value falls back below the limit.
-  std::unordered_map<const sockaddr*, size_t, SocketAddress::Hash>
-      addr_counts_;
+  std::unordered_map<const sockaddr*, size_t, SocketAddress::Hash,
+      SocketAddress::Compare> addr_counts_;
 
   // The validated_addrs_ vector is used as an LRU cache for
   // validated addresses only when the VALIDATE_ADDRESS_LRU

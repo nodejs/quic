@@ -158,6 +158,14 @@ class SocketAddress {
     }
   };
 
+  // std::equal_to specialization for sockaddr instances (ipv4 or ipv6).
+  struct Compare {
+    bool operator()(const sockaddr* laddr, const sockaddr* raddr) const {
+      CHECK(laddr->sa_family == AF_INET || laddr->sa_family == AF_INET6);
+      return memcmp(laddr, raddr, GetAddressLen(laddr)) == 0;
+    }
+  };
+
   static bool numeric_host(const char* hostname) {
     return numeric_host(hostname, AF_INET) || numeric_host(hostname, AF_INET6);
   }
