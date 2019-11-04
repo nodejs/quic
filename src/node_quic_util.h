@@ -14,7 +14,6 @@
 
 #include <functional>
 #include <string>
-#include <vector>
 
 namespace node {
 namespace quic {
