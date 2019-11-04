@@ -87,7 +87,7 @@ class Http3Application final :
       size_t datalen) override;
 
   void StreamOpen(int64_t stream_id) override;
-  void StreamClose(int64_t stream_id, uint64_t app_error_code);
+  void StreamClose(int64_t stream_id, uint64_t app_error_code) override;
 
   void StreamReset(
       int64_t stream_id,
@@ -120,7 +120,7 @@ class Http3Application final :
 
   SET_SELF_SIZE(Http3Application)
   SET_MEMORY_INFO_NAME(Http3Application)
-  void MemoryInfo(MemoryTracker* tracker) const;
+  void MemoryInfo(MemoryTracker* tracker) const override;
 
  private:
   nghttp3_conn* Connection() { return connection_.get(); }
