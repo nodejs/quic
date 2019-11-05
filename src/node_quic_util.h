@@ -13,6 +13,7 @@
 #include <openssl/ssl.h>
 
 #include <functional>
+#include <limits>
 #include <string>
 
 namespace node {
