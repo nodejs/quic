@@ -20,7 +20,6 @@
 #include <ngtcp2/ngtcp2_crypto.h>
 #include <openssl/ssl.h>
 
-#include <functional>
 #include <map>
 #include <vector>
 

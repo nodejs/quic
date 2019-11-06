@@ -21,7 +21,6 @@
 #include "uv.h"
 
 #include <array>
-#include <functional>
 #include <string>
 #include <type_traits>
 #include <utility>
