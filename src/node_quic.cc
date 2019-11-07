@@ -11,8 +11,8 @@
 #include "node_quic_state.h"
 #include "node_quic_util.h"
 
-#include <climits>
-#include <algorithm>
+#include <memory>
+#include <utility>
 
 namespace node {
 
