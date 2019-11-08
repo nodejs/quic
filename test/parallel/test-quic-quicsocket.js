@@ -136,3 +136,43 @@ socket.on('ready', common.mustCall(() => {
   socket.destroy();
   assert(socket.destroyed);
 }));
+
+socket.on('close', common.mustCall(() => {
+  const makeError = (method) => ({
+    code: 'ERR_QUICSOCKET_DESTROYED',
+    message: `Cannot call ${method} after a QuicSocket has been destroyed`
+  });
+
+  assert.throws(
+    () => socket.setTTL(1),
+    makeError('setTTL')
+  );
+  assert.throws(
+    () => socket.setMulticastTTL(1),
+    makeError('setMulticastTTL')
+  );
+  assert.throws(
+    () => socket.setBroadcast(true),
+    makeError('setBroadcast')
+  );
+  assert.throws(
+    () => socket.setMulticastLoopback(),
+    makeError('setMulticastLoopback')
+  );
+  assert.throws(
+    () => socket.setMulticastInterface(true),
+    makeError('setMulticastInterface')
+  );
+  assert.throws(
+    () => socket.addMembership('foo', 'bar'),
+    makeError('addMembership')
+  );
+  assert.throws(
+    () => socket.dropMembership('foo', 'bar'),
+    makeError('dropMembership')
+  );
+  assert.throws(
+    () => socket.setServerBusy(true),
+    makeError('setServerBusy')
+  );
+}));
