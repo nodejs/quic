@@ -6,7 +6,6 @@
 #include "node_quic_session.h"
 #include "node_quic_socket.h"
 
-#include <algorithm>
 
 namespace node {
 
