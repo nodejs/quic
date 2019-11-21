@@ -71,4 +71,12 @@ server.on('ready', common.mustCall(() => {
 
 server.on('listening', common.mustCall());
 
-server.on('close', common.mustCall());
+server.on('close', common.mustCall(() => {
+  assert.throws(
+    () => server.listen(),
+    {
+      code: 'ERR_QUICSOCKET_DESTROYED',
+      message: 'Cannot call listen after a QuicSocket has been destroyed'
+    }
+  );
+}));
