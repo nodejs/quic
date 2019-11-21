@@ -123,6 +123,10 @@ void QuicSessionConfig::Set(Environment* env,
 
   SetConfig(env, IDX_QUIC_SESSION_MAX_CRYPTO_BUFFER,
             &max_crypto_buffer_);
+
+  settings_.transport_params.idle_timeout =
+      settings_.transport_params.idle_timeout * 1000000;
+
   max_crypto_buffer_ = std::max(max_crypto_buffer_, MIN_MAX_CRYPTO_BUFFER);
 
   if (preferred_addr != nullptr) {
@@ -621,7 +625,6 @@ bool QuicCryptoContext::InitiateKeyUpdate() {
   int err = ngtcp2_conn_initiate_key_update(
              session_->Connection(),
              uv_hrtime());
-printf("Initiated key update? %d\n", err);
   return err == 0;
 }
 

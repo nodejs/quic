@@ -480,6 +480,8 @@ class QuicSession : public AsyncWrap,
 
   std::string diagnostic_name() const override;
 
+  QuicApplication* Application() { return application_.get(); }
+
   enum InitialPacketResult : int {
     PACKET_OK,
     PACKET_IGNORE,

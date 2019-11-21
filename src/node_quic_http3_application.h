@@ -57,8 +57,8 @@ class Http3Header : public QuicStream::Header {
     other.token_ = -1;
   }
 
-  v8::MaybeLocal<v8::String> GetName(Environment* env) const override;
-  v8::MaybeLocal<v8::String> GetValue(Environment* env) const override;
+  v8::MaybeLocal<v8::String> GetName(QuicApplication* app) const override;
+  v8::MaybeLocal<v8::String> GetValue(QuicApplication* app) const override;
 
  private:
   int32_t token_ = -1;

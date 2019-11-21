@@ -405,8 +405,8 @@ void QuicStream::EndHeaders() {
     // name and value should never be empty here, and if
     // they are, there's an actual bug so go ahead and crash
     Local<Value> pair[] = {
-      header->GetName(env()).ToLocalChecked(),
-      header->GetValue(env()).ToLocalChecked()
+      header->GetName(Session()->Application()).ToLocalChecked(),
+      header->GetValue(Session()->Application()).ToLocalChecked()
     };
     headers.push_back(Array::New(env()->isolate(), pair, arraysize(pair)));
   }
