@@ -309,7 +309,7 @@ void Http3Application::StreamClose(
     int64_t stream_id,
     uint64_t app_error_code) {
   if (app_error_code == 0)
-    app_error_code = NGHTTP3_HTTP_NO_ERROR;
+    app_error_code = NGTCP2_APP_NOERROR;
   nghttp3_conn_close_stream(Connection(), stream_id, app_error_code);
   QuicApplication::StreamClose(stream_id, app_error_code);
 }

@@ -1237,25 +1237,25 @@ bool DeriveAndInstallInitialKey(
       session->CryptoContext()->Side()));
 }
 
-bool UpdateAndInstallKey(
+bool UpdateKey(
     QuicSession* session,
+    uint8_t* rx_key,
+    uint8_t* rx_iv,
+    uint8_t* tx_key,
+    uint8_t* tx_iv,
     std::vector<uint8_t>* current_rx_secret,
     std::vector<uint8_t>* current_tx_secret) {
   SessionSecret rx_secret;
   SessionSecret tx_secret;
-  SessionKey rx_key;
-  SessionIV rx_iv;
-  SessionKey tx_key;
-  SessionIV tx_iv;
 
-  if (NGTCP2_ERR(ngtcp2_crypto_update_and_install_key(
+  if (NGTCP2_ERR(ngtcp2_crypto_update_key(
          session->Connection(),
          rx_secret.data(),
          tx_secret.data(),
-         rx_key.data(),
-         rx_iv.data(),
-         tx_key.data(),
-         tx_iv.data(),
+         rx_key,
+         rx_iv,
+         tx_key,
+         tx_iv,
          current_rx_secret->data(),
          current_tx_secret->data(),
          current_rx_secret->size()))) {

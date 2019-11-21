@@ -143,7 +143,7 @@ server.on('session', common.mustCall((session) => {
     // Should not error and should return true... also shouldn't
     // cause anything else to fail.
 
-    assert(session.updateKey());
+    setTimeout(() => assert(session.updateKey()), 500);
 
     debug('QuicServerSession TLS Handshake Complete');
     debug('  Server name: %s', servername);

@@ -76,6 +76,8 @@
   'lib/ngtcp2_net.h',
   'lib/ngtcp2_path.c',
   'lib/ngtcp2_path.h',
+  'lib/ngtcp2_pipeack.c',
+  'lib/ngtcp2_pipeack.h',
   'lib/ngtcp2_pkt.c',
   'lib/ngtcp2_pkt.h',
   'lib/ngtcp2_ppe.c',
@@ -86,6 +88,8 @@
   'lib/ngtcp2_psl.h',
   'lib/ngtcp2_pv.c',
   'lib/ngtcp2_pv.h',
+  'lib/ngtcp2_qlog.c',
+  'lib/ngtcp2_qlog.h',
   'lib/ngtcp2_range.c',
   'lib/ngtcp2_range.h',
   'lib/ngtcp2_ringbuf.c',
@@ -102,6 +106,7 @@
   'lib/ngtcp2_vec.h',
   'lib/ngtcp2_version.c',
   'crypto/shared.c',
+  'crypto/shared.h',
   'crypto/openssl/openssl.c',
       ]
     }
