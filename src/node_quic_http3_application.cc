@@ -47,13 +47,15 @@ Http3Header::Http3Header(
     nghttp3_rcbuf* value) :
     token_(token) {
   // Only retain the name buffer if it's not a known token
-  if (token == -1)
+  if (token == -1) {
     name_.reset(name, true);  // Internalizable
+  }
   value_.reset(value);
 }
 
-MaybeLocal<String> Http3Header::GetName(Environment* env) const {
+MaybeLocal<String> Http3Header::GetName(QuicApplication* app) const {
   const char* header_name = to_http_header_name(token_);
+  Environment* env = app->env();
 
   // If header_name is not nullptr, then it is a known header with
   // a statically defined name. We can safely internalize it here.
@@ -73,14 +75,19 @@ MaybeLocal<String> Http3Header::GetName(Environment* env) const {
   if (UNLIKELY(!name_))
     return String::Empty(env->isolate());
 
-  return Http3RcBufferPointer::External::New(env, name_);
+  return Http3RcBufferPointer::External::New(
+      static_cast<Http3Application*>(app),
+      name_);
 }
 
-MaybeLocal<String> Http3Header::GetValue(Environment* env) const {
+MaybeLocal<String> Http3Header::GetValue(QuicApplication* app) const {
+  Environment* env = app->env();
   if (UNLIKELY(!value_))
     return String::Empty(env->isolate());
 
-  return Http3RcBufferPointer::External::New(env, value_);
+  return Http3RcBufferPointer::External::New(
+      static_cast<Http3Application*>(app),
+      value_);
 }
 
 Http3Application::Http3Application(
@@ -334,10 +341,6 @@ void Http3Application::ExtendMaxStreamData(
 
 bool Http3Application::StreamCommit(int64_t stream_id, ssize_t datalen) {
   CHECK_GT(datalen, 0);
-  if (!IsControlStream(stream_id)) {
-    QuicStream* stream = Session()->FindStream(stream_id);
-    stream->Commit(datalen);
-  }
   int err = nghttp3_conn_add_write_offset(
       Connection(),
       stream_id,
@@ -432,7 +435,7 @@ bool Http3Application::SendPendingData() {
     if (nwrite == 0)
       return true;  // Congestion limited
 
-    if (ndatalen >= 0 && !StreamCommit(stream_id, ndatalen))
+    if (ndatalen > 0 && !StreamCommit(stream_id, ndatalen))
       return false;
 
     Debug(Session(), "Sending %" PRIu64 " bytes in serialized packet", nwrite);
@@ -461,14 +464,15 @@ ssize_t Http3Application::H3ReadData(
   CHECK_NOT_NULL(stream);
 
   size_t count = 0;
-
   stream->DrainInto(&vec, &count, std::min(veccnt, MAX_VECTOR_COUNT));
   CHECK_LE(count, MAX_VECTOR_COUNT);
+  size_t numbytes = nghttp3_vec_len(vec, count);
+  stream->Commit(numbytes);
 
   Debug(
       Session(),
       "Sending %" PRIu64 " bytes in %d vectors for stream %" PRId64,
-      nghttp3_vec_len(vec, count), count, stream_id);
+      numbytes, count, stream_id);
 
   if (!stream->IsWritable()) {
     Debug(Session(), "Ending stream %" PRId64, stream_id);
@@ -540,9 +544,9 @@ void Http3Application::H3BeginHeaders(
   int64_t stream_id,
   QuicStreamHeadersKind kind) {
   QuicStream* stream = FindOrCreateStream(stream_id);
-  if (!stream)
-    return;
-  stream->BeginHeaders(kind);
+  Debug(Session(), "Starting header block for stream %" PRId64, stream_id);
+  if (stream != nullptr)
+    stream->BeginHeaders(kind);
 }
 
 bool Http3Application::H3ReceiveHeader(
@@ -553,11 +557,12 @@ bool Http3Application::H3ReceiveHeader(
     uint8_t flags) {
   // Protect against zero-length headers
   if (!IsZeroLengthHeader(name, value)) {
+    Debug(Session(), "Receiving header for stream %" PRId64, stream_id);
     QuicStream* stream = Session()->FindStream(stream_id);
     if (stream) {
       if (token == NGHTTP3_QPACK_TOKEN__STATUS) {
         nghttp3_vec vec = nghttp3_rcbuf_get_buf(value);
-        if (memcmp(vec.base, "1", 1))
+        if (vec.base[0] == '1')
           stream->SetHeadersKind(QUICSTREAM_HEADERS_KIND_INFORMATIONAL);
         else
           stream->SetHeadersKind(QUICSTREAM_HEADERS_KIND_INITIAL);
@@ -566,11 +571,11 @@ bool Http3Application::H3ReceiveHeader(
       return stream->AddHeader(std::move(header));
     }
   }
-
   return true;
 }
 
 void Http3Application::H3EndHeaders(int64_t stream_id) {
+  Debug(Session(), "Ending header block for stream %" PRId64, stream_id);
   QuicStream* stream = Session()->FindStream(stream_id);
   if (stream)
     stream->EndHeaders();

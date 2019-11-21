@@ -69,23 +69,34 @@ server.on('session', common.mustCall((session) => {
   session.on('secure', common.mustCall((servername, alpn) => {
     debug('QuicServerSession handshake completed');
     assert.strictEqual(session.alpnProtocol, alpn);
-
-    // const uni = session.openStream({ halfOpen: true });
-    // uni.write(unidata[0]);
-    // uni.end(unidata[1]);
-    // debug('Unidirectional, Server-initiated stream %d opened', uni.id);
-    // uni.on('data', common.mustNotCall());
-    // uni.on('finish', common.mustCall());
-    // uni.on('close', common.mustCall());
-    // uni.on('end', common.mustCall());
   }));
 
   session.on('stream', common.mustCall((stream) => {
     debug('Bidirectional, Client-initiated stream %d received', stream.id);
     const file = fs.createReadStream(__filename);
     let data = '';
+
+    assert(stream.submitInitialHeaders({
+      ':status': '200',
+    }));
+
     file.pipe(stream);
     stream.setEncoding('utf8');
+
+    stream.on('initialHeaders', common.mustCall((headers) => {
+      // TODO(@jasnell): Update when headers to changed to an object
+      const expected = [
+        [ ':path', '/' ],
+        [ ':authority', 'localhost' ],
+        [ ':scheme', 'https' ],
+        [ ':method', 'POST' ]
+      ];
+      assert.deepStrictEqual(expected, headers);
+      debug('Received expected request headers');
+    }));
+    stream.on('informationalHeaders', common.mustNotCall());
+    stream.on('trailingHeaders', common.mustNotCall());
+
     stream.on('data', (chunk) => {
       data += chunk;
     });
@@ -129,14 +140,26 @@ server.on('ready', common.mustCall(() => {
 
     assert(stream.submitInitialHeaders({
       ':method': 'POST',
+      ':scheme': 'https',
       ':authority': 'localhost',
       ':path': '/',
-      ':protocol': 'https:'
     }));
     file.pipe(stream);
     let data = '';
     stream.resume();
     stream.setEncoding('utf8');
+
+    stream.on('initialHeaders', common.mustCall((headers) => {
+      // TODO(@jasnell): Update when headers to changed to an object
+      const expected = [
+        [ ':status', '200' ]
+      ];
+      assert.deepStrictEqual(expected, headers);
+      debug('Received expected response headers');
+    }));
+    stream.on('informationalHeaders', common.mustNotCall());
+    stream.on('trailingHeaders', common.mustNotCall());
+
     stream.on('data', (chunk) => data += chunk);
     stream.on('finish', common.mustCall());
     stream.on('end', common.mustCall(() => {

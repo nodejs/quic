@@ -115,8 +115,8 @@ class QuicStream : public AsyncWrap, public StreamBase {
     Header() {}
 
     virtual ~Header() {}
-    virtual v8::MaybeLocal<v8::String> GetName(Environment* env) const = 0;
-    virtual v8::MaybeLocal<v8::String> GetValue(Environment* env) const = 0;
+    virtual v8::MaybeLocal<v8::String> GetName(QuicApplication* app) const = 0;
+    virtual v8::MaybeLocal<v8::String> GetValue(QuicApplication* app) const = 0;
   };
 
   enum QuicStreamStates : uint32_t {

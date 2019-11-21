@@ -307,7 +307,12 @@ class NgRcBufPointer : public MemoryRetainer {
     return *new (this) NgRcBufPointer(std::move(other));
   }
 
-  ~NgRcBufPointer() { T::dec(get()); }
+  ~NgRcBufPointer() {
+    rcbuf_t* ptr = get();
+    if (ptr != nullptr) {
+      T::dec(ptr);
+    }
+  }
 
   // Returns the underlying ngvec for this rcbuf
   uint8_t* data() const {
@@ -364,9 +369,11 @@ class NgRcBufPointer : public MemoryRetainer {
           ptr.len());
     }
 
+    template <typename Allocator>
     static v8::MaybeLocal<v8::String> New(
-        Environment* env,
+        Allocator* allocator,
         NgRcBufPointer<T> ptr) {
+      Environment* env = allocator->env();
       if (ptr.IsStatic()) {
         auto& static_str_map = env->isolate_data()->http_static_strs;
         v8::Eternal<v8::String>& eternal = static_str_map[ptr.get()];
@@ -392,6 +399,7 @@ class NgRcBufPointer : public MemoryRetainer {
         return ret;
       }
 
+      allocator->StopTrackingMemory(ptr.get());
       External* h_str = new External(std::move(ptr));
       v8::MaybeLocal<v8::String> str =
           v8::String::NewExternalOneByte(env->isolate(), h_str);
@@ -406,7 +414,7 @@ class NgRcBufPointer : public MemoryRetainer {
   };
 
  private:
-  rcbuf_t* buf_;
+  rcbuf_t* buf_ = nullptr;
   bool internalizable_ = false;
 };
 

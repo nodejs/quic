@@ -8732,7 +8732,6 @@ ngtcp2_tstamp ngtcp2_conn_get_idle_expiry(ngtcp2_conn *conn) {
   }
 
   trpto = 3 * conn_compute_pto(conn);
-
   return conn->idle_ts + ngtcp2_max(idle_timeout, trpto);
 }
 
