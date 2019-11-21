@@ -38,7 +38,7 @@ const server = createSocket({ port: kServerPort, validateAddress: true });
 
 const unidata = ['I wonder if it worked.', 'test'];
 const kServerName = 'agent2';  // Intentionally the wrong servername
-const kALPN = 'h3-23';
+const kALPN = 'h3-24';
 
 const countdown = new Countdown(1, () => {
   debug('Countdown expired. Destroying sockets');

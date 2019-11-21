@@ -3,6 +3,7 @@
 #include "env-inl.h"
 #include "ngtcp2/ngtcp2.h"
 #include "ngtcp2/ngtcp2_crypto.h"
+#include "ngtcp2/ngtcp2_crypto_openssl.h"
 #include "node.h"
 #include "node_buffer.h"
 #include "node_crypto.h"
@@ -572,10 +573,10 @@ int QuicCryptoContext::Receive(
   switch (ret) {
     case 0:
       return 0;
-    case NGTCP2_ERR_TLS_WANT_X509_LOOKUP:
+    case NGTCP2_CRYPTO_ERR_TLS_WANT_X509_LOOKUP:
       Debug(session_, "TLS handshake wants X509 Lookup");
       return 0;
-    case NGTCP2_ERR_TLS_WANT_CLIENT_HELLO_CB:
+    case NGTCP2_CRYPTO_ERR_TLS_WANT_CLIENT_HELLO_CB:
       Debug(session_, "TLS handshake wants client hello callback");
       return 0;
     default:
@@ -602,7 +603,7 @@ bool QuicCryptoContext::SetupInitialKey(const ngtcp2_cid* dcid) {
   return DeriveAndInstallInitialKey(session_, dcid);
 }
 
-bool QuicCryptoContext::UpdateKey(bool initiate) {
+bool QuicCryptoContext::InitiateKeyUpdate() {
   if (UNLIKELY(session_->IsDestroyed()))
     return false;
 
@@ -611,17 +612,34 @@ bool QuicCryptoContext::UpdateKey(bool initiate) {
   OnScopeLeave leave([&]() { in_key_update_ = false; });
   CHECK(!in_key_update_);
   in_key_update_ = true;
-  Debug(session_, "Updating keys.");
+  Debug(session_, "Initiating Key Update");
 
   IncrementStat(
       1, &session_->session_stats_,
       &QuicSession::session_stats::keyupdate_count);
 
-  if (!UpdateAndInstallKey(session_, &rx_secret_, &tx_secret_))
-    return false;
+  int err = ngtcp2_conn_initiate_key_update(
+             session_->Connection(),
+             uv_hrtime());
+printf("Initiated key update? %d\n", err);
+  return err == 0;
+}
 
-  return !initiate ||
-         ngtcp2_conn_initiate_key_update(session_->Connection()) == 0;
+bool QuicCryptoContext::KeyUpdate(
+    uint8_t* rx_key,
+    uint8_t* rx_iv,
+    uint8_t* tx_key,
+    uint8_t* tx_iv) {
+  if (UNLIKELY(session_->IsDestroyed()))
+    return false;
+  return UpdateKey(
+      session_,
+      rx_key,
+      rx_iv,
+      tx_key,
+      tx_iv,
+      &rx_secret_,
+      &tx_secret_);
 }
 
 int QuicCryptoContext::VerifyPeerIdentity(const char* hostname) {
@@ -2130,8 +2148,8 @@ void QuicSession::UpdateIdleTimer() {
   CHECK_NOT_NULL(idle_);
   uint64_t now = uv_hrtime();
   uint64_t expiry = ngtcp2_conn_get_idle_expiry(Connection());
-  uint64_t timeout = (expiry - now) / 1000000UL;
-  if (expiry < now || timeout == 0) timeout = 1;
+  uint64_t timeout = expiry > now ? (expiry - now) / 1000 : 1;
+  if (timeout == 0) timeout = 1;
   Debug(this, "Updating idle timeout to %" PRIu64, timeout);
   idle_->Update(timeout);
 }
@@ -2402,11 +2420,11 @@ void QuicSessionOnCertDone(const FunctionCallbackInfo<Value>& args) {
 }
 
 void QuicSession::UpdateRecoveryStats() {
-  ngtcp2_rcvry_stat stat;
-  ngtcp2_conn_get_rcvry_stat(Connection(), &stat);
-  recovery_stats_.min_rtt = static_cast<double>(stat.min_rtt);
-  recovery_stats_.latest_rtt = static_cast<double>(stat.latest_rtt);
-  recovery_stats_.smoothed_rtt = static_cast<double>(stat.smoothed_rtt);
+  const ngtcp2_rcvry_stat* stat =
+      ngtcp2_conn_get_rcvry_stat(Connection());
+  recovery_stats_.min_rtt = static_cast<double>(stat->min_rtt);
+  recovery_stats_.latest_rtt = static_cast<double>(stat->latest_rtt);
+  recovery_stats_.smoothed_rtt = static_cast<double>(stat->smoothed_rtt);
 }
 
 BaseObjectPtr<QuicSession> QuicSession::CreateClient(
@@ -2794,10 +2812,14 @@ int QuicSession::OnGetNewConnectionID(
 // Called by ngtcp2 to trigger a key update for the connection.
 int QuicSession::OnUpdateKey(
     ngtcp2_conn* conn,
+    uint8_t* rx_key,
+    uint8_t* rx_iv,
+    uint8_t* tx_key,
+    uint8_t* tx_iv,
     void* user_data) {
   QuicSession* session = static_cast<QuicSession*>(user_data);
   QuicSession::Ngtcp2CallbackScope callback_scope(session);
-  if (!session->CryptoContext()->UpdateKey(false)) {
+  if (!session->CryptoContext()->KeyUpdate(rx_key, rx_iv, tx_key, tx_iv)) {
     Debug(session, "Updating the key failed");
     return NGTCP2_ERR_CALLBACK_FAILURE;
   }
@@ -3023,7 +3045,7 @@ void QuicSessionRemoveFromSocket(const FunctionCallbackInfo<Value>& args) {
 void QuicSessionUpdateKey(const FunctionCallbackInfo<Value>& args) {
   QuicSession* session;
   ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
-  args.GetReturnValue().Set(session->CryptoContext()->UpdateKey());
+  args.GetReturnValue().Set(session->CryptoContext()->InitiateKeyUpdate());
 }
 
 void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {

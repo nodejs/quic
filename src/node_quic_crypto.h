@@ -58,8 +58,12 @@ bool DeriveAndInstallInitialKey(
     const ngtcp2_cid* dcid);
 
 // Called when QuicSession::UpdateKey() is called.
-bool UpdateAndInstallKey(
+bool UpdateKey(
     QuicSession* session,
+    uint8_t* rx_key,
+    uint8_t* rx_iv,
+    uint8_t* tx_key,
+    uint8_t* tx_iv,
     std::vector<uint8_t>* current_rx_secret,
     std::vector<uint8_t>* current_tx_secret);
 

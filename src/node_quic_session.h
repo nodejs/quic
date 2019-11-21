@@ -227,7 +227,12 @@ class QuicCryptoContext : public MemoryRetainer {
       const uint8_t* data,
       size_t datalen);
 
-  bool UpdateKey(bool initiate = true);
+  bool InitiateKeyUpdate();
+  bool KeyUpdate(
+    uint8_t* rx_key,
+    uint8_t* rx_iv,
+    uint8_t* tx_key,
+    uint8_t* tx_iv);
 
   int VerifyPeerIdentity(const char* hostname);
 
@@ -953,6 +958,10 @@ class QuicSession : public AsyncWrap,
       void* user_data);
   static int OnUpdateKey(
       ngtcp2_conn* conn,
+      uint8_t* rx_key,
+      uint8_t* rx_iv,
+      uint8_t* tx_key,
+      uint8_t* tx_iv,
       void* user_data);
   static int OnPathValidation(
       ngtcp2_conn* conn,
