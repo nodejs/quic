@@ -29,6 +29,12 @@
 
 #include "ngtcp2_str.h"
 
+ngtcp2_vec *ngtcp2_vec_init(ngtcp2_vec *vec, const uint8_t *base, size_t len) {
+  vec->base = (uint8_t *)base;
+  vec->len = len;
+  return vec;
+}
+
 int ngtcp2_vec_new(ngtcp2_vec **pvec, const uint8_t *data, size_t datalen,
                    const ngtcp2_mem *mem) {
   size_t len;
@@ -44,7 +50,9 @@ int ngtcp2_vec_new(ngtcp2_vec **pvec, const uint8_t *data, size_t datalen,
   p = (uint8_t *)(*pvec) + sizeof(ngtcp2_vec);
   (*pvec)->base = p;
   (*pvec)->len = datalen;
-  /* p = */ ngtcp2_cpymem(p, data, datalen);
+  if (datalen) {
+    /* p = */ ngtcp2_cpymem(p, data, datalen);
+  }
 
   return 0;
 }
@@ -64,8 +72,8 @@ size_t ngtcp2_vec_len(const ngtcp2_vec *vec, size_t n) {
   return res;
 }
 
-ssize_t ngtcp2_vec_split(ngtcp2_vec *src, size_t *psrccnt, ngtcp2_vec *dst,
-                         size_t *pdstcnt, size_t left, size_t maxcnt) {
+ngtcp2_ssize ngtcp2_vec_split(ngtcp2_vec *src, size_t *psrccnt, ngtcp2_vec *dst,
+                              size_t *pdstcnt, size_t left, size_t maxcnt) {
   size_t i;
   size_t srccnt = *psrccnt;
   size_t nmove;
@@ -97,9 +105,11 @@ ssize_t ngtcp2_vec_split(ngtcp2_vec *src, size_t *psrccnt, ngtcp2_vec *dst,
     }
 
     nmove = srccnt - i;
-    memmove(dst + nmove, dst, sizeof(ngtcp2_vec) * (*pdstcnt));
-    *pdstcnt += nmove;
-    memcpy(dst, src + i, sizeof(ngtcp2_vec) * nmove);
+    if (nmove) {
+      memmove(dst + nmove, dst, sizeof(ngtcp2_vec) * (*pdstcnt));
+      *pdstcnt += nmove;
+      memcpy(dst, src + i, sizeof(ngtcp2_vec) * nmove);
+    }
 
     dst[0].len -= left;
     dst[0].base += left;
@@ -109,7 +119,7 @@ ssize_t ngtcp2_vec_split(ngtcp2_vec *src, size_t *psrccnt, ngtcp2_vec *dst,
       extra -= left;
     }
 
-    return (ssize_t)(ngtcp2_vec_len(dst, nmove) + extra);
+    return (ngtcp2_ssize)(ngtcp2_vec_len(dst, nmove) + extra);
   }
 
   return 0;

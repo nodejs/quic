@@ -30,7 +30,6 @@
 #include "ngtcp2_str.h"
 #include "ngtcp2_conv.h"
 #include "ngtcp2_conn.h"
-#include "ngtcp2_macro.h"
 
 void ngtcp2_ppe_init(ngtcp2_ppe *ppe, uint8_t *out, size_t outlen,
                      ngtcp2_crypto_cc *cc) {
@@ -46,7 +45,7 @@ void ngtcp2_ppe_init(ngtcp2_ppe *ppe, uint8_t *out, size_t outlen,
 }
 
 int ngtcp2_ppe_encode_hd(ngtcp2_ppe *ppe, const ngtcp2_pkt_hd *hd) {
-  ssize_t rv;
+  ngtcp2_ssize rv;
   ngtcp2_buf *buf = &ppe->buf;
   ngtcp2_crypto_cc *cc = ppe->cc;
 
@@ -84,7 +83,7 @@ int ngtcp2_ppe_encode_hd(ngtcp2_ppe *ppe, const ngtcp2_pkt_hd *hd) {
 }
 
 int ngtcp2_ppe_encode_frame(ngtcp2_ppe *ppe, ngtcp2_frame *fr) {
-  ssize_t rv;
+  ngtcp2_ssize rv;
   ngtcp2_buf *buf = &ppe->buf;
   ngtcp2_crypto_cc *cc = ppe->cc;
 
@@ -103,7 +102,7 @@ int ngtcp2_ppe_encode_frame(ngtcp2_ppe *ppe, ngtcp2_frame *fr) {
   return 0;
 }
 
-ssize_t ngtcp2_ppe_final(ngtcp2_ppe *ppe, const uint8_t **ppkt) {
+ngtcp2_ssize ngtcp2_ppe_final(ngtcp2_ppe *ppe, const uint8_t **ppkt) {
   ngtcp2_buf *buf = &ppe->buf;
   ngtcp2_crypto_cc *cc = ppe->cc;
   ngtcp2_conn *conn = cc->user_data;
@@ -160,7 +159,7 @@ ssize_t ngtcp2_ppe_final(ngtcp2_ppe *ppe, const uint8_t **ppkt) {
     *ppkt = buf->begin;
   }
 
-  return (ssize_t)ngtcp2_buf_len(buf);
+  return (ngtcp2_ssize)ngtcp2_buf_len(buf);
 }
 
 size_t ngtcp2_ppe_left(ngtcp2_ppe *ppe) {
@@ -198,6 +197,8 @@ size_t ngtcp2_ppe_padding_hp_sample(ngtcp2_ppe *ppe) {
   ngtcp2_buf *buf = &ppe->buf;
   size_t max_samplelen;
   size_t len = 0;
+
+  assert(cc->aead_overhead);
 
   max_samplelen = ngtcp2_buf_len(buf) + cc->aead_overhead - ppe->sample_offset;
   if (max_samplelen < NGTCP2_HP_SAMPLELEN) {

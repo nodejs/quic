@@ -26,8 +26,6 @@
 
 #include <assert.h>
 
-#include "ngtcp2_macro.h"
-
 int ngtcp2_acktr_entry_new(ngtcp2_acktr_entry **ent, int64_t pkt_num,
                            ngtcp2_tstamp tstamp, const ngtcp2_mem *mem) {
   *ent = ngtcp2_mem_malloc(mem, sizeof(ngtcp2_acktr_entry));
@@ -322,7 +320,8 @@ void ngtcp2_acktr_commit_ack(ngtcp2_acktr *acktr) {
   acktr->rx_npkt = 0;
 }
 
-int ngtcp2_acktr_require_active_ack(ngtcp2_acktr *acktr, uint64_t max_ack_delay,
+int ngtcp2_acktr_require_active_ack(ngtcp2_acktr *acktr,
+                                    ngtcp2_duration max_ack_delay,
                                     ngtcp2_tstamp ts) {
   return acktr->first_unacked_ts <= ts - max_ack_delay;
 }

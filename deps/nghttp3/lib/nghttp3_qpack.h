@@ -162,7 +162,7 @@ typedef struct {
      the authority to decide how many entries are inserted into
      dynamic table. */
   size_t hard_max_dtable_size;
-  /* dtable_size is the effective maximum size of dynamic table. */
+  /* max_dtable_size is the effective maximum size of dynamic table. */
   size_t max_dtable_size;
   /* max_blocked is the maximum number of stream which can be
      blocked. */
@@ -304,13 +304,13 @@ int nghttp3_qpack_encoder_encode_nv(nghttp3_qpack_encoder *encoder,
 /* nghttp3_qpack_lookup_result stores a result of table lookup. */
 typedef struct {
   /* index is an index of matched entry.  -1 if no match is made. */
-  ssize_t index;
+  nghttp3_ssize index;
   /* name_value_match is nonzero if both name and value are
      matched. */
   int name_value_match;
   /* pb_index is the absolute index of matched post-based dynamic
      table entry.  -1 if no such entry exists. */
-  ssize_t pb_index;
+  nghttp3_ssize pb_index;
 } nghttp3_qpack_lookup_result;
 
 /*
@@ -740,6 +740,11 @@ struct nghttp3_qpack_decoder {
   nghttp3_buf dbuf;
   /* written_icnt is Insert Count written to decoder stream so far. */
   size_t written_icnt;
+  /* max_concurrent_streams is the number of concurrent streams that a
+     remote endpoint can open, including both bidirectional and
+     unidirectional streams which potentially receives QPACK encoded
+     HEADER frame. */
+  size_t max_concurrent_streams;
 };
 
 /*
@@ -942,16 +947,17 @@ void nghttp3_qpack_decoder_emit_literal(nghttp3_qpack_decoder *decoder,
 
 /*
  * nghttp3_qpack_decoder_write_header_ack writes Header
- * Acknowledgement to |dbuf|.
+ * Acknowledgement to decoder stream.
  *
  * This function returns 0 if it succeeds, or one of the following
  * negative error codes:
  *
  * NGHTTP3_ERR_NOMEM
  *     Out of memory.
+ * NGHTTP3_ERR_QPACK_FATAL
+ *     Decoder stream overflow.
  */
 int nghttp3_qpack_decoder_write_header_ack(
-    nghttp3_qpack_decoder *decoder, nghttp3_buf *dbuf,
-    const nghttp3_qpack_stream_context *sctx);
+    nghttp3_qpack_decoder *decoder, const nghttp3_qpack_stream_context *sctx);
 
 #endif /* NGHTTP3_QPACK_H */

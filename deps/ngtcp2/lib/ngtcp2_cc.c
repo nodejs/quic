@@ -23,9 +23,6 @@
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 #include "ngtcp2_cc.h"
-
-#include <assert.h>
-
 #include "ngtcp2_log.h"
 #include "ngtcp2_macro.h"
 
@@ -39,9 +36,11 @@ ngtcp2_cc_pkt *ngtcp2_cc_pkt_init(ngtcp2_cc_pkt *pkt, int64_t pkt_num,
 }
 
 void ngtcp2_default_cc_init(ngtcp2_default_cc *cc, ngtcp2_cc_stat *ccs,
-                            ngtcp2_log *log) {
+                            ngtcp2_log *log, ngtcp2_tstamp ts) {
   cc->log = log;
   cc->ccs = ccs;
+
+  ngtcp2_pipeack_init(&cc->pipeack, ts);
 }
 
 void ngtcp2_default_cc_free(ngtcp2_default_cc *cc) { (void)cc; }
@@ -52,14 +51,20 @@ static int default_cc_in_congestion_recovery(ngtcp2_default_cc *cc,
 }
 
 void ngtcp2_default_cc_on_pkt_acked(ngtcp2_default_cc *cc,
-                                    const ngtcp2_cc_pkt *pkt) {
+                                    const ngtcp2_cc_pkt *pkt,
+                                    const ngtcp2_rcvry_stat *rcs,
+                                    ngtcp2_tstamp ts) {
   ngtcp2_cc_stat *ccs = cc->ccs;
 
   if (default_cc_in_congestion_recovery(cc, pkt->ts_sent)) {
     return;
   }
 
-  /* TODO Do something if "app limited" */
+  ngtcp2_pipeack_update(&cc->pipeack, pkt->pktlen, rcs, ts);
+
+  if (cc->pipeack.value < ccs->cwnd / 2) {
+    return;
+  }
 
   if (ccs->cwnd < ccs->ssthresh) {
     ccs->cwnd += pkt->pktlen;
@@ -77,11 +82,11 @@ void ngtcp2_default_cc_congestion_event(ngtcp2_default_cc *cc,
                                         ngtcp2_tstamp ts) {
   ngtcp2_cc_stat *ccs = cc->ccs;
 
-  if (!default_cc_in_congestion_recovery(cc, ts_sent)) {
+  if (default_cc_in_congestion_recovery(cc, ts_sent)) {
     return;
   }
   ccs->congestion_recovery_start_ts = ts;
-  ccs->cwnd = (uint64_t)((double)ccs->cwnd * NGTCP2_LOSS_REDUCTION_FACTOR);
+  ccs->cwnd >>= NGTCP2_LOSS_REDUCTION_FACTOR_BITS;
   ccs->cwnd = ngtcp2_max(ccs->cwnd, NGTCP2_MIN_CWND);
   ccs->ssthresh = ccs->cwnd;
 

@@ -34,6 +34,19 @@
 #include "ngtcp2_mem.h"
 
 /*
+ * ngtcp2_vec_lit is a convenient macro to fill the object pointed by
+ * |DEST| with the literal string |LIT|.
+ */
+#define ngtcp2_vec_lit(DEST, LIT)                                              \
+  ((DEST)->base = (uint8_t *)(LIT), (DEST)->len = sizeof(LIT) - 1, (DEST))
+
+/*
+ * ngtcp2_vec_init initializes |vec| with the given parameters.  It
+ * returns |vec|.
+ */
+ngtcp2_vec *ngtcp2_vec_init(ngtcp2_vec *vec, const uint8_t *base, size_t len);
+
+/*
  * ngtcp2_vec_new allocates and initializes |*pvec| with given |data|
  * of length |datalen|.  This function allocates memory for |*pvec|
  * and the given data with a single allocation, and the contents
@@ -66,8 +79,8 @@ size_t ngtcp2_vec_len(const ngtcp2_vec *vec, size_t n);
  * bytes moved from |src| to |dst|.  If split cannot be made because
  * doing so exceeds |maxcnt|, this function returns -1.
  */
-ssize_t ngtcp2_vec_split(ngtcp2_vec *src, size_t *psrccnt, ngtcp2_vec *dst,
-                         size_t *pdstcnt, size_t left, size_t maxcnt);
+ngtcp2_ssize ngtcp2_vec_split(ngtcp2_vec *src, size_t *psrccnt, ngtcp2_vec *dst,
+                              size_t *pdstcnt, size_t left, size_t maxcnt);
 
 /*
  * ngtcp2_vec_merge merges |src| into |dst| by moving at most |left|

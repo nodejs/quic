@@ -32,6 +32,7 @@
 #include "ngtcp2_log.h"
 #include "ngtcp2_vec.h"
 #include "ngtcp2_cc.h"
+#include "ngtcp2_rcvry.h"
 
 int ngtcp2_frame_chain_new(ngtcp2_frame_chain **pfrc, const ngtcp2_mem *mem) {
   *pfrc = ngtcp2_mem_malloc(mem, sizeof(ngtcp2_frame_chain));
@@ -147,11 +148,13 @@ static int greater(const ngtcp2_ksl_key *lhs, const ngtcp2_ksl_key *rhs) {
 
 void ngtcp2_rtb_init(ngtcp2_rtb *rtb, ngtcp2_crypto_level crypto_level,
                      ngtcp2_strm *crypto, ngtcp2_default_cc *cc,
-                     ngtcp2_log *log, const ngtcp2_mem *mem) {
+                     ngtcp2_log *log, ngtcp2_qlog *qlog,
+                     const ngtcp2_mem *mem) {
   ngtcp2_ksl_init(&rtb->ents, greater, sizeof(int64_t), mem);
   rtb->crypto = crypto;
   rtb->cc = cc;
   rtb->log = log;
+  rtb->qlog = qlog;
   rtb->mem = mem;
   rtb->largest_acked_tx_pkt_num = -1;
   rtb->num_ack_eliciting = 0;
@@ -197,6 +200,10 @@ static void rtb_on_pkt_lost(ngtcp2_rtb *rtb, ngtcp2_frame_chain **pfrc,
                             ngtcp2_rtb_entry *ent) {
   ngtcp2_log_pkt_lost(rtb->log, ent->hd.pkt_num, ent->hd.type, ent->hd.flags,
                       ent->ts);
+
+  if (rtb->qlog) {
+    ngtcp2_qlog_pkt_lost(rtb->qlog, ent);
+  }
 
   if (!(ent->flags & NGTCP2_RTB_FLAG_PROBE)) {
     if (ent->flags & NGTCP2_RTB_FLAG_CRYPTO_TIMEOUT_RETRANSMITTED) {
@@ -331,25 +338,35 @@ static int rtb_call_acked_stream_offset(ngtcp2_rtb *rtb, ngtcp2_rtb_entry *ent,
   return 0;
 }
 
-static void rtb_on_pkt_acked(ngtcp2_rtb *rtb, ngtcp2_rtb_entry *ent) {
+static void rtb_on_pkt_acked(ngtcp2_rtb *rtb, ngtcp2_rtb_entry *ent,
+                             const ngtcp2_rcvry_stat *rcs, ngtcp2_tstamp ts) {
   ngtcp2_cc_pkt pkt;
 
   ngtcp2_default_cc_on_pkt_acked(
-      rtb->cc, ngtcp2_cc_pkt_init(&pkt, ent->hd.pkt_num, ent->pktlen, ent->ts));
+      rtb->cc, ngtcp2_cc_pkt_init(&pkt, ent->hd.pkt_num, ent->pktlen, ent->ts),
+      rcs, ts);
 }
 
-ssize_t ngtcp2_rtb_recv_ack(ngtcp2_rtb *rtb, const ngtcp2_ack *fr,
-                            ngtcp2_conn *conn, ngtcp2_tstamp ts) {
+ngtcp2_ssize ngtcp2_rtb_recv_ack(ngtcp2_rtb *rtb, const ngtcp2_ack *fr,
+                                 ngtcp2_conn *conn, ngtcp2_tstamp ts) {
   ngtcp2_rtb_entry *ent;
   int64_t largest_ack = fr->largest_ack, min_ack;
   size_t i;
   int rv;
   ngtcp2_ksl_it it;
   ngtcp2_ksl_key key;
-  ssize_t num_acked = 0;
+  ngtcp2_ssize num_acked = 0;
   int largest_pkt_acked = 0;
   int rtt_updated = 0;
   ngtcp2_tstamp largest_pkt_sent_ts = 0;
+
+  if (conn && (conn->flags & NGTCP2_CONN_FLAG_KEY_UPDATE_NOT_CONFIRMED) &&
+      largest_ack >= conn->pktns.crypto.tx.ckm->pkt_num) {
+    conn->flags &= (uint16_t)~NGTCP2_CONN_FLAG_KEY_UPDATE_NOT_CONFIRMED;
+    conn->crypto.key_update.confirmed_ts = ts;
+
+    ngtcp2_log_info(rtb->log, NGTCP2_LOG_EVENT_CRY, "key update confirmed");
+  }
 
   rtb->largest_acked_tx_pkt_num =
       ngtcp2_max(rtb->largest_acked_tx_pkt_num, largest_ack);
@@ -382,7 +399,7 @@ ssize_t ngtcp2_rtb_recv_ack(ngtcp2_rtb *rtb, const ngtcp2_ack *fr,
           ngtcp2_conn_update_rtt(conn, ts - largest_pkt_sent_ts,
                                  fr->ack_delay_unscaled);
         }
-        rtb_on_pkt_acked(rtb, ent);
+        rtb_on_pkt_acked(rtb, ent, &conn->rcs, ts);
         /* At this point, it is invalided because rtb->ents might be
            modified. */
       }
@@ -420,7 +437,7 @@ ssize_t ngtcp2_rtb_recv_ack(ngtcp2_rtb *rtb, const ngtcp2_ack *fr,
           ngtcp2_conn_update_rtt(conn, ts - largest_pkt_sent_ts,
                                  fr->ack_delay_unscaled);
         }
-        rtb_on_pkt_acked(rtb, ent);
+        rtb_on_pkt_acked(rtb, ent, &conn->rcs, ts);
       }
       rtb_remove(rtb, &it, ent);
       ++num_acked;
@@ -450,12 +467,12 @@ static int rtb_pkt_lost(ngtcp2_rtb *rtb, const ngtcp2_rtb_entry *ent,
 
 /*
  * rtb_compute_pkt_loss_delay computes delay until packet is
- * considered lost in NGTCP2_DURATION_TICK resolution.
+ * considered lost in NGTCP2_MICROSECONDS resolution.
  */
 static ngtcp2_duration compute_pkt_loss_delay(const ngtcp2_rcvry_stat *rcs) {
   /* 9/8 is kTimeThreshold */
-  ngtcp2_duration loss_delay = (ngtcp2_duration)(
-      ngtcp2_max((double)rcs->latest_rtt, rcs->smoothed_rtt) * 9 / 8);
+  ngtcp2_duration loss_delay =
+      ngtcp2_max(rcs->latest_rtt, rcs->smoothed_rtt) * 9 / 8;
   return ngtcp2_max(loss_delay, NGTCP2_GRANULARITY);
 }
 

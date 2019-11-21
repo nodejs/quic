@@ -25,11 +25,10 @@
 #include "ngtcp2_str.h"
 
 #include <string.h>
-#include <assert.h>
 
-uint8_t *ngtcp2_cpymem(uint8_t *dest, const uint8_t *src, size_t n) {
+void *ngtcp2_cpymem(void *dest, const void *src, size_t n) {
   memcpy(dest, src, n);
-  return dest + n;
+  return (uint8_t *)dest + n;
 }
 
 uint8_t *ngtcp2_setmem(uint8_t *dest, uint8_t b, size_t n) {
@@ -73,10 +72,9 @@ char *ngtcp2_encode_printable_ascii(char *dest, const uint8_t *data,
   return dest;
 }
 
-int ngtcp2_verify_stateless_retry_token(const uint8_t *want,
+int ngtcp2_verify_stateless_reset_token(const uint8_t *want,
                                         const uint8_t *got) {
   size_t i;
-  int rv;
 
   /* We consider that token with all bits not set is invalid. */
   for (i = 0; i < NGTCP2_STATELESS_RESET_TOKENLEN; ++i) {
@@ -89,10 +87,18 @@ int ngtcp2_verify_stateless_retry_token(const uint8_t *want,
     return NGTCP2_ERR_INVALID_ARGUMENT;
   }
 
-  rv = 0;
-  for (i = 0; i < NGTCP2_STATELESS_RESET_TOKENLEN; ++i) {
-    rv |= want[i] ^ got[i];
+  return ngtcp2_cmemeq(want, got, NGTCP2_STATELESS_RESET_TOKENLEN)
+             ? 0
+             : NGTCP2_ERR_INVALID_ARGUMENT;
+}
+
+int ngtcp2_cmemeq(const uint8_t *a, const uint8_t *b, size_t n) {
+  size_t i;
+  int rv = 0;
+
+  for (i = 0; i < n; ++i) {
+    rv |= a[i] ^ b[i];
   }
 
-  return rv == 0 ? 0 : NGTCP2_ERR_INVALID_ARGUMENT;
+  return rv == 0;
 }
