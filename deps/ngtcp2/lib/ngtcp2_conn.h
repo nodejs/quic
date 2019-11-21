@@ -47,6 +47,7 @@
 #include "ngtcp2_cid.h"
 #include "ngtcp2_buf.h"
 #include "ngtcp2_ppe.h"
+#include "ngtcp2_qlog.h"
 
 typedef enum {
   /* Client specific handshake states */
@@ -68,22 +69,12 @@ typedef enum {
 
 /* NGTCP2_MAX_NUM_BUFFED_RX_PKTS is the maximum number of buffered
    reordered packets. */
-#define NGTCP2_MAX_NUM_BUFFED_RX_PKTS 16
+#define NGTCP2_MAX_NUM_BUFFED_RX_PKTS 4
 
 /* NGTCP2_MAX_REORDERED_CRYPTO_DATA is the maximum offset of crypto
    data which is not continuous.  In other words, there is a gap of
    unreceived data. */
 #define NGTCP2_MAX_REORDERED_CRYPTO_DATA 65536
-
-/* NGTCP2_PKT_THRESHOLD is kPacketThreshold described in
-   draft-ietf-quic-recovery-22. */
-#define NGTCP2_PKT_THRESHOLD 3
-
-/* NGTCP2_GRANULARITY is kGranularity described in
-   draft-ietf-quic-recovery-17. */
-#define NGTCP2_GRANULARITY NGTCP2_MILLISECONDS
-
-#define NGTCP2_DEFAULT_INITIAL_RTT (500 * NGTCP2_MILLISECONDS)
 
 /* NGTCP2_MAX_RX_INITIAL_CRYPTO_DATA is the maximum offset of received
    crypto stream in Initial packet.  We set this hard limit here
@@ -164,10 +155,11 @@ typedef enum {
   /* NGTCP2_CONN_FLAG_INITIAL_KEY_DISCARDED is set when Initial keys
      have been discarded. */
   NGTCP2_CONN_FLAG_INITIAL_KEY_DISCARDED = 0x0400,
-  /* NGTCP2_CONN_FLAG_WAIT_FOR_REMOTE_KEY_UPDATE is set when local
-     endpoint has initiated key update and waits for the remote
-     endpoint to update key. */
-  NGTCP2_CONN_FLAG_WAIT_FOR_REMOTE_KEY_UPDATE = 0x0800,
+  /* NGTCP2_CONN_FLAG_KEY_UPDATE_NOT_CONFIRMED is set when key update
+     is not confirmed by the local endpoint.  That is, it has not
+     received ACK frame which acknowledges packet which is encrypted
+     with new key. */
+  NGTCP2_CONN_FLAG_KEY_UPDATE_NOT_CONFIRMED = 0x0800,
   /* NGTCP2_CONN_FLAG_PPE_PENDING is set when
      NGTCP2_WRITE_STREAM_FLAG_MORE is used and the intermediate state
      of ngtcp2_ppe is stored in pkt struct of ngtcp2_conn. */
@@ -188,23 +180,6 @@ typedef struct {
      packet type denoted by pkt_type. */
   uint8_t pkt_type;
 } ngtcp2_crypto_data;
-
-/*
- * ngtcp2_bw measures bandwidth.
- */
-typedef struct {
-  /* first_ts is a timestamp when bandwidth measurement is
-     started. */
-  ngtcp2_tstamp first_ts;
-  /* last_ts is a timestamp when bandwidth measurement was last
-     updated. */
-  ngtcp2_tstamp last_ts;
-  /* datalen is the length of STREAM data received for bandwidth
-     measurement. */
-  uint64_t datalen;
-  /* value is receiver side bandwidth. */
-  double value;
-} ngtcp2_bw;
 
 typedef struct {
   struct {
@@ -274,7 +249,7 @@ typedef struct {
 } ngtcp2_pktns;
 
 struct ngtcp2_conn {
-  int state;
+  ngtcp2_conn_state state;
   ngtcp2_conn_callbacks callbacks;
   /* rcid is a connection ID present in Initial or 0-RTT packet from
      client as destination connection ID.  Server uses this field to
@@ -350,8 +325,6 @@ struct ngtcp2_conn {
     /* max_offset is the maximum offset that remote endpoint can
        send. */
     uint64_t max_offset;
-    /* bw is STREAM data bandwidth */
-    ngtcp2_bw bw;
     /* path_challenge stores received PATH_CHALLENGE data. */
     ngtcp2_ringbuf path_challenge;
     /* ccec is the received connection close error code. */
@@ -429,6 +402,10 @@ struct ngtcp2_conn {
       ngtcp2_crypto_km *new_rx_ckm;
       /* old_rx_ckm is an old receiver 1RTT key. */
       ngtcp2_crypto_km *old_rx_ckm;
+      /* confirmed_ts is the time instant when the key update is
+         confirmed by the local endpoint last time.  UINT64_MAX means
+         undefined value. */
+      ngtcp2_tstamp confirmed_ts;
     } key_update;
 
     size_t aead_overhead;
@@ -447,7 +424,7 @@ struct ngtcp2_conn {
     int hd_logged;
     uint8_t rtb_entry_flags;
     int was_client_initial;
-    ssize_t hs_spktlen;
+    ngtcp2_ssize hs_spktlen;
   } pkt;
 
   ngtcp2_map strms;
@@ -455,6 +432,7 @@ struct ngtcp2_conn {
   ngtcp2_cc_stat ccs;
   ngtcp2_pv *pv;
   ngtcp2_log log;
+  ngtcp2_qlog qlog;
   ngtcp2_default_cc cc;
   /* token is an address validation token received from server. */
   ngtcp2_buf token;
@@ -536,8 +514,8 @@ int ngtcp2_conn_read_handshake(ngtcp2_conn *conn, const ngtcp2_path *path,
  * pointed by |dest| if it succeeds, or one of the following negative
  * error codes: (TBD).
  */
-ssize_t ngtcp2_conn_write_handshake(ngtcp2_conn *conn, uint8_t *dest,
-                                    size_t destlen, ngtcp2_tstamp ts);
+ngtcp2_ssize ngtcp2_conn_write_handshake(ngtcp2_conn *conn, uint8_t *dest,
+                                         size_t destlen, ngtcp2_tstamp ts);
 
 /**
  * @function
@@ -566,11 +544,10 @@ ssize_t ngtcp2_conn_write_handshake(ngtcp2_conn *conn, uint8_t *dest,
  * pointed by |dest| if it succeeds, or one of the following negative
  * error codes: (TBD).
  */
-ssize_t ngtcp2_conn_client_write_handshake(ngtcp2_conn *conn, uint8_t *dest,
-                                           size_t destlen, ssize_t *pdatalen,
-                                           uint32_t flags, int64_t stream_id,
-                                           int fin, const ngtcp2_vec *datav,
-                                           size_t datavcnt, ngtcp2_tstamp ts);
+ngtcp2_ssize ngtcp2_conn_client_write_handshake(
+    ngtcp2_conn *conn, uint8_t *dest, size_t destlen, ngtcp2_ssize *pdatalen,
+    uint32_t flags, int64_t stream_id, int fin, const ngtcp2_vec *datav,
+    size_t datavcnt, ngtcp2_tstamp ts);
 
 /*
  * ngtcp2_conn_sched_ack stores packet number |pkt_num| and its
@@ -647,8 +624,8 @@ int ngtcp2_conn_close_stream_if_shut_rdwr(ngtcp2_conn *conn, ngtcp2_strm *strm,
  * (sent by peer), so don't assume that |ack_delay| is always smaller
  * than, or equals to |rtt|.
  */
-void ngtcp2_conn_update_rtt(ngtcp2_conn *conn, uint64_t rtt,
-                            uint64_t ack_delay);
+void ngtcp2_conn_update_rtt(ngtcp2_conn *conn, ngtcp2_duration rtt,
+                            ngtcp2_duration ack_delay);
 
 void ngtcp2_conn_set_loss_detection_timer(ngtcp2_conn *conn);
 
@@ -692,5 +669,26 @@ int ngtcp2_conn_tx_strmq_push(ngtcp2_conn *conn, ngtcp2_strm *strm);
  * all timers in |conn|.
  */
 ngtcp2_tstamp ngtcp2_conn_internal_expiry(ngtcp2_conn *conn);
+
+/*
+ * ngtcp2_conn_write_single_frame_pkt writes a packet which contains |fr|
+ * frame only in the buffer pointed by |dest| whose length if
+ * |destlen|.  |type| is a long packet type to send.  If |type| is 0,
+ * Short packet is used.  |dcid| is used as a destination connection
+ * ID.
+ *
+ * The packet written by this function will not be retransmitted.
+ *
+ * This function returns the number of bytes written in |dest| if it
+ * succeeds, or one of the following negative error codes:
+ *
+ * NGTCP2_ERR_CALLBACK_FAILURE
+ *     User-defined callback function failed.
+ */
+ngtcp2_ssize
+ngtcp2_conn_write_single_frame_pkt(ngtcp2_conn *conn, uint8_t *dest,
+                                   size_t destlen, uint8_t type,
+                                   const ngtcp2_cid *dcid, ngtcp2_frame *fr,
+                                   uint8_t rtb_flags, ngtcp2_tstamp ts);
 
 #endif /* NGTCP2_CONN_H */

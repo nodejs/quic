@@ -1,7 +1,7 @@
 /*
  * ngtcp2
  *
- * Copyright (c) 2017 ngtcp2 contributors
+ * Copyright (c) 2019 ngtcp2 contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -22,23 +22,23 @@
  * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#include "ngtcp2_buf.h"
+#ifndef NGTCP2_RCVRY_H
+#define NGTCP2_RCVRY_H
 
-void ngtcp2_buf_init(ngtcp2_buf *buf, uint8_t *begin, size_t len) {
-  buf->begin = buf->pos = buf->last = begin;
-  buf->end = begin + len;
-}
+#ifdef HAVE_CONFIG_H
+#  include <config.h>
+#endif /* HAVE_CONFIG_H */
 
-void ngtcp2_buf_reset(ngtcp2_buf *buf) { buf->pos = buf->last = buf->begin; }
+#include <ngtcp2/ngtcp2.h>
 
-size_t ngtcp2_buf_left(const ngtcp2_buf *buf) {
-  return (size_t)(buf->end - buf->last);
-}
+/* NGTCP2_PKT_THRESHOLD is kPacketThreshold described in
+   draft-ietf-quic-recovery-22. */
+#define NGTCP2_PKT_THRESHOLD 3
 
-size_t ngtcp2_buf_len(const ngtcp2_buf *buf) {
-  return (size_t)(buf->last - buf->pos);
-}
+/* NGTCP2_GRANULARITY is kGranularity described in
+   draft-ietf-quic-recovery-17. */
+#define NGTCP2_GRANULARITY NGTCP2_MILLISECONDS
 
-size_t ngtcp2_buf_cap(const ngtcp2_buf *buf) {
-  return (size_t)(buf->end - buf->begin);
-}
+#define NGTCP2_DEFAULT_INITIAL_RTT (500 * NGTCP2_MILLISECONDS)
+
+#endif /* NGTCP2_RCVRY_H */

@@ -48,6 +48,7 @@ extern "C" {
 #endif /* !defined(_MSC_VER) || (_MSC_VER >= 1800) */
 #include <sys/types.h>
 #include <stdarg.h>
+#include <stddef.h>
 
 #include <nghttp3/version.h>
 
@@ -67,6 +68,8 @@ extern "C" {
 #  endif /* !BUILDING_NGHTTP3 */
 #endif   /* !defined(WIN32) */
 
+typedef ptrdiff_t nghttp3_ssize;
+
 typedef enum {
   NGHTTP3_ERR_INVALID_ARGUMENT = -101,
   NGHTTP3_ERR_NOBUF = -102,
@@ -84,37 +87,37 @@ typedef enum {
   NGHTTP3_ERR_HTTP_QPACK_DECOMPRESSION_FAILED = -402,
   NGHTTP3_ERR_HTTP_QPACK_ENCODER_STREAM_ERROR = -403,
   NGHTTP3_ERR_HTTP_QPACK_DECODER_STREAM_ERROR = -404,
-  NGHTTP3_ERR_HTTP_FRAME_UNEXPECTED = -408,
-  NGHTTP3_ERR_HTTP_FRAME_ERROR = -409,
-  NGHTTP3_ERR_HTTP_MISSING_SETTINGS = -665,
-  NGHTTP3_ERR_HTTP_INTERNAL_ERROR = -667,
-  NGHTTP3_ERR_HTTP_CLOSED_CRITICAL_STREAM = -668,
-  NGHTTP3_ERR_HTTP_GENERAL_PROTOCOL_ERROR = -669,
-  NGHTTP3_ERR_HTTP_ID_ERROR = -670,
-  NGHTTP3_ERR_HTTP_SETTINGS_ERROR = -671,
-  NGHTTP3_ERR_HTTP_STREAM_CREATION_ERROR = -672,
+  NGHTTP3_ERR_H3_FRAME_UNEXPECTED = -408,
+  NGHTTP3_ERR_H3_FRAME_ERROR = -409,
+  NGHTTP3_ERR_H3_MISSING_SETTINGS = -665,
+  NGHTTP3_ERR_H3_INTERNAL_ERROR = -667,
+  NGHTTP3_ERR_H3_CLOSED_CRITICAL_STREAM = -668,
+  NGHTTP3_ERR_H3_GENERAL_PROTOCOL_ERROR = -669,
+  NGHTTP3_ERR_H3_ID_ERROR = -670,
+  NGHTTP3_ERR_H3_SETTINGS_ERROR = -671,
+  NGHTTP3_ERR_H3_STREAM_CREATION_ERROR = -672,
   NGHTTP3_ERR_FATAL = -900,
   NGHTTP3_ERR_NOMEM = -901,
   NGHTTP3_ERR_CALLBACK_FAILURE = -902
 } nghttp3_lib_error;
 
-#define NGHTTP3_HTTP_NO_ERROR 0x0100
-#define NGHTTP3_HTTP_GENERAL_PROTOCOL_ERROR 0x0101
-#define NGHTTP3_HTTP_INTERNAL_ERROR 0x0102
-#define NGHTTP3_HTTP_STREAM_CREATION_ERROR 0x0103
-#define NGHTTP3_HTTP_CLOSED_CRITICAL_STREAM 0x0104
-#define NGHTTP3_HTTP_FRAME_UNEXPECTED 0x0105
-#define NGHTTP3_HTTP_FRAME_ERROR 0x0106
-#define NGHTTP3_HTTP_EXCESSIVE_LOAD 0x0107
-#define NGHTTP3_HTTP_ID_ERROR 0x0108
-#define NGHTTP3_HTTP_SETTINGS_ERROR 0x0109
-#define NGHTTP3_HTTP_MISSING_SETTINGS 0x010a
-#define NGHTTP3_HTTP_REQUEST_REJECTED 0x010b
-#define NGHTTP3_HTTP_REQUEST_CANCELLED 0x010c
-#define NGHTTP3_HTTP_REQUEST_INCOMPLETE 0x010d
-#define NGHTTP3_HTTP_EARLY_RESPONSE 0x010e
-#define NGHTTP3_HTTP_CONNECT_ERROR 0x010f
-#define NGHTTP3_HTTP_VERSION_FALLBACK 0x0110
+#define NGHTTP3_H3_NO_ERROR 0x0100
+#define NGHTTP3_H3_GENERAL_PROTOCOL_ERROR 0x0101
+#define NGHTTP3_H3_INTERNAL_ERROR 0x0102
+#define NGHTTP3_H3_STREAM_CREATION_ERROR 0x0103
+#define NGHTTP3_H3_CLOSED_CRITICAL_STREAM 0x0104
+#define NGHTTP3_H3_FRAME_UNEXPECTED 0x0105
+#define NGHTTP3_H3_FRAME_ERROR 0x0106
+#define NGHTTP3_H3_EXCESSIVE_LOAD 0x0107
+#define NGHTTP3_H3_ID_ERROR 0x0108
+#define NGHTTP3_H3_SETTINGS_ERROR 0x0109
+#define NGHTTP3_H3_MISSING_SETTINGS 0x010a
+#define NGHTTP3_H3_REQUEST_REJECTED 0x010b
+#define NGHTTP3_H3_REQUEST_CANCELLED 0x010c
+#define NGHTTP3_H3_REQUEST_INCOMPLETE 0x010d
+#define NGHTTP3_H3_EARLY_RESPONSE 0x010e
+#define NGHTTP3_H3_CONNECT_ERROR 0x010f
+#define NGHTTP3_H3_VERSION_FALLBACK 0x0110
 #define NGHTTP3_HTTP_QPACK_DECOMPRESSION_FAILED 0x0200
 #define NGHTTP3_HTTP_QPACK_ENCODER_STREAM_ERROR 0x0201
 #define NGHTTP3_HTTP_QPACK_DECODER_STREAM_ERROR 0x0202
@@ -585,7 +588,7 @@ NGHTTP3_EXTERN int nghttp3_qpack_encoder_encode(
  * :enum:`NGHTTP3_ERR_QPACK_DECODER_STREAM`
  *     |encoder| is unable to process input because it is malformed.
  */
-NGHTTP3_EXTERN ssize_t nghttp3_qpack_encoder_read_decoder(
+NGHTTP3_EXTERN nghttp3_ssize nghttp3_qpack_encoder_read_decoder(
     nghttp3_qpack_encoder *encoder, const uint8_t *src, size_t srclen);
 
 /**
@@ -802,7 +805,7 @@ NGHTTP3_EXTERN void nghttp3_qpack_decoder_del(nghttp3_qpack_decoder *decoder);
  * :enum:`NGHTTP3_ERR_QPACK_ENCODER_STREAM`
  *     Could not interpret encoder stream instruction.
  */
-NGHTTP3_EXTERN ssize_t nghttp3_qpack_decoder_read_encoder(
+NGHTTP3_EXTERN nghttp3_ssize nghttp3_qpack_decoder_read_encoder(
     nghttp3_qpack_decoder *decoder, const uint8_t *src, size_t srclen);
 
 /**
@@ -878,7 +881,7 @@ typedef enum {
  * :enum:`NGHTTP3_ERR_QPACK_HEADER_TOO_LARGE`
  *     Header field is too large.
  */
-NGHTTP3_EXTERN ssize_t nghttp3_qpack_decoder_read_request(
+NGHTTP3_EXTERN nghttp3_ssize nghttp3_qpack_decoder_read_request(
     nghttp3_qpack_decoder *decoder, nghttp3_qpack_stream_context *sctx,
     nghttp3_qpack_nv *nv, uint8_t *pflags, const uint8_t *src, size_t srclen,
     int fin);
@@ -916,6 +919,8 @@ nghttp3_qpack_decoder_get_decoder_streamlen(nghttp3_qpack_decoder *decoder);
  *
  * :enum:`NGHTTP3_ERR_NOMEM`
  *     Out of memory.
+ * :enum:`NGHTTP3_ERR_QPACK_FATAL`
+ *     Decoder stream overflow.
  */
 NGHTTP3_EXTERN int
 nghttp3_qpack_decoder_cancel_stream(nghttp3_qpack_decoder *decoder,
@@ -932,6 +937,19 @@ nghttp3_qpack_decoder_cancel_stream(nghttp3_qpack_decoder *decoder,
 NGHTTP3_EXTERN void
 nghttp3_qpack_decoder_set_dtable_cap(nghttp3_qpack_decoder *decoder,
                                      size_t cap);
+
+/**
+ * @function
+ *
+ * `nghttp3_qpack_decoder_set_max_concurrent_streams` tells |decoder|
+ * the maximum number of concurrent streams that a remote endpoint can
+ * open, including both bidirectional and unidirectional streams which
+ * potentially receive QPACK encoded HEADERS frame.  This value is
+ * used as a hint to limit the length of decoder stream.
+ */
+NGHTTP3_EXTERN void
+nghttp3_qpack_decoder_set_max_concurrent_streams(nghttp3_qpack_decoder *decoder,
+                                                 size_t max_concurrent_streams);
 
 /**
  * @function
@@ -1184,8 +1202,8 @@ typedef struct {
 typedef struct {
   uint64_t max_header_list_size;
   uint64_t max_pushes;
-  uint64_t qpack_max_table_capacity;
-  uint64_t qpack_blocked_streams;
+  size_t qpack_max_table_capacity;
+  size_t qpack_blocked_streams;
 } nghttp3_conn_settings;
 
 NGHTTP3_EXTERN void
@@ -1327,13 +1345,16 @@ typedef union {
  * stream identified by |stream_id|.  It returns the number of bytes
  * consumed.  The "consumed" means that application can increase flow
  * control credit (both stream and connection) of underlying QUIC
- * connection by that amount.  If |fin| is nonzero, this is the last
- * data from remote endpoint in this stream.
+ * connection by that amount.  It does not include the amount of data
+ * carried by DATA frame which contains application data (excluding
+ * any control or QPACK unidirectional streams) .  See
+ * type:`nghttp3_recv_data` to handle those bytes.  If |fin| is
+ * nonzero, this is the last data from remote endpoint in this stream.
  */
-NGHTTP3_EXTERN ssize_t nghttp3_conn_read_stream(nghttp3_conn *conn,
-                                                int64_t stream_id,
-                                                const uint8_t *src,
-                                                size_t srclen, int fin);
+NGHTTP3_EXTERN nghttp3_ssize nghttp3_conn_read_stream(nghttp3_conn *conn,
+                                                      int64_t stream_id,
+                                                      const uint8_t *src,
+                                                      size_t srclen, int fin);
 
 /**
  * @function
@@ -1347,10 +1368,11 @@ NGHTTP3_EXTERN ssize_t nghttp3_conn_read_stream(nghttp3_conn *conn,
  * send.  If there is no stream to write data or send fin, this
  * function returns 0, and -1 is assigned to |*pstream_id|.
  */
-NGHTTP3_EXTERN ssize_t nghttp3_conn_writev_stream(nghttp3_conn *conn,
-                                                  int64_t *pstream_id,
-                                                  int *pfin, nghttp3_vec *vec,
-                                                  size_t veccnt);
+NGHTTP3_EXTERN nghttp3_ssize nghttp3_conn_writev_stream(nghttp3_conn *conn,
+                                                        int64_t *pstream_id,
+                                                        int *pfin,
+                                                        nghttp3_vec *vec,
+                                                        size_t veccnt);
 
 /**
  * @function
@@ -1459,6 +1481,19 @@ nghttp3_conn_set_max_client_streams_bidi(nghttp3_conn *conn,
                                          uint64_t max_streams);
 
 /**
+ * @function
+ *
+ * `nghttp3_conn_set_max_concurrent_streams` tells |conn| the maximum
+ * number of concurrent streams that a remote endpoint can open,
+ * including both bidirectional and unidirectional streams which
+ * potentially receive QPACK encoded HEADERS frame.  This value is
+ * used as a hint to limit the internal resource consumption.
+ */
+NGHTTP3_EXTERN void
+nghttp3_conn_set_max_concurrent_streams(nghttp3_conn *conn,
+                                        size_t max_concurrent_streams);
+
+/**
  * @functypedef
  *
  * :type:`nghttp3_read_data_callback` is a callback function invoked
@@ -1486,7 +1521,7 @@ nghttp3_conn_set_max_client_streams_bidi(nghttp3_conn *conn,
  * TODO Add NGHTTP3_ERR_TEMPORAL_CALLBACK_FAILURE to reset just this
  * stream.
  */
-typedef ssize_t (*nghttp3_read_data_callback)(
+typedef nghttp3_ssize (*nghttp3_read_data_callback)(
     nghttp3_conn *conn, int64_t stream_id, nghttp3_vec *vec, size_t veccnt,
     uint32_t *pflags, void *conn_user_data, void *stream_user_data);
 

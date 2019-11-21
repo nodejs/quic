@@ -23,11 +23,9 @@
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 #include "ngtcp2_gaptr.h"
+#include "ngtcp2_range.h"
 
 #include <string.h>
-#include <assert.h>
-
-#include "ngtcp2_macro.h"
 
 int ngtcp2_gaptr_init(ngtcp2_gaptr *gaptr, const ngtcp2_mem *mem) {
   int rv;
