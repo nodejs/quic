@@ -71,6 +71,8 @@ added: REPLACEME
   * `maxConnectionsPerHost` {number} The maximum number of inbound connections
     per remote host. Default: `100`.
   * `port` {number} The local port to bind to.
+  * `qlog` {boolean} Whether to emit ['qlog'][] events for incoming sessions.
+    (For outgoing client sessions, set `client.qlog`.) Default: `false`.
   * `retryTokenTimeout` {number} The maximum number of *seconds* for retry token
     validation. Default: `10` seconds.
   * `server` {Object} A default configuration for QUIC server sessions.
@@ -152,6 +154,18 @@ The callback will be invoked with three arguments:
   of the path challenge.
 * `local` {Object} The local address component of the tested path.
 * `remote` {Object} The remote address component of the tested path.
+
+### Event: `'qlog'`
+<!-- YAML
+added: REPLACEME
+-->
+
+* `jsonChunk` {string} A JSON fragment.
+
+Emitted if the `qlog: true` option was passed to `quicsocket.connect()` or
+`quic.createSocket()` functions.
+
+The argument is a JSON fragment according to the [qlog standard][].
 
 ### Event: `'secure'`
 <!-- YAML
@@ -675,6 +689,8 @@ added: REPLACEME
     transport parameters from a previously established session. These would
     have been provided as part of the `'sessionTicket'` event on a previous
     `QuicClientSession` object.
+  * `qlog` {boolean} Whether to emit ['qlog'][] events for this session.
+    Default: `false`.
   * `requestOCSP` {boolean} If `true`, specifies that the OCSP status request
     extension will be added to the client hello and an `'OCSPResponse'` event
     will be emitted before establishing a secure communication.
@@ -1259,3 +1275,5 @@ Set to `true` if the `QuicStream` is unidirectional.
 
 [RFC 4007]: https://tools.ietf.org/html/rfc4007
 [Certificate Object]: https://nodejs.org/dist/latest-v12.x/docs/api/tls.html#tls_certificate_object
+['qlog']: #quic_event_qlog
+[qlog standard]: https://tools.ietf.org/id/draft-marx-qlog-event-definitions-quic-h3-00.html

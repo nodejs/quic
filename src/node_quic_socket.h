@@ -58,7 +58,8 @@ class QuicSocket : public AsyncWrap,
       Local<Object> udp_base_wrap,
       uint64_t retry_token_expiration,
       size_t max_connections_per_host,
-      uint32_t options = 0);
+      uint32_t options = 0,
+      QlogMode qlog = QlogMode::kDisabled);
   ~QuicSocket() override;
 
   SocketAddress* GetLocalAddress() { return &local_address_; }
@@ -236,6 +237,7 @@ class QuicSocket : public AsyncWrap,
 
   SocketAddress local_address_;
   QuicSessionConfig server_session_config_;
+  QlogMode qlog_ = QlogMode::kDisabled;
   crypto::SecureContext* server_secure_context_ = nullptr;
   std::string server_alpn_;
   std::unordered_map<std::string, BaseObjectPtr<QuicSession>> sessions_;

@@ -71,12 +71,14 @@ QuicSocket::QuicSocket(
     Local<Object> udp_base_wrap,
     uint64_t retry_token_expiration,
     size_t max_connections_per_host,
-    uint32_t options) :
-    AsyncWrap(env, wrap, AsyncWrap::PROVIDER_QUICSOCKET),
+    uint32_t options,
+    QlogMode qlog)
+  : AsyncWrap(env, wrap, AsyncWrap::PROVIDER_QUICSOCKET),
     alloc_info_(MakeAllocator()),
     options_(options),
     max_connections_per_host_(max_connections_per_host),
     retry_token_expiration_(retry_token_expiration),
+    qlog_(qlog),
     server_alpn_(NGTCP2_ALPN_H3),
     stats_buffer_(
         env->isolate(),
@@ -635,7 +637,8 @@ BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
           version,
           server_alpn_,
           server_options_,
-          initial_connection_close);
+          initial_connection_close,
+          qlog_);
   Local<Value> arg = session->object();
   MakeCallback(env()->quic_on_session_ready_function(), 1, &arg);
 
@@ -897,7 +900,8 @@ void NewQuicSocket(const FunctionCallbackInfo<Value>& args) {
       args[0].As<Object>(),
       retry_token_expiration,
       max_connections_per_host,
-      options);
+      options,
+      args[4]->IsTrue() ? QlogMode::kEnabled : QlogMode::kDisabled);
 }
 
 // Enabling diagnostic packet loss enables a mode where the QuicSocket
