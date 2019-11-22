@@ -186,6 +186,10 @@ void QuicSessionConfig::GeneratePreferredAddressToken(ngtcp2_cid* pscid) {
   settings_.transport_params.preferred_address.cid = *pscid;
 }
 
+void QuicSessionConfig::SetQlog(const ngtcp2_qlog_settings& qlog) {
+  settings_.qlog = qlog;
+}
+
 // Check required capabilities were not excluded from the OpenSSL build:
 // - OPENSSL_NO_SSL_TRACE excludes SSL_trace()
 // - OPENSSL_NO_STDIO excludes BIO_new_fp()
@@ -753,8 +757,9 @@ QuicSession::QuicSession(
     uint32_t version,
     const std::string& alpn,
     uint32_t options,
-    uint64_t initial_connection_close) :
-    QuicSession(
+    uint64_t initial_connection_close,
+    QlogMode qlog)
+  : QuicSession(
         NGTCP2_CRYPTO_SIDE_SERVER,
         socket,
         wrap,
@@ -766,7 +771,7 @@ QuicSession::QuicSession(
         options,
         QUIC_PREFERRED_ADDRESS_ACCEPT,  // Not used on server sessions
         initial_connection_close) {
-  InitServer(config, addr, dcid, ocid, version);
+  InitServer(config, addr, dcid, ocid, version, qlog);
 }
 
 // Client QuicSession Constructor
@@ -781,8 +786,9 @@ QuicSession::QuicSession(
     SelectPreferredAddressPolicy select_preferred_address_policy,
     const std::string& alpn,
     const std::string& hostname,
-    uint32_t options) :
-    QuicSession(
+    uint32_t options,
+    QlogMode qlog)
+  : QuicSession(
         NGTCP2_CRYPTO_SIDE_CLIENT,
         socket,
         wrap,
@@ -793,7 +799,7 @@ QuicSession::QuicSession(
         nullptr,  // rcid only used on the server
         options,
         select_preferred_address_policy) {
-  CHECK(InitClient(addr, early_transport_params, session_ticket, dcid));
+  CHECK(InitClient(addr, early_transport_params, session_ticket, dcid, qlog));
 }
 
 // QuicSession is an abstract base class that defines the code used by both
@@ -910,6 +916,12 @@ QuicSession::~QuicSession() {
         sendbuf_length,
         handshake_length,
         txbuf_length);
+
+  connection_.reset();
+
+  // Emit the 'close' event in JS. This needs to happen after destroying the
+  // connection, because doing so also releases the last qlog data.
+  MakeCallback(env()->quic_on_session_destroyed_function(), 0, nullptr);
 }
 
 std::string QuicSession::diagnostic_name() const {
@@ -2331,7 +2343,8 @@ BaseObjectPtr<QuicSession> QuicSession::CreateServer(
     uint32_t version,
     const std::string& alpn,
     uint32_t options,
-    uint64_t initial_connection_close) {
+    uint64_t initial_connection_close,
+    QlogMode qlog) {
   Local<Object> obj;
   if (!socket->env()
              ->quicserversession_constructor_template()
@@ -2350,7 +2363,8 @@ BaseObjectPtr<QuicSession> QuicSession::CreateServer(
           version,
           alpn,
           options,
-          initial_connection_close);
+          initial_connection_close,
+          qlog);
 
   session->AddToSocket(socket);
   return session;
@@ -2361,7 +2375,8 @@ void QuicSession::InitServer(
     const struct sockaddr* addr,
     const ngtcp2_cid* dcid,
     const ngtcp2_cid* ocid,
-    uint32_t version) {
+    uint32_t version,
+    QlogMode qlog) {
 
   CHECK_NULL(connection_);
 
@@ -2380,6 +2395,9 @@ void QuicSession::InitServer(
   scid_.datalen = NGTCP2_SV_SCIDLEN;
 
   QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
+
+  // NOLINTNEXTLINE(readability/pointer_notation)
+  if (qlog == QlogMode::kEnabled) config->SetQlog({ *ocid, OnQlogWrite });
 
   ngtcp2_conn* conn;
   CHECK_EQ(
@@ -2441,7 +2459,8 @@ BaseObjectPtr<QuicSession> QuicSession::CreateClient(
     SelectPreferredAddressPolicy select_preferred_address_policy,
     const std::string& alpn,
     const std::string& hostname,
-    uint32_t options) {
+    uint32_t options,
+    QlogMode qlog) {
   Local<Object> obj;
   if (!socket->env()
              ->quicclientsession_constructor_template()
@@ -2461,7 +2480,8 @@ BaseObjectPtr<QuicSession> QuicSession::CreateClient(
           select_preferred_address_policy,
           alpn,
           hostname,
-          options);
+          options,
+          qlog);
 
   session->AddToSocket(socket);
   return session;
@@ -2471,8 +2491,8 @@ bool QuicSession::InitClient(
     const struct sockaddr* addr,
     Local<Value> early_transport_params,
     Local<Value> session_ticket,
-    Local<Value> dcid_value) {
-
+    Local<Value> dcid_value,
+    QlogMode qlog) {
   CHECK_NULL(connection_);
 
   remote_address_.Copy(addr);
@@ -2500,6 +2520,8 @@ bool QuicSession::InitClient(
   }
 
   QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
+
+  if (qlog == QlogMode::kEnabled) config.SetQlog({ dcid, OnQlogWrite });
 
   ngtcp2_conn* conn;
   CHECK_EQ(
@@ -2877,6 +2899,24 @@ int QuicSession::OnStatelessReset(
   return 0;
 }
 
+void QuicSession::OnQlogWrite(void* user_data, const void* data, size_t len) {
+  QuicSession* session = static_cast<QuicSession*>(user_data);
+
+  HandleScope handle_scope(session->env()->isolate());
+  Context::Scope context_scope(session->env()->context());
+
+  Local<Value> str =
+      String::NewFromOneByte(session->env()->isolate(),
+                             static_cast<const uint8_t*>(data),
+                             v8::NewStringType::kNormal,
+                             len).ToLocalChecked();
+
+  session->MakeCallback(
+      session->env()->quic_on_session_qlog_function(),
+      1,
+      &str);
+}
+
 const ngtcp2_conn_callbacks QuicSession::callbacks[2] = {
   // NGTCP2_CRYPTO_SIDE_CLIENT
   {
@@ -2939,7 +2979,6 @@ const ngtcp2_conn_callbacks QuicSession::callbacks[2] = {
     OnExtendMaxStreamData
   }
 };
-
 
 // JavaScript API
 
@@ -3109,7 +3148,8 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
               (select_preferred_address_policy),
           alpn,
           hostname,
-          options);
+          options,
+          args[13]->IsTrue() ? QlogMode::kEnabled : QlogMode::kDisabled);
 
   session->SendPendingData();
   args.GetReturnValue().Set(session->object());

@@ -31,6 +31,11 @@ using ConnectionPointer = DeleteFnPtr<ngtcp2_conn, ngtcp2_conn_del>;
 class QuicSocket;
 class QuicStream;
 
+enum class QlogMode {
+  kDisabled,
+  kEnabled
+};
+
 // The QuicSessionConfig class holds the initial transport parameters and
 // configuration options set by the JavaScript side when either a
 // client or server QuicSession is created. Instances are
@@ -71,6 +76,8 @@ class QuicSessionConfig {
   void GeneratePreferredAddressToken(ngtcp2_cid* pscid);
 
   uint64_t GetMaxCryptoBuffer() const { return max_crypto_buffer_; }
+
+  void SetQlog(const ngtcp2_qlog_settings& qlog);
 
   const ngtcp2_settings* operator*() const { return &settings_; }
 
@@ -405,7 +412,8 @@ class QuicSession : public AsyncWrap,
       uint32_t version,
       const std::string& alpn = NGTCP2_ALPN_H3,
       uint32_t options = 0,
-      uint64_t initial_connection_close = NGTCP2_NO_ERROR);
+      uint64_t initial_connection_close = NGTCP2_NO_ERROR,
+      QlogMode qlog = QlogMode::kDisabled);
 
   static BaseObjectPtr<QuicSession> CreateClient(
       QuicSocket* socket,
@@ -418,7 +426,8 @@ class QuicSession : public AsyncWrap,
           QUIC_PREFERRED_ADDRESS_IGNORE,
       const std::string& alpn = NGTCP2_ALPN_H3,
       const std::string& hostname = "",
-      uint32_t options = 0);
+      uint32_t options = 0,
+      QlogMode qlog = QlogMode::kDisabled);
 
   static const int kInitialClientBufferLength = 4096;
 
@@ -460,7 +469,8 @@ class QuicSession : public AsyncWrap,
       uint32_t version,
       const std::string& alpn,
       uint32_t options,
-      uint64_t initial_connection_close);
+      uint64_t initial_connection_close,
+      QlogMode qlog);
 
   // Client Constructor
   QuicSession(
@@ -474,7 +484,8 @@ class QuicSession : public AsyncWrap,
       SelectPreferredAddressPolicy select_preferred_address_policy,
       const std::string& alpn,
       const std::string& hostname,
-      uint32_t options);
+      uint32_t options,
+      QlogMode qlog);
 
   ~QuicSession() override;
 
@@ -791,14 +802,16 @@ class QuicSession : public AsyncWrap,
       const struct sockaddr* addr,
       const ngtcp2_cid* dcid,
       const ngtcp2_cid* ocid,
-      uint32_t version);
+      uint32_t version,
+      QlogMode qlog);
 
   // Initialize the QuicSession as a client
   bool InitClient(
       const struct sockaddr* addr,
       v8::Local<v8::Value> early_transport_params,
       v8::Local<v8::Value> session_ticket,
-      v8::Local<v8::Value> dcid);
+      v8::Local<v8::Value> dcid,
+      QlogMode qlog);
 
   void InitApplication();
 
@@ -1002,6 +1015,7 @@ class QuicSession : public AsyncWrap,
       ngtcp2_conn* conn,
       uint64_t max_streams,
       void* user_data);
+  static void OnQlogWrite(void* user_data, const void* data, size_t len);
 
   void UpdateIdleTimer();
   void UpdateRetransmitTimer(uint64_t timeout);
