@@ -915,7 +915,8 @@ QuicSession::~QuicSession() {
 std::string QuicSession::diagnostic_name() const {
   return std::string("QuicSession ") +
       (IsServer() ? "Server" : "Client") +
-      " (" + std::to_string(static_cast<int64_t>(get_async_id())) + ")";
+      " (" + GetALPN().substr(1) + ", " +
+      std::to_string(static_cast<int64_t>(get_async_id())) + ")";
 }
 
 // Locate the QuicStream with the given id or return nullptr
