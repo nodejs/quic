@@ -8,6 +8,7 @@ const common = require('../common');
 if (!common.hasQuic)
   common.skip('missing quic');
 
+const assert = require('assert');
 const fs = require('fs');
 const fixtures = require('../common/fixtures');
 const key = fixtures.readKey('agent1-key.pem', 'binary');
@@ -40,6 +41,12 @@ server.on('session', common.mustCall((session) => {
   session.on('close', common.mustCall(() => {
     client.close();
     server.close();
+
+    assert.throws(() => server.close(), {
+      code: 'ERR_QUICSOCKET_DESTROYED',
+      name: 'Error',
+      message: 'Cannot call close after a QuicSocket has been destroyed'
+    });
   }));
   session.on('stream', common.mustNotCall());
 
