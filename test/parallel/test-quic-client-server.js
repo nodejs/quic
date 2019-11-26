@@ -214,9 +214,15 @@ server.on('session', common.mustCall((session) => {
     debug(`Server session closed with code ${code} (family: ${family})`);
     assert.strictEqual(code, NGTCP2_NO_ERROR);
     assert.strictEqual(family, QUIC_ERROR_APPLICATION);
-    assert.throws(() => session.ping(), {
+
+    const err = {
       code: 'ERR_QUICSESSION_DESTROYED',
       name: 'Error'
+    };
+    assert.throws(() => session.ping(), { ...err });
+    assert.throws(() => session.openStream(), {
+      ...err,
+      message: 'Cannot call openStream after a QuicSession has been destroyed'
     });
   }));
 }));
