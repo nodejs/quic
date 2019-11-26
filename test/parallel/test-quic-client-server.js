@@ -224,6 +224,10 @@ server.on('session', common.mustCall((session) => {
       ...err,
       message: 'Cannot call openStream after a QuicSession has been destroyed'
     });
+    assert.throws(() => session.updateKey(), {
+      ...err,
+      message: 'Cannot call updateKey after a QuicSession has been destroyed'
+    });
   }));
 }));
 
