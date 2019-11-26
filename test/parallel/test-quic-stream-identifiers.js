@@ -47,6 +47,18 @@ server.on('session', common.mustCall((session) => {
   debug('QuicServerSession created');
   session.on('secure', common.mustCall(() => {
     debug('QuicServerSession TLS Handshake Completed.');
+
+    ([3, 1n, [], {}, null, 'meow']).forEach((halfOpen) => {
+      const message = 'The "options.halfOpen" property must' +
+        ` be of type boolean. Received type ${typeof halfOpen}`;
+
+      assert.throws(() => session.openStream({ halfOpen }), {
+        code: 'ERR_INVALID_ARG_TYPE',
+        name: 'TypeError',
+        message
+      });
+    });
+
     const uni = session.openStream({ halfOpen: true });
     uni.end('test');
     debug('Unidirectional, Server-initiated stream %d opened', uni.id);
