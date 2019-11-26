@@ -111,6 +111,8 @@ void Initialize(Local<Object> target,
               (field)).FromJust()
   SET_STATE_TYPEDARRAY(
     "sessionConfig", state->quicsessionconfig_buffer.GetJSArray());
+  SET_STATE_TYPEDARRAY(
+    "http3Config", state->http3config_buffer.GetJSArray());
 #undef SET_STATE_TYPEDARRAY
 
   env->set_quic_state(std::move(state));
@@ -178,6 +180,12 @@ void Initialize(Local<Object> target,
   NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_MAX_ACK_DELAY);
   NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_MAX_CRYPTO_BUFFER);
   NODE_DEFINE_CONSTANT(constants, IDX_QUIC_SESSION_CONFIG_COUNT);
+
+  NODE_DEFINE_CONSTANT(constants, IDX_HTTP3_QPACK_MAX_TABLE_CAPACITY);
+  NODE_DEFINE_CONSTANT(constants, IDX_HTTP3_QPACK_BLOCKED_STREAMS);
+  NODE_DEFINE_CONSTANT(constants, IDX_HTTP3_MAX_HEADER_LIST_SIZE);
+  NODE_DEFINE_CONSTANT(constants, IDX_HTTP3_MAX_PUSHES);
+  NODE_DEFINE_CONSTANT(constants, IDX_HTTP3_CONFIG_COUNT);
 
   NODE_DEFINE_CONSTANT(constants, QUICSTREAM_HEADER_FLAGS_NONE);
   NODE_DEFINE_CONSTANT(constants, QUICSTREAM_HEADER_FLAGS_TERMINAL);

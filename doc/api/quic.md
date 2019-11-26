@@ -653,6 +653,11 @@ added: REPLACEME
   * `maxStreamDataUni` {number}
   * `maxStreamsBidi` {number}
   * `maxStreamsUni` {number}
+  * `h3` {Object} HTTP/3 Specific Configuration Options
+    * `qpackMaxTableCapacity` {number}
+    * `qpackBlockedStreams` {number}
+    * `maxHeaderListSize` {number}
+    * `maxPushes` {number}
   * `passphrase` {string} Shared passphrase used for a single private key and/or
     a PFX.
   * `pfx` {string|string[]|Buffer|Buffer[]|Object[]} PFX or PKCS12 encoded
