@@ -214,6 +214,10 @@ server.on('session', common.mustCall((session) => {
     debug(`Server session closed with code ${code} (family: ${family})`);
     assert.strictEqual(code, NGTCP2_NO_ERROR);
     assert.strictEqual(family, QUIC_ERROR_APPLICATION);
+    assert.throws(() => session.ping(), {
+      code: 'ERR_QUICSESSION_DESTROYED',
+      name: 'Error'
+    });
   }));
 }));
 
