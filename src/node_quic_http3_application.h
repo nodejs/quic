@@ -44,6 +44,8 @@ using Http3Headers = NgHeaders<Http3HeadersTraits>;
 
 constexpr uint64_t DEFAULT_QPACK_MAX_TABLE_CAPACITY = 4096;
 constexpr uint64_t DEFAULT_QPACK_BLOCKED_STREAMS = 100;
+constexpr size_t DEFAULT_MAX_HEADER_LIST_SIZE = 65535;
+constexpr size_t DEFAULT_MAX_PUSHES = 65535;
 
 using Http3ConnectionPointer = DeleteFnPtr<nghttp3_conn, nghttp3_conn_del>;
 
@@ -178,6 +180,11 @@ class Http3Application final :
   int64_t qpack_enc_stream_id_;
   int64_t qpack_dec_stream_id_;
   size_t current_nghttp3_memory_ = 0;
+
+  uint64_t qpack_max_table_capacity_ = DEFAULT_QPACK_MAX_TABLE_CAPACITY;
+  uint64_t qpack_blocked_streams_ = DEFAULT_QPACK_BLOCKED_STREAMS;
+  size_t max_header_list_size_ = DEFAULT_MAX_HEADER_LIST_SIZE;
+  size_t max_pushes_ = DEFAULT_MAX_PUSHES;
 
   nghttp3_conn* CreateConnection(nghttp3_conn_settings* settings);
 

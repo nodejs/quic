@@ -90,10 +90,29 @@ MaybeLocal<String> Http3Header::GetValue(QuicApplication* app) const {
       value_);
 }
 
+namespace {
+template <typename t>
+inline void SetConfig(Environment* env, int idx, t* val) {
+  AliasedFloat64Array& buffer = env->quic_state()->http3config_buffer;
+  uint64_t flags = static_cast<uint64_t>(buffer[IDX_HTTP3_CONFIG_COUNT]);
+  if (flags & (1ULL << idx))
+    *val = static_cast<t>(buffer[idx]);
+}
+}  // namespace
+
 Http3Application::Http3Application(
     QuicSession* session)
   : QuicApplication(session),
     alloc_info_(MakeAllocator()) {
+  // Collect Configuration Details
+  Environment* env = session->env();
+  SetConfig(env, IDX_HTTP3_QPACK_MAX_TABLE_CAPACITY,
+            &qpack_max_table_capacity_);
+  SetConfig(env, IDX_HTTP3_QPACK_BLOCKED_STREAMS,
+            &qpack_blocked_streams_);
+  SetConfig(env, IDX_HTTP3_MAX_HEADER_LIST_SIZE, &max_header_list_size_);
+  SetConfig(env, IDX_HTTP3_MAX_PUSHES, &max_pushes_);
+  env->quic_state()->http3config_buffer[IDX_HTTP3_CONFIG_COUNT] = 0;  // Reset
 }
 
 bool Http3Application::SubmitInformation(
@@ -253,13 +272,19 @@ bool Http3Application::Initialize() {
   if (Session()->GetMaxLocalStreamsUni() < 3)
     return false;
 
-  // TODO(@jasnell): How we provide application specific settings...
   nghttp3_conn_settings settings;
   nghttp3_conn_settings_default(&settings);
-
-  // TODO(@jasnell): Make configurable
-  settings.qpack_max_table_capacity = DEFAULT_QPACK_MAX_TABLE_CAPACITY;
-  settings.qpack_blocked_streams = DEFAULT_QPACK_BLOCKED_STREAMS;
+  settings.qpack_max_table_capacity = qpack_max_table_capacity_;
+  settings.qpack_blocked_streams = qpack_blocked_streams_;
+  settings.max_header_list_size = max_header_list_size_;
+  settings.max_pushes = max_pushes_;
+  Debug(Session(), "QPack Max Table Capacity: %" PRIu64,
+        qpack_max_table_capacity_);
+  Debug(Session(), "QPack Blocked Streams: %" PRIu64,
+        qpack_blocked_streams_);
+  Debug(Session(), "Max Header List Size: %" PRIu64,
+        max_header_list_size_);
+  Debug(Session(), "Max Pushes: %" PRIu64, max_pushes_);
 
   connection_.reset(CreateConnection(&settings));
   CHECK(connection_);

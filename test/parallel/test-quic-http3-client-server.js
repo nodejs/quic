@@ -15,7 +15,6 @@ const {
   }
 } = internalBinding('quic');
 
-const { Buffer } = require('buffer');
 const Countdown = require('../common/countdown');
 const assert = require('assert');
 const fs = require('fs');
@@ -129,6 +128,7 @@ server.on('ready', common.mustCall(() => {
     address: 'localhost',
     port: server.address.port,
     servername: kServerName,
+    h3: { maxPushes: 10 }
   });
   debug('QuicClientSession Created');
 
