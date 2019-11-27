@@ -3065,7 +3065,7 @@ void QuicSessionGetPeerCertificate(const FunctionCallbackInfo<Value>& args) {
   QuicSession* session;
   ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
   args.GetReturnValue().Set(
-      crypto::GetPeerCertificate(
+      crypto::GetPeerCert(
           session->env(),
           session->CryptoContext()->ssl(),
           !args[0]->IsTrue(),
@@ -3087,7 +3087,7 @@ void QuicSessionGetCertificate(
   QuicSession* session;
   ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
   args.GetReturnValue().Set(
-      crypto::GetCertificate(
+      crypto::GetCert(
           session->env(),
           session->CryptoContext()->ssl()));
 }
