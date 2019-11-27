@@ -1,6 +1,7 @@
 #include "aliased_buffer.h"
 #include "debug_utils.h"
 #include "env-inl.h"
+#include "node_crypto_common-inl.h"
 #include "ngtcp2/ngtcp2.h"
 #include "ngtcp2/ngtcp2_crypto.h"
 #include "ngtcp2/ngtcp2_crypto_openssl.h"
@@ -279,7 +280,7 @@ void QuicCryptoContext::EnableTrace() {
 }
 
 std::string QuicCryptoContext::GetOCSPResponse() {
-  return GetSSLOCSPResponse(ssl());
+  return crypto::GetSSLOCSPResponse(ssl());
 }
 
 ngtcp2_crypto_level QuicCryptoContext::GetReadCryptoLevel() {
@@ -352,13 +353,19 @@ int QuicCryptoContext::OnClientHello() {
   HandleScope scope(env->isolate());
   Context::Scope context_scope(env->context());
 
-  const char* alpn = GetClientHelloALPN(session_);
-  const char* server_name = GetClientHelloServerName(session_);
+  const char* alpn =
+      crypto::GetClientHelloALPN(
+          session_->CryptoContext()->ssl());
+  const char* server_name =
+      crypto::GetClientHelloServerName(
+          session_->CryptoContext()->ssl());
 
   Local<Value> argv[] = {
     Undefined(env->isolate()),
     Undefined(env->isolate()),
-    GetClientHelloCiphers(session_)
+    crypto::GetClientHelloCiphers(
+        session_->env(),
+        session_->CryptoContext()->ssl())
   };
 
   if (alpn != nullptr) {
@@ -421,7 +428,9 @@ int QuicCryptoContext::OnOCSP() {
   Context::Scope context_scope(env->context());
 
   Local<Value> servername_str;
-  const char* servername = GetServerName(session_);
+  const char* servername =
+      crypto::GetServerName(
+          session_->CryptoContext()->ssl());
 
   Local<Value> argv[] = {
     servername == nullptr ?
@@ -460,7 +469,7 @@ void QuicCryptoContext::OnOCSPDone(
   session_->state_[IDX_QUIC_SESSION_STATE_CERT_ENABLED] = 0;
 
   if (context != nullptr) {
-    int err = UseSNIContext(ssl(), context);
+    int err = crypto::UseSNIContext(ssl(), context);
     if (!err) {
       unsigned long err = ERR_get_error();  // NOLINT(runtime/int)
       if (!err) {
@@ -598,7 +607,7 @@ void QuicCryptoContext::ResumeHandshake() {
 }
 
 bool QuicCryptoContext::SetSession(const unsigned char* data, size_t length) {
-  return SetTLSSession(ssl(), data, length);
+  return crypto::SetTLSSession(ssl(), data, length);
 }
 
 void QuicCryptoContext::SetTLSAlert(int err) {
@@ -650,7 +659,7 @@ bool QuicCryptoContext::KeyUpdate(
 }
 
 int QuicCryptoContext::VerifyPeerIdentity(const char* hostname) {
-  int err = VerifyPeerCertificate(ssl());
+  int err = crypto::VerifyPeerCertificate(ssl());
   if (err)
     return err;
 
@@ -1237,7 +1246,9 @@ void QuicSession::HandshakeCompleted() {
   Context::Scope context_scope(env()->context());
 
   Local<Value> servername = Undefined(env()->isolate());
-  const char* hostname = GetServerName(this);
+  const char* hostname =
+      crypto::GetServerName(
+          this->CryptoContext()->ssl());
   if (hostname != nullptr) {
     servername =
         String::NewFromUtf8(
@@ -1254,14 +1265,14 @@ void QuicSession::HandshakeCompleted() {
   Local<Value> argv[] = {
     servername,
     GetALPNProtocol(this),
-    GetCipherName(this),
-    GetCipherVersion(this),
+    crypto::GetCipherName(this->env(), this->CryptoContext()->ssl()),
+    crypto::GetCipherVersion(this->env(), this->CryptoContext()->ssl()),
     Integer::New(env()->isolate(), max_pktlen_),
     err != 0 ?
-        GetValidationErrorReason(env(), err) :
+        crypto::GetValidationErrorReason(env(), err) :
         v8::Undefined(env()->isolate()).As<Value>(),
     err != 0 ?
-        GetValidationErrorCode(env(), err) :
+        crypto::GetValidationErrorCode(env(), err) :
         v8::Undefined(env()->isolate()).As<Value>()
   };
 
@@ -3041,21 +3052,24 @@ void QuicSessionDestroy(const FunctionCallbackInfo<Value>& args) {
   session->Destroy();
 }
 
-// TODO(@jasnell): Consolidate shared code with node_crypto
 void QuicSessionGetEphemeralKeyInfo(const FunctionCallbackInfo<Value>& args) {
   QuicSession* session;
   ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
-  return args.GetReturnValue().Set(GetEphemeralKey(session));
+  return args.GetReturnValue().Set(
+      crypto::GetEphemeralKey(
+          session->env(),
+          session->CryptoContext()->ssl()));
 }
 
-// TODO(@jasnell): Consolidate with shared code in node_crypto
 void QuicSessionGetPeerCertificate(const FunctionCallbackInfo<Value>& args) {
   QuicSession* session;
   ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
   args.GetReturnValue().Set(
-      GetPeerCertificate(
-          session,
-          !args[0]->IsTrue()));
+      crypto::GetPeerCertificate(
+          session->env(),
+          session->CryptoContext()->ssl(),
+          !args[0]->IsTrue(),
+          session->IsServer()));
 }
 
 void QuicSessionGetRemoteAddress(
@@ -3068,12 +3082,14 @@ void QuicSessionGetRemoteAddress(
       AddressToJS(env, **session->GetRemoteAddress(), args[0].As<Object>()));
 }
 
-// TODO(@jasnell): Reconcile with shared code in node_crypto
 void QuicSessionGetCertificate(
     const FunctionCallbackInfo<Value>& args) {
   QuicSession* session;
   ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
-  args.GetReturnValue().Set(GetCertificate(session));
+  args.GetReturnValue().Set(
+      crypto::GetCertificate(
+          session->env(),
+          session->CryptoContext()->ssl()));
 }
 
 void QuicSessionPing(const FunctionCallbackInfo<Value>& args) {
