@@ -326,29 +326,40 @@ struct QuicPathStorage {
   std::array<uint8_t, sizeof(sockaddr_storage)> remote_addrbuf;
 };
 
+// Simple wrapper for ngtcp2_cid that handles hex encoding
+// and conversion to std::string automatically
 class QuicCID {
  public:
-  explicit QuicCID(ngtcp2_cid* cid) : cid_(*cid) {}
-  explicit QuicCID(const ngtcp2_cid* cid) : cid_(*cid) {}
-  explicit QuicCID(const ngtcp2_cid& cid) : cid_(cid) {}
+  explicit QuicCID(ngtcp2_cid* cid) :
+      cid_(*cid),
+      str_(cid->data, cid->data + cid->datalen) {}
+  explicit QuicCID(const ngtcp2_cid* cid) :
+      cid_(*cid),
+      str_(cid->data, cid->data + cid->datalen) {}
+  explicit QuicCID(const ngtcp2_cid& cid) :
+      cid_(cid),
+      str_(cid.data, cid.data + cid.datalen) {}
   QuicCID(const uint8_t* cid, size_t len) {
     ngtcp2_cid_init(&cid_, cid, len);
+    str_ = std::string(cid_.data, cid_.data + cid_.datalen);
   }
 
-  std::string ToStr() const {
-    return std::string(cid_.data, cid_.data + cid_.datalen);
-  }
+  std::string ToStr() const { return str_; }
 
   std::string ToHex() const {
-    MaybeStackBuffer<char, 64> dest;
-    dest.AllocateSufficientStorage(cid_.datalen * 2);
-    dest.SetLengthAndZeroTerminate(cid_.datalen * 2);
-    size_t written = StringBytes::hex_encode(
-        reinterpret_cast<const char*>(cid_.data),
-        cid_.datalen,
-        *dest,
-        dest.length());
-    return std::string(*dest, written);
+    if (hex_.empty() && cid_.datalen > 0) {
+      size_t len = cid_.datalen * 2;
+      MaybeStackBuffer<char, 64> dest;
+      dest.AllocateSufficientStorage(len);
+      dest.SetLengthAndZeroTerminate(len);
+      size_t written = StringBytes::hex_encode(
+          reinterpret_cast<const char*>(cid_.data),
+          cid_.datalen,
+          *dest,
+          dest.length());
+      hex_ = std::string(*dest, written);
+    }
+    return hex_;
   }
 
   const ngtcp2_cid* operator*() const { return &cid_; }
@@ -358,6 +369,8 @@ class QuicCID {
 
  private:
   ngtcp2_cid cid_;
+  std::string str_;
+  mutable std::string hex_;
 };
 
 // https://stackoverflow.com/questions/33701430/template-function-to-access-struct-members
