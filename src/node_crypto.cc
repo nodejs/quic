@@ -24,6 +24,7 @@
 #include "node_crypto_bio.h"
 #include "node_crypto_clienthello-inl.h"
 #include "node_crypto_groups.h"
+#include "node_crypto_common-inl.h"
 #include "node_errors.h"
 #include "node_mutex.h"
 #include "node_process.h"
@@ -2269,46 +2270,12 @@ void SSLWrap<Base>::GetPeerCertificate(
     const FunctionCallbackInfo<Value>& args) {
   Base* w;
   ASSIGN_OR_RETURN_UNWRAP(&w, args.Holder());
-  Environment* env = w->ssl_env();
-
-  ClearErrorOnReturn clear_error_on_return;
-
-  Local<Object> result;
-  // Used to build the issuer certificate chain.
-  Local<Object> issuer_chain;
-
-  // NOTE: This is because of the odd OpenSSL behavior. On client `cert_chain`
-  // contains the `peer_certificate`, but on server it doesn't.
-  X509Pointer cert(
-      w->is_server() ? SSL_get_peer_certificate(w->ssl_.get()) : nullptr);
-  STACK_OF(X509)* ssl_certs = SSL_get_peer_cert_chain(w->ssl_.get());
-  if (!cert && (ssl_certs == nullptr || sk_X509_num(ssl_certs) == 0))
-    goto done;
-
-  // Short result requested.
-  if (args.Length() < 1 || !args[0]->IsTrue()) {
-    result = X509ToObject(env, cert ? cert.get() : sk_X509_value(ssl_certs, 0));
-    goto done;
-  }
-
-  if (auto peer_certs = CloneSSLCerts(std::move(cert), ssl_certs)) {
-    // First and main certificate.
-    X509Pointer cert(sk_X509_value(peer_certs.get(), 0));
-    CHECK(cert);
-    result = X509ToObject(env, cert.release());
-
-    issuer_chain =
-        AddIssuerChainToObject(&cert, result, std::move(peer_certs), env);
-    issuer_chain = GetLastIssuedCert(&cert, w->ssl_.get(), issuer_chain, env);
-    // Last certificate should be self-signed.
-    if (X509_check_issued(cert.get(), cert.get()) == X509_V_OK)
-      issuer_chain->Set(env->context(),
-                        env->issuercert_string(),
-                        issuer_chain).Check();
-  }
-
- done:
-  args.GetReturnValue().Set(result);
+  args.GetReturnValue().Set(
+      GetPeerCert(
+          w->ssl_env(),
+          w->ssl_.get(),
+          args.Length() < 1 || !args[0]->IsTrue(),
+          w->is_server()));
 }
 
 
@@ -2317,18 +2284,7 @@ void SSLWrap<Base>::GetCertificate(
     const FunctionCallbackInfo<Value>& args) {
   Base* w;
   ASSIGN_OR_RETURN_UNWRAP(&w, args.Holder());
-  Environment* env = w->ssl_env();
-
-  ClearErrorOnReturn clear_error_on_return;
-
-  Local<Object> result;
-
-  X509* cert = SSL_get_certificate(w->ssl_.get());
-
-  if (cert != nullptr)
-    result = X509ToObject(env, cert);
-
-  args.GetReturnValue().Set(result);
+  args.GetReturnValue().Set(GetCert(w->ssl_env(), w->ssl_.get()));
 }
 
 
@@ -2415,14 +2371,8 @@ void SSLWrap<Base>::SetSession(const FunctionCallbackInfo<Value>& args) {
   ArrayBufferViewContents<unsigned char> sbuf(args[0].As<ArrayBufferView>());
 
   const unsigned char* p = sbuf.data();
-  SSLSessionPointer sess(d2i_SSL_SESSION(nullptr, &p, sbuf.length()));
 
-  if (sess == nullptr)
-    return;
-
-  int r = SSL_set_session(w->ssl_.get(), sess.get());
-
-  if (!r)
+  if (!SetTLSSession(w->ssl_.get(), p, sbuf.length()))
     return env->ThrowError("SSL_set_session error");
 }
 
@@ -2546,51 +2496,8 @@ void SSLWrap<Base>::GetEphemeralKeyInfo(
   if (w->is_server())
     return args.GetReturnValue().SetNull();
 
-  Local<Object> info = Object::New(env->isolate());
-
-  EVP_PKEY* raw_key;
-  if (SSL_get_server_tmp_key(w->ssl_.get(), &raw_key)) {
-    EVPKeyPointer key(raw_key);
-    int kid = EVP_PKEY_id(key.get());
-    switch (kid) {
-      case EVP_PKEY_DH:
-        info->Set(context, env->type_string(),
-                  FIXED_ONE_BYTE_STRING(env->isolate(), "DH")).Check();
-        info->Set(context, env->size_string(),
-                  Integer::New(env->isolate(), EVP_PKEY_bits(key.get())))
-            .Check();
-        break;
-      case EVP_PKEY_EC:
-      case EVP_PKEY_X25519:
-      case EVP_PKEY_X448:
-        {
-          const char* curve_name;
-          if (kid == EVP_PKEY_EC) {
-            EC_KEY* ec = EVP_PKEY_get1_EC_KEY(key.get());
-            int nid = EC_GROUP_get_curve_name(EC_KEY_get0_group(ec));
-            curve_name = OBJ_nid2sn(nid);
-            EC_KEY_free(ec);
-          } else {
-            curve_name = OBJ_nid2sn(kid);
-          }
-          info->Set(context, env->type_string(),
-                    FIXED_ONE_BYTE_STRING(env->isolate(), "ECDH")).Check();
-          info->Set(context, env->name_string(),
-                    OneByteString(args.GetIsolate(),
-                                  curve_name)).Check();
-          info->Set(context, env->size_string(),
-                    Integer::New(env->isolate(),
-                                 EVP_PKEY_bits(key.get()))).Check();
-        }
-        break;
-      default:
-        break;
-    }
-  }
-  // TODO(@sam-github) semver-major: else return ThrowCryptoError(env,
-  // ERR_get_error())
-
-  return args.GetReturnValue().Set(info);
+  return args.GetReturnValue().Set(
+      crypto::GetEphemeralKey(env, w->ssl_.get()));
 }
 
 
@@ -2620,11 +2527,8 @@ void SSLWrap<Base>::VerifyError(const FunctionCallbackInfo<Value>& args) {
   // peer certificate is questionable but it's compatible with what was
   // here before.
   long x509_verify_error =  // NOLINT(runtime/int)
-      X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT;
-  if (X509* peer_cert = SSL_get_peer_certificate(w->ssl_.get())) {
-    X509_free(peer_cert);
-    x509_verify_error = SSL_get_verify_result(w->ssl_.get());
-  }
+      VerifyPeerCertificate(w->ssl_.get(),
+      X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT);
 
   if (x509_verify_error == X509_V_OK)
     return args.GetReturnValue().SetNull();
@@ -2686,15 +2590,14 @@ void SSLWrap<Base>::GetCipher(const FunctionCallbackInfo<Value>& args) {
     return;
 
   Local<Object> info = Object::New(env->isolate());
-  const char* cipher_name = SSL_CIPHER_get_name(c);
   info->Set(context, env->name_string(),
-            OneByteString(args.GetIsolate(), cipher_name)).Check();
+            GetCipherName(env, w->ssl_.get())).Check();
   const char* cipher_standard_name = SSL_CIPHER_standard_name(c);
   info->Set(context, env->standard_name_string(),
             OneByteString(args.GetIsolate(), cipher_standard_name)).Check();
   const char* cipher_version = SSL_CIPHER_get_version(c);
   info->Set(context, env->version_string(),
-            OneByteString(args.GetIsolate(), cipher_version)).Check();
+            GetCipherVersion(env, w->ssl_.get())).Check();
   args.GetReturnValue().Set(info);
 }
 

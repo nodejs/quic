@@ -31,7 +31,7 @@ std::unordered_multimap<std::string, std::string> GetCertificateAltNames(
 
 std::string GetCertificateCN(X509* cert);
 
-int VerifyPeerCertificate(SSL* ssl);
+int VerifyPeerCertificate(SSL* ssl, int def = X509_V_ERR_UNSPECIFIED);
 
 int UseSNIContext(SSL* ssl, SecureContext* context);
 
@@ -41,7 +41,7 @@ bool SetGroups(SecureContext* sc, const char* groups);
 
 const char* X509ErrorCode(int err);
 
-v8::Local<v8::Value> GetCertificate(Environment* env, SSL* ssl);
+v8::Local<v8::Value> GetCert(Environment* env, SSL* ssl);
 
 v8::Local<v8::Value> GetCipherName(
     Environment* env,
@@ -53,7 +53,7 @@ v8::Local<v8::Value> GetCipherVersion(
 
 v8::Local<v8::Value> GetEphemeralKey(Environment* env, SSL* ssl);
 
-v8::Local<v8::Value> GetPeerCertificate(
+v8::Local<v8::Value> GetPeerCert(
     Environment* env,
     SSL* ssl,
     bool abbreviated = false,

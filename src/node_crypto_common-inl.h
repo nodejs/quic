@@ -5,6 +5,7 @@
 #include "node_crypto.h"
 #include "node_crypto_common.h"
 #include "node.h"
+#include "node_internals.h"
 #include "node_url.h"
 #include "string_bytes.h"
 #include "v8.h"
@@ -46,10 +47,10 @@ inline void LogSecret(
 }
 
 inline void SetALPN(SSL* ssl, const std::string& alpn) {
-  SSL_set_alpn_protos(
+  CHECK_EQ(SSL_set_alpn_protos(
       ssl,
       reinterpret_cast<const uint8_t*>(alpn.c_str()),
-      alpn.length());
+      alpn.length()), 0);
 }
 
 inline std::string GetSSLOCSPResponse(SSL* ssl) {
@@ -60,7 +61,7 @@ inline std::string GetSSLOCSPResponse(SSL* ssl) {
 }
 
 inline bool SetTLSSession(SSL* ssl, const unsigned char* buf, size_t length) {
-  crypto::SSLSessionPointer s(d2i_SSL_SESSION(nullptr, &buf, length));
+  SSLSessionPointer s(d2i_SSL_SESSION(nullptr, &buf, length));
   return s != nullptr && SSL_set_session(ssl, s.get()) == 1;
 }
 
@@ -135,8 +136,8 @@ inline std::string GetCertificateCN(X509* cert) {
   return std::string();
 }
 
-inline int VerifyPeerCertificate(SSL* ssl) {
-  int err = X509_V_ERR_UNSPECIFIED;
+inline int VerifyPeerCertificate(SSL* ssl, int def) {
+  int err = def;
   if (X509* peer_cert = SSL_get_peer_certificate(ssl)) {
     X509_free(peer_cert);
     err = SSL_get_verify_result(ssl);
@@ -289,7 +290,7 @@ inline Local<Value> GetValidationErrorCode(Environment* env, int err) {
   return OneByteString(env->isolate(), X509ErrorCode(err));
 }
 
-inline Local<Value> GetCertificate(Environment* env, SSL* ssl) {
+inline Local<Value> GetCert(Environment* env, SSL* ssl) {
   ClearErrorOnReturn clear_error_on_return;
   Local<Value> value = v8::Undefined(env->isolate());
   X509* cert = SSL_get_certificate(ssl);
@@ -369,7 +370,7 @@ inline Local<Value> GetEphemeralKey(Environment* env, SSL* ssl) {
   return info;
 }
 
-inline Local<Value> GetPeerCertificate(
+inline Local<Value> GetPeerCert(
     Environment* env,
     SSL* ssl,
     bool abbreviated,
