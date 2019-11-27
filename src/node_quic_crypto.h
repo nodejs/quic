@@ -33,10 +33,6 @@ bool SetCryptoSecrets(
     const uint8_t* tx_secret,
     size_t secretlen);
 
-// Called by QuicInitSecureContext in node_quic.cc
-// to set the TLS groups for the context.
-bool SetGroups(crypto::SecureContext* sc, const char* groups);
-
 // Called by QuicInitSecureContext to initialize the
 // given SecureContext with the defaults for the given
 // QUIC side (client or server).
@@ -67,17 +63,6 @@ bool UpdateKey(
     std::vector<uint8_t>* current_rx_secret,
     std::vector<uint8_t>* current_tx_secret);
 
-// Get the server name identified in the client hello
-const char* GetClientHelloServerName(QuicSession* session);
-
-// Get the alpn protocol identified in the client hello
-const char* GetClientHelloALPN(QuicSession* session);
-
-const char* GetServerName(QuicSession* session);
-
-// Replaces the SecureContext to be used in the handshake.
-int UseSNIContext(SSL* ssl, crypto::SecureContext* context);
-
 bool GenerateRetryToken(
     uint8_t* token,
     size_t* tokenlen,
@@ -93,49 +78,14 @@ bool InvalidRetryToken(
     std::array<uint8_t, TOKEN_SECRETLEN>* token_secret,
     uint64_t verification_expiration);
 
-// Called by QuicSession::VerifyPeerIdentity to perform basic
-// validation checks against the peer provided certificate.
-int VerifyPeerCertificate(SSL* ssl);
-
 int VerifyHostnameIdentity(SSL* ssl, const char* hostname);
 int VerifyHostnameIdentity(
     const char* hostname,
     const std::string& cert_cn,
     const std::unordered_multimap<std::string, std::string>& altnames);
 
-v8::Local<v8::Value> GetValidationErrorReason(Environment* env, int err);
-v8::Local<v8::Value> GetValidationErrorCode(Environment* env, int err);
-
-v8::Local<v8::Value> GetCertificate(QuicSession* session);
-v8::Local<v8::Value> GetEphemeralKey(QuicSession* session);
-
-bool SetTLSSession(SSL* ssl, const unsigned char* buf, size_t length);
-
-std::string GetSSLOCSPResponse(SSL* ssl);
-
-// Get the SNI hostname requested by the client for the session
-v8::Local<v8::Value> GetServerName(
-    Environment* env,
-    SSL* ssl,
-    const char* host_name);
-
-// Get the list of cipher algorithms advertised in the client hello
-v8::Local<v8::Array> GetClientHelloCiphers(QuicSession* Session);
-
 // Get the ALPN protocol identifier that was negotiated for the session
 v8::Local<v8::Value> GetALPNProtocol(QuicSession* session);
-
-// Get the negotiated cipher name for the TLS session
-v8::Local<v8::Value> GetCipherName(QuicSession* session);
-
-// Get the negotiated cipher version for the TLS session
-v8::Local<v8::Value> GetCipherVersion(QuicSession* session);
-
-// Get a JavaScript rendering of the X509 certificate provided by the peer
-// TODO(@jasnell): This currently only works for the Client side
-v8::Local<v8::Value> GetPeerCertificate(
-    QuicSession* session,
-    bool abbreviated);
 
 }  // namespace quic
 }  // namespace node

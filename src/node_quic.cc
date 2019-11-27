@@ -3,6 +3,7 @@
 #include "env-inl.h"
 #include "histogram-inl.h"
 #include "node_crypto.h"  // SecureContext
+#include "node_crypto_common-inl.h"
 #include "node_process.h"
 #include "node_quic_crypto.h"
 #include "node_quic_session-inl.h"
@@ -90,7 +91,7 @@ void QuicInitSecureContext(const FunctionCallbackInfo<Value>& args) {
   InitializeSecureContext(sc, side);
 
   // TODO(@jasnell): Throw a proper node.js error with code
-  if (!SetGroups(sc, *groups))
+  if (!crypto::SetGroups(sc, *groups))
     return env->ThrowError("Failed to set groups");
 }
 }  // namespace
