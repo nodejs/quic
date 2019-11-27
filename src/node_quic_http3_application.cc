@@ -26,6 +26,11 @@ bool IsZeroLengthHeader(nghttp3_rcbuf* name, nghttp3_rcbuf* value) {
          Http3RcBufferPointer::IsZeroLength(value);
 }
 
+// nghttp3 uses a numeric identifier for a large number
+// of known HTTP header names. These allow us to use
+// static strings for those rather than allocating new
+// strings all of the time. The list of strings supported
+// is included in node_http_common.h
 const char* to_http_header_name(int32_t token) {
   switch (token) {
     default:
@@ -72,6 +77,7 @@ MaybeLocal<String> Http3Header::GetName(QuicApplication* app) const {
     return eternal.Get(env->isolate());
   }
 
+  // This is exceedingly unlikely but we need to be prepared just in case.
   if (UNLIKELY(!name_))
     return String::Empty(env->isolate());
 
@@ -104,7 +110,7 @@ Http3Application::Http3Application(
     QuicSession* session)
   : QuicApplication(session),
     alloc_info_(MakeAllocator()) {
-  // Collect Configuration Details
+  // Collect Configuration Details. An aliased buffer is used here.
   Environment* env = session->env();
   SetConfig(env, IDX_HTTP3_QPACK_MAX_TABLE_CAPACITY,
             &qpack_max_table_capacity_);
@@ -115,11 +121,18 @@ Http3Application::Http3Application(
   env->quic_state()->http3config_buffer[IDX_HTTP3_CONFIG_COUNT] = 0;  // Reset
 }
 
+// Submit informational headers (response headers that use a 1xx
+// status code).
 bool Http3Application::SubmitInformation(
     int64_t stream_id,
     v8::Local<v8::Array> headers) {
+  // If the QuicSession is not a server session, return false
+  // immediately. Informational headers cannot be sent by an
+  // HTTP/3 client
+  if (!Session()->IsServer())
+    return false;
+
   Http3Headers nva(Session()->env(), headers);
-  // TODO(@jasnell): Do we need more granularity on error conditions?
   Debug(
       Session(),
       "Submitting %d informational headers for stream %" PRId64,
@@ -146,7 +159,6 @@ bool Http3Application::SubmitHeaders(
   if (!(flags & QUICSTREAM_HEADER_FLAGS_TERMINAL))
     reader_ptr = &reader;
 
-  // TODO(@jasnell): Do we need more granularity on error conditions?
   switch (Session()->CryptoContext()->Side()) {
     case NGTCP2_CRYPTO_SIDE_CLIENT:
       Debug(
@@ -183,7 +195,6 @@ bool Http3Application::SubmitTrailers(
     int64_t stream_id,
     v8::Local<v8::Array> headers) {
   Http3Headers nva(Session()->env(), headers);
-  // TODO(@jasnell): Do we need more granularity on error conditions?
   Debug(
       Session(),
       "Submitting %d trailing headers for stream %" PRId64,
@@ -235,6 +246,9 @@ nghttp3_conn* Http3Application::CreateConnection(
   return conn;
 }
 
+// The HTTP/3 QUIC binding uses a single unidirectional control
+// stream in each direction to exchange frames impacting the entire
+// connection.
 bool Http3Application::CreateAndBindControlStream() {
   if (!Session()->OpenUnidirectionalStream(&control_stream_id_))
     return false;
@@ -247,6 +261,8 @@ bool Http3Application::CreateAndBindControlStream() {
       control_stream_id_) == 0;
 }
 
+// The HTTP/3 QUIC binding creates two unidirectional streams in
+// each direction to exchange header compression details.
 bool Http3Application::CreateAndBindQPackStreams() {
   if (!Session()->OpenUnidirectionalStream(&qpack_enc_stream_id_) ||
       !Session()->OpenUnidirectionalStream(&qpack_dec_stream_id_)) {
@@ -268,7 +284,8 @@ bool Http3Application::Initialize() {
     return false;
 
   // The QuicSession must allow for at least three local unidirectional streams.
-  // This number is fixed by the http3 specification.
+  // This number is fixed by the http3 specification and represent the
+  // control stream and two qpack management streams.
   if (Session()->GetMaxLocalStreamsUni() < 3)
     return false;
 
@@ -308,6 +325,9 @@ bool Http3Application::Initialize() {
   return true;
 }
 
+// All HTTP/3 control, header, and stream data arrives as QUIC stream data.
+// Here we pass the received data off to nghttp3 for processing. This will
+// trigger the invocation of the various nghttp3 callbacks.
 bool Http3Application::ReceiveStreamData(
     int64_t stream_id,
     int fin,
@@ -334,7 +354,7 @@ void Http3Application::AcknowledgeStreamData(
 }
 
 void Http3Application::StreamOpen(int64_t stream_id) {
-  // FindOrCreateStream(stream_id);
+  Debug(Session(), "HTTP/3 Stream %" PRId64 " is open.");
 }
 
 void Http3Application::StreamClose(
@@ -395,6 +415,7 @@ bool Http3Application::SendPendingData() {
     int fin = 0;
     ssize_t sveccnt = 0;
 
+    // First, grab the outgoing data from nghttp3
     if (Connection() && Session()->GetMaxDataLeft()) {
       sveccnt =
           nghttp3_conn_writev_stream(
@@ -413,6 +434,10 @@ bool Http3Application::SendPendingData() {
     ssize_t ndatalen;
     nghttp3_vec* v = vec.data();
     size_t vcnt = static_cast<size_t>(sveccnt);
+
+    // Second, serialize as much of the outgoing data as possible to a
+    // QUIC packet for transmission. We'll keep iterating until there
+    // is no more data to transmit.
 
     // TODO(@jasnell): Support the use of the NGTCP2_WRITE_STREAM_FLAG_MORE
     // flag to allow more efficient coallescing of packets.
@@ -480,6 +505,8 @@ bool Http3Application::SendStreamData(QuicStream* stream) {
   return SendPendingData();
 }
 
+// This is where nghttp3 pulls the data from the outgoing
+// buffer to prepare it to be sent on the QUIC stream.
 ssize_t Http3Application::H3ReadData(
     int64_t stream_id,
     nghttp3_vec* vec,
@@ -505,9 +532,14 @@ ssize_t Http3Application::H3ReadData(
     return count;
   }
 
+  // If count is zero here, it means that there is no data currently
+  // available to send but there might be later, so return WOULDBLOCK
+  // to tell nghttp3 to hold off attempting to serialize any more
+  // data for this stream until it is resumed.
   return count == 0 ? NGHTTP3_ERR_WOULDBLOCK : count;
 }
 
+// Outgoing data is retained in memory until it is acknowledged.
 void Http3Application::H3AckedStreamData(
     int64_t stream_id,
     size_t datalen) {
@@ -574,13 +606,18 @@ void Http3Application::H3BeginHeaders(
     stream->BeginHeaders(kind);
 }
 
+// As each header name+value pair is received, it is stored internally
+// by the QuicStream until stream->EndHeaders() is called, during which
+// the collected headers are converted to an array and passed off to
+// the javascript side.
 bool Http3Application::H3ReceiveHeader(
     int64_t stream_id,
     int32_t token,
     nghttp3_rcbuf* name,
     nghttp3_rcbuf* value,
     uint8_t flags) {
-  // Protect against zero-length headers
+  // Protect against zero-length headers (zero-length if either the
+  // name or value are zero-length). Such headers are simply ignored.
   if (!IsZeroLengthHeader(name, value)) {
     Debug(Session(), "Receiving header for stream %" PRId64, stream_id);
     QuicStream* stream = Session()->FindStream(stream_id);
@@ -606,12 +643,14 @@ void Http3Application::H3EndHeaders(int64_t stream_id) {
     stream->EndHeaders();
 }
 
+// TODO(@jasnell): Implement Push Promise Support
 int Http3Application::H3BeginPushPromise(
     int64_t stream_id,
     int64_t push_id) {
   return 0;
 }
 
+// TODO(@jasnell): Implement Push Promise Support
 bool Http3Application::H3ReceivePushPromise(
     int64_t stream_id,
     int64_t push_id,
@@ -622,27 +661,30 @@ bool Http3Application::H3ReceivePushPromise(
   return true;
 }
 
+// TODO(@jasnell): Implement Push Promise Support
 int Http3Application::H3EndPushPromise(
     int64_t stream_id,
     int64_t push_id) {
   return 0;
 }
 
+// TODO(@jasnell): Implement Push Promise Support
 void Http3Application::H3CancelPush(
     int64_t push_id,
     int64_t stream_id) {
+}
+
+// TODO(@jasnell): Implement Push Promise Support
+int Http3Application::H3PushStream(
+    int64_t push_id,
+    int64_t stream_id) {
+  return 0;
 }
 
 void Http3Application::H3SendStopSending(
     int64_t stream_id,
     uint64_t app_error_code) {
   Session()->ResetStream(stream_id, app_error_code);
-}
-
-int Http3Application::H3PushStream(
-    int64_t push_id,
-    int64_t stream_id) {
-  return 0;
 }
 
 int Http3Application::H3EndStream(
