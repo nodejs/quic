@@ -164,16 +164,23 @@ enum QuicSessionState : int {
   IDX_QUIC_SESSION_STATE_COUNT
 };
 
+// The QuicCryptoContext class encapsulates all of the crypto/TLS
+// handshake details on behalf of a QuicSession.
 class QuicCryptoContext : public MemoryRetainer {
  public:
   SSL* operator*() { return ssl_.get(); }
 
   uint64_t Cancel();
 
+  // Outgoing crypto data must be retained in memory until it is
+  // explicitly acknowledged.
   void AcknowledgeCryptoData(ngtcp2_crypto_level level, size_t datalen);
 
+  // Enables openssl's TLS tracing mechanism
   void EnableTrace();
 
+  // Returns the server's prepared OCSP response for transmission. This
+  // is not used by client QuicSession instances.
   std::string GetOCSPResponse();
 
   ngtcp2_crypto_level GetReadCryptoLevel();
@@ -184,6 +191,7 @@ class QuicCryptoContext : public MemoryRetainer {
     return options_ & option;
   }
 
+  // Emits a single keylog line to the JavaScript layer
   void Keylog(const char* line);
 
   int OnClientHello();
@@ -204,12 +212,15 @@ class QuicCryptoContext : public MemoryRetainer {
 
   int OnTLSStatus();
 
+  // Receives and processes TLS handshake details
   int Receive(
       ngtcp2_crypto_level crypto_level,
       uint64_t offset,
       const uint8_t* data,
       size_t datalen);
 
+  // Resumes the TLS handshake following a client hello or
+  // OCSP callback
   void ResumeHandshake();
 
   void SetOption(uint32_t option, bool on = true) {
@@ -235,6 +246,7 @@ class QuicCryptoContext : public MemoryRetainer {
       size_t datalen);
 
   bool InitiateKeyUpdate();
+
   bool KeyUpdate(
     uint8_t* rx_key,
     uint8_t* rx_iv,
