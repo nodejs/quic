@@ -963,8 +963,7 @@ void QuicSession::AddToSocket(QuicSocket* socket) {
 
   switch (crypto_context_->Side()) {
     case NGTCP2_CRYPTO_SIDE_SERVER: {
-      QuicCID rcid(rcid_);
-      socket->AssociateCID(rcid, scid);
+      socket->AssociateCID(QuicCID(rcid_), scid);
 
       if (pscid_.datalen)
         socket->AssociateCID(QuicCID(pscid_), scid);
