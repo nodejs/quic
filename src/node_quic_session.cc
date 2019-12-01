@@ -1543,7 +1543,7 @@ bool QuicSession::ReceiveClientInitial(const ngtcp2_cid* dcid) {
 }
 
 bool QuicSession::ReceivePacket(
-    QuicPath* path,
+    ngtcp2_path* path,
     const uint8_t* data,
     ssize_t nread) {
   DCHECK(!Ngtcp2CallbackScope::InNgtcp2CallbackScope(this));
@@ -1555,7 +1555,7 @@ bool QuicSession::ReceivePacket(
 
   uint64_t now = uv_hrtime();
   session_stats_.session_received_at = now;
-  int err = ngtcp2_conn_read_pkt(Connection(), **path, data, nread, now);
+  int err = ngtcp2_conn_read_pkt(Connection(), path, data, nread, now);
   if (err < 0) {
     switch (err) {
       case NGTCP2_ERR_DRAINING:
@@ -1787,7 +1787,7 @@ bool QuicSession::SelectPreferredAddress(
 
 bool QuicSession::SendPacket(
   MallocedBuffer<uint8_t> buf,
-  QuicPathStorage* path) {
+  ngtcp2_path_storage* path) {
   sendbuf_.Push(std::move(buf));
   // TODO(@jasnell): Update the local endpoint also?
   remote_address_.Update(&path->path.remote);
@@ -1991,7 +1991,7 @@ bool QuicSession::SetSocket(QuicSocket* socket, bool nat_rebinding) {
     QuicPath path(local_address, &remote_address_);
     if (ngtcp2_conn_initiate_migration(
             Connection(),
-            *path,
+            &path,
             uv_hrtime()) != 0) {
       return false;
     }
@@ -2421,7 +2421,7 @@ void QuicSession::InitServer(
           &conn,
           dcid,
           &scid_,
-          *path,
+          &path,
           version,
           &callbacks[crypto_context_->Side()],
           **config,
@@ -2545,7 +2545,7 @@ bool QuicSession::InitClient(
           &conn,
           &dcid,
           &scid_,
-          *path,
+          &path,
           NGTCP2_PROTO_VER,
           &callbacks[crypto_context_->Side()],
           *config,

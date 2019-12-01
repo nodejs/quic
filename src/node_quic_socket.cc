@@ -417,7 +417,7 @@ void QuicSocket::SendInitialConnectionClose(
     &conn,
     *dcid,
     &scid,
-    *path,
+    &path,
     version,
     &callbacks,
     &settings,
@@ -429,7 +429,7 @@ void QuicSocket::SendInitialConnectionClose(
   ssize_t nwrite =
       ngtcp2_conn_write_connection_close(
           conn,
-          *path,
+          &path,
           reinterpret_cast<uint8_t*>(buf.data),
           NGTCP2_MAX_PKTLEN_IPV6,
           error_code,

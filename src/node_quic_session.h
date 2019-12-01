@@ -522,6 +522,7 @@ class QuicSession : public AsyncWrap,
 
   QuicStream* CreateStream(int64_t id);
   QuicStream* FindStream(int64_t id);
+
   inline bool HasStream(int64_t id);
 
   inline QuicError GetLastError() const;
@@ -659,7 +660,7 @@ class QuicSession : public AsyncWrap,
   // Causes pending QuicStream data to be serialized and sent
   bool SendStreamData(QuicStream* stream);
 
-  bool SendPacket(MallocedBuffer<uint8_t> buf, QuicPathStorage* path);
+  bool SendPacket(MallocedBuffer<uint8_t> buf, ngtcp2_path_storage* path);
 
   inline uint64_t GetMaxDataLeft();
 
@@ -847,7 +848,7 @@ class QuicSession : public AsyncWrap,
     const ngtcp2_path* path,
     ngtcp2_path_validation_result res);
   bool ReceiveClientInitial(const ngtcp2_cid* dcid);
-  bool ReceivePacket(QuicPath* path, const uint8_t* data, ssize_t nread);
+  bool ReceivePacket(ngtcp2_path* path, const uint8_t* data, ssize_t nread);
   bool ReceiveRetry();
   void RemoveConnectionID(const ngtcp2_cid* cid);
   void ScheduleRetransmit();

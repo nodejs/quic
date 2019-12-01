@@ -302,28 +302,19 @@ class SocketAddress {
   sockaddr_storage address_;
 };
 
-class QuicPath {
- public:
+struct QuicPath : public ngtcp2_path {
   QuicPath(
     SocketAddress* local,
-    SocketAddress* remote) :
-    path_({ local->ToAddr(), remote->ToAddr() }) {}
-
-  ngtcp2_path* operator*() { return &path_; }
-
- private:
-  ngtcp2_path path_;
+    SocketAddress* remote) {
+    ngtcp2_addr_init(&this->local, **local, local->Size(), nullptr);
+    ngtcp2_addr_init(&this->remote, **remote, remote->Size(), nullptr);
+  }
 };
 
-struct QuicPathStorage {
+struct QuicPathStorage : public ngtcp2_path_storage {
   QuicPathStorage() {
-    path.local.addr = local_addrbuf.data();
-    path.remote.addr = remote_addrbuf.data();
+    ngtcp2_path_storage_zero(this);
   }
-
-  ngtcp2_path path;
-  std::array<uint8_t, sizeof(sockaddr_storage)> local_addrbuf;
-  std::array<uint8_t, sizeof(sockaddr_storage)> remote_addrbuf;
 };
 
 // Simple wrapper for ngtcp2_cid that handles hex encoding
