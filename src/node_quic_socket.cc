@@ -567,7 +567,11 @@ BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
   switch (QuicSession::Accept(&hd, version, data, nread)) {
     case QuicSession::InitialPacketResult::PACKET_VERSION:
       SendVersionNegotiation(version, dcid, scid, addr);
-      // Fall through
+      return {};
+    case QuicSession::InitialPacketResult::PACKET_RETRY:
+      Debug(this, "0RTT Packet. Sending retry.");
+      SendRetry(version, dcid, scid, addr);
+      return {};
     case QuicSession::InitialPacketResult::PACKET_IGNORE:
       return {};
     case QuicSession::InitialPacketResult::PACKET_OK:

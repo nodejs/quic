@@ -496,7 +496,8 @@ class QuicSession : public AsyncWrap,
   enum InitialPacketResult : int {
     PACKET_OK,
     PACKET_IGNORE,
-    PACKET_VERSION
+    PACKET_VERSION,
+    PACKET_RETRY
   };
 
   static InitialPacketResult Accept(
