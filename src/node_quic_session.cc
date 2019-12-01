@@ -612,7 +612,7 @@ bool QuicCryptoContext::SetSession(const unsigned char* data, size_t length) {
 
 void QuicCryptoContext::SetTLSAlert(int err) {
   Debug(session_, "TLS Alert [%d]: %s", err, SSL_alert_type_string_long(err));
-  session_->SetLastError(InitQuicError(QUIC_ERROR_CRYPTO, err));
+  session_->SetLastError(QuicError(QUIC_ERROR_CRYPTO, err));
 }
 
 bool QuicCryptoContext::SetupInitialKey(const ngtcp2_cid* dcid) {
@@ -1048,7 +1048,7 @@ void QuicSession::ImmediateClose() {
   QuicError last_error = GetLastError();
   Debug(this, "Immediate close with code %" PRIu64 " (%s)",
         last_error.code,
-        ErrorFamilyName(last_error.family));
+        last_error.GetFamilyName());
 
   HandleScope scope(env()->isolate());
   Context::Scope context_scope(env()->context());
@@ -2040,7 +2040,7 @@ void QuicSession::SilentClose(bool stateless_reset) {
   QuicError last_error = GetLastError();
   Debug(this,
         "Silent close with %s code %" PRIu64 " (stateless reset? %s)",
-        ErrorFamilyName(last_error.family),
+        last_error.GetFamilyName(),
         last_error.code,
         stateless_reset ? "yes" : "no");
 
@@ -3021,10 +3021,7 @@ void QuicSessionClose(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   QuicSession* session;
   ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
-  int family = QUIC_ERROR_SESSION;
-  uint64_t code = ExtractErrorCode(env, args[0]);
-  if (!args[1]->Int32Value(env->context()).To(&family)) return;
-  session->SetLastError(static_cast<QuicErrorFamily>(family), code);
+  session->SetLastError(QuicError(env, args[0], args[1]));
   session->SendConnectionClose();
 }
 
@@ -3044,11 +3041,7 @@ void QuicSessionDestroy(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   QuicSession* session;
   ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
-  int code = 0;
-  int family = QUIC_ERROR_SESSION;
-  if (!args[0]->Int32Value(env->context()).To(&code)) return;
-  if (!args[1]->Int32Value(env->context()).To(&family)) return;
-  session->SetLastError(static_cast<QuicErrorFamily>(family), code);
+  session->SetLastError(QuicError(env, args[0], args[1]));
   session->Destroy();
 }
 

@@ -491,13 +491,11 @@ void QuicStreamReset(const FunctionCallbackInfo<Value>& args) {
   QuicStream* stream;
   ASSIGN_OR_RETURN_UNWRAP(&stream, args.Holder());
 
-  uint32_t family = QUIC_ERROR_APPLICATION;
-  uint64_t code = ExtractErrorCode(env, args[0]);
-  if (!args[1]->Uint32Value(env->context()).To(&family)) return;
+  QuicError error(env, args[0], args[1], QUIC_ERROR_APPLICATION);
 
   stream->ResetStream(
-      family == QUIC_ERROR_APPLICATION ?
-          code : static_cast<uint64_t>(NGTCP2_NO_ERROR));
+      error.family == QUIC_ERROR_APPLICATION ?
+          error.code : static_cast<uint64_t>(NGTCP2_NO_ERROR));
 }
 
 // Requests transmission of a block of informational headers. Not all

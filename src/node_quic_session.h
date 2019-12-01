@@ -666,11 +666,11 @@ class QuicSession : public AsyncWrap,
 
   inline void SetLastError(
       QuicError error = {
-          QUIC_ERROR_SESSION,
-          NGTCP2_NO_ERROR
+          uint32_t{QUIC_ERROR_SESSION},
+          uint64_t{NGTCP2_NO_ERROR}
       });
-  inline void SetLastError(QuicErrorFamily family, uint64_t error_code);
-  inline void SetLastError(QuicErrorFamily family, int error_code);
+  inline void SetLastError(int32_t family, uint64_t error_code);
+  inline void SetLastError(int32_t family, int error_code);
 
   inline uint64_t GetMaxLocalStreamsUni();
 
@@ -1108,7 +1108,7 @@ class QuicSession : public AsyncWrap,
     uint64_t error_code,
     ngtcp2_tstamp ts);
 
-  static inline ngtcp2_close_fn SelectCloseFn(QuicErrorFamily family) {
+  static inline ngtcp2_close_fn SelectCloseFn(uint32_t family) {
     if (family == QUIC_ERROR_APPLICATION)
       return ngtcp2_conn_write_application_close;
     return ngtcp2_conn_write_connection_close;
@@ -1123,7 +1123,10 @@ class QuicSession : public AsyncWrap,
   BaseObjectWeakPtr<QuicSocket> socket_;
   std::string alpn_;
   std::string hostname_;
-  QuicError last_error_ = { QUIC_ERROR_SESSION, NGTCP2_NO_ERROR };
+  QuicError last_error_ = {
+      uint32_t{QUIC_ERROR_SESSION},
+      uint64_t{NGTCP2_NO_ERROR}
+  };
   ConnectionPointer connection_;
   SocketAddress remote_address_;
   uint32_t flags_ = 0;

@@ -71,63 +71,28 @@ inline void hash_combine(size_t* seed, const T& value, Args... rest) {
 // look at the ALPN identifier to determine exactly what it
 // means. Connection (Session) and Crypto errors, on the other
 // hand, share the same meaning regardless of the ALPN.
-enum QuicErrorFamily : int {
+enum QuicErrorFamily : int32_t {
   QUIC_ERROR_SESSION,
   QUIC_ERROR_CRYPTO,
   QUIC_ERROR_APPLICATION
 };
 
 struct QuicError {
-  QuicErrorFamily family;
+  int32_t family;
   uint64_t code;
-  inline QuicError(
-      QuicErrorFamily family_ = QUIC_ERROR_SESSION,
-      uint64_t code_ = NGTCP2_NO_ERROR) :
-      family(family_), code(code_) {}
+  QuicError(
+      int32_t family_ = QUIC_ERROR_SESSION,
+      int code_ = NGTCP2_NO_ERROR);
+  QuicError(
+      int32_t family_ = QUIC_ERROR_SESSION,
+      uint64_t code_ = NGTCP2_NO_ERROR);
+  QuicError(
+      Environment* env,
+      v8::Local<v8::Value> codeArg,
+      v8::Local<v8::Value> familyArg = v8::Local<v8::Object>(),
+      int32_t family_ = QUIC_ERROR_SESSION);
+  const char* GetFamilyName();
 };
-
-inline QuicError InitQuicError(
-    QuicErrorFamily family = QUIC_ERROR_SESSION,
-    int code_ = NGTCP2_NO_ERROR) {
-  QuicError error;
-  error.family = family;
-  switch (family) {
-    case QUIC_ERROR_CRYPTO:
-      code_ |= NGTCP2_CRYPTO_ERROR;
-      // Fall-through...
-    case QUIC_ERROR_SESSION:
-      error.code = ngtcp2_err_infer_quic_transport_error_code(code_);
-      break;
-    case QUIC_ERROR_APPLICATION:
-      error.code = code_;
-  }
-  return error;
-}
-
-inline uint64_t ExtractErrorCode(Environment* env, v8::Local<v8::Value> arg) {
-  uint64_t code = NGTCP2_APP_NOERROR;
-  if (arg->IsBigInt()) {
-    code = arg.As<v8::BigInt>()->Int64Value();
-  } else if (arg->IsNumber()) {
-    double num = 0;
-    USE(arg->NumberValue(env->context()).To(&num));
-    code = static_cast<uint64_t>(num);
-  }
-  return code;
-}
-
-inline const char* ErrorFamilyName(QuicErrorFamily family) {
-  switch (family) {
-    case QUIC_ERROR_SESSION:
-      return "Session";
-    case QUIC_ERROR_APPLICATION:
-      return "Application";
-    case QUIC_ERROR_CRYPTO:
-      return "Crypto";
-    default:
-      return "<unknown>";
-  }
-}
 
 class SocketAddress {
  public:
