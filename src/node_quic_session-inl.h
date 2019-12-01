@@ -39,12 +39,12 @@ void QuicSession::SetLastError(QuicError error) {
   last_error_ = error;
 }
 
-void QuicSession::SetLastError(QuicErrorFamily family, uint64_t code) {
+void QuicSession::SetLastError(int32_t family, uint64_t code) {
   SetLastError({ family, code });
 }
 
-void QuicSession::SetLastError(QuicErrorFamily family, int code) {
-  SetLastError(family, ngtcp2_err_infer_quic_transport_error_code(code));
+void QuicSession::SetLastError(int32_t family, int code) {
+  SetLastError({ family, code });
 }
 
 bool QuicSession::IsInClosingPeriod() {
