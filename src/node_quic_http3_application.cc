@@ -4,7 +4,7 @@
 #include "node_quic_http3_application.h"
 #include "node_quic_session-inl.h"
 #include "node_quic_stream.h"
-#include "node_quic_util.h"
+#include "node_quic_util-inl.h"
 #include "node_http_common-inl.h"
 
 #include <nghttp3/nghttp3.h>

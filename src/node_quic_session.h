@@ -11,6 +11,7 @@
 #include "node.h"
 #include "node_crypto.h"
 #include "node_mem.h"
+#include "node_quic_buffer.h"
 #include "node_quic_crypto.h"
 #include "node_quic_util.h"
 #include "v8.h"

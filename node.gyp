@@ -853,6 +853,7 @@
             'src/node_quic_socket.h',
             'src/node_quic_stream.h',
             'src/node_quic_util.h',
+            'src/node_quic_util-inl.h',
             'src/node_quic_state.h',
             'src/node_quic_default_application.h',
             'src/node_quic_http3_application.h',
@@ -860,7 +861,6 @@
             'src/node_quic_session.cc',
             'src/node_quic_socket.cc',
             'src/node_quic_stream.cc',
-            'src/node_quic_util.cc',
             'src/node_quic.cc',
             'src/node_quic_default_application.cc',
             'src/node_quic_http3_application.cc'

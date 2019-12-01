@@ -10,7 +10,7 @@
 #include "node_quic_socket.h"
 #include "node_quic_stream.h"
 #include "node_quic_state.h"
-#include "node_quic_util.h"
+#include "node_quic_util-inl.h"
 
 #include <memory>
 #include <utility>

@@ -3,7 +3,7 @@
 #include "node_crypto.h"
 #include "node_crypto_common.h"
 #include "node_quic_session-inl.h"
-#include "node_quic_util.h"
+#include "node_quic_util-inl.h"
 #include "node_url.h"
 #include "string_bytes.h"
 #include "v8.h"

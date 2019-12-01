@@ -1,12 +1,62 @@
+#ifndef SRC_NODE_QUIC_UTIL_INL_H_
+#define SRC_NODE_QUIC_UTIL_INL_H_
+
 #include "node_internals.h"
 #include "node_quic_util.h"
 #include "env-inl.h"
+#include "string_bytes.h"
 #include "util-inl.h"
 #include "uv.h"
+
+#include <string>
 
 namespace node {
 
 namespace quic {
+
+std::string QuicCID::ToStr() const {
+  return std::string(cid_.data, cid_.data + cid_.datalen);
+}
+
+std::string QuicCID::ToHex() const {
+  MaybeStackBuffer<char, 64> dest;
+  dest.AllocateSufficientStorage(cid_.datalen * 2);
+  dest.SetLengthAndZeroTerminate(cid_.datalen * 2);
+  size_t written = StringBytes::hex_encode(
+      reinterpret_cast<const char*>(cid_.data),
+      cid_.datalen,
+      *dest,
+      dest.length());
+  return std::string(*dest, written);
+}
+
+
+Timer::Timer(Environment* env, std::function<void()> fn)
+  : env_(env),
+    fn_(fn) {
+  uv_timer_init(env_->event_loop(), &timer_);
+  timer_.data = this;
+}
+
+void Timer::Stop() {
+  if (stopped_)
+    return;
+  stopped_ = true;
+
+  if (timer_.data == this) {
+    uv_timer_stop(&timer_);
+    timer_.data = nullptr;
+  }
+}
+
+// If the timer is not currently active, interval must be either 0 or greater.
+// If the timer is already active, interval is ignored.
+void Timer::Update(uint64_t interval) {
+  if (stopped_)
+    return;
+  uv_timer_start(&timer_, OnTimeout, interval, interval);
+  uv_unref(reinterpret_cast<uv_handle_t*>(&timer_));
+}
 
 void Timer::Free(Timer* timer) {
   timer->env_->CloseHandle(
@@ -112,3 +162,5 @@ const char* QuicError::GetFamilyName() {
 
 }  // namespace quic
 }  // namespace node
+
+#endif  // SRC_NODE_QUIC_UTIL_INL_H_
