@@ -921,6 +921,7 @@ QuicSession::~QuicSession() {
 
   // Emit the 'close' event in JS. This needs to happen after destroying the
   // connection, because doing so also releases the last qlog data.
+  HandleScope scope(env()->isolate());
   MakeCallback(env()->quic_on_session_destroyed_function(), 0, nullptr);
 }
 
@@ -1558,6 +1559,21 @@ bool QuicSession::ReceivePacket(
       case NGTCP2_ERR_RECV_VERSION_NEGOTIATION:
         break;
       default:
+        // Per ngtcp2: If NGTCP2_ERR_RETRY is returned,
+        // QuicSession must be a server and must perform
+        // address validation by sending a Retry packet
+        // then immediately close the connection.
+        if (err == NGTCP2_ERR_RETRY && IsServer()) {
+          // TODO(@jasnell): Need to verify proper ordering of
+          // scid and rcid here
+          Socket()->SendRetry(
+              GetNegotiatedVersion(),
+              &QuicCID(scid()),
+              &QuicCID(rcid()),
+              *remote_address_);
+          ImmediateClose();
+          break;
+        }
         SetLastError(QUIC_ERROR_SESSION, err);
         return false;
     }
@@ -2320,6 +2336,9 @@ QuicSession::InitialPacketResult QuicSession::Accept(
     case 1:
       return PACKET_VERSION;
   }
+
+  if (hd->type == NGTCP2_PKT_0RTT)
+    return PACKET_RETRY;
 
   // Currently, we only understand one version of the QUIC
   // protocol, but that could change in the future. If it

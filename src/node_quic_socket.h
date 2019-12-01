@@ -119,6 +119,12 @@ class QuicSocket : public AsyncWrap,
   void OnSendDone(ReqWrap<uv_udp_send_t>* wrap, int status) override;
   void OnAfterBind() override;
 
+  bool SendRetry(
+      uint32_t version,
+      QuicCID* dcid,
+      QuicCID* scid,
+      const sockaddr* addr);
+
  private:
   static void OnAlloc(
       uv_handle_t* handle,
@@ -167,11 +173,6 @@ class QuicSocket : public AsyncWrap,
       const uint8_t* data,
       const struct sockaddr* addr,
       unsigned int flags);
-  bool SendRetry(
-      uint32_t version,
-      QuicCID* dcid,
-      QuicCID* scid,
-      const sockaddr* addr);
 
   void IncrementSocketAddressCounter(const sockaddr* addr);
   void DecrementSocketAddressCounter(const sockaddr* addr);
