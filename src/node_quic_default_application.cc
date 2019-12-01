@@ -2,6 +2,7 @@
 #include "node_quic_default_application.h"
 #include "node_quic_session-inl.h"
 #include "node_quic_stream.h"
+#include "node_quic_util-inl.h"
 #include <ngtcp2/ngtcp2.h>
 
 namespace node {

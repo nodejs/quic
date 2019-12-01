@@ -10,7 +10,7 @@
 #include "node_quic_crypto.h"
 #include "node_quic_session-inl.h"
 #include "node_quic_socket.h"
-#include "node_quic_util.h"
+#include "node_quic_util-inl.h"
 #include "req_wrap-inl.h"
 #include "util.h"
 #include "uv.h"

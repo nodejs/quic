@@ -4,8 +4,6 @@
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
 #include "node.h"
-#include "node_quic_buffer.h"
-#include "string_bytes.h"
 #include "uv.h"
 #include "v8.h"
 
@@ -80,18 +78,18 @@ enum QuicErrorFamily : int32_t {
 struct QuicError {
   int32_t family;
   uint64_t code;
-  QuicError(
+  inline QuicError(
       int32_t family_ = QUIC_ERROR_SESSION,
       int code_ = NGTCP2_NO_ERROR);
-  QuicError(
+  inline QuicError(
       int32_t family_ = QUIC_ERROR_SESSION,
       uint64_t code_ = NGTCP2_NO_ERROR);
-  QuicError(
+  inline QuicError(
       Environment* env,
       v8::Local<v8::Value> codeArg,
       v8::Local<v8::Value> familyArg = v8::Local<v8::Object>(),
       int32_t family_ = QUIC_ERROR_SESSION);
-  const char* GetFamilyName();
+  inline const char* GetFamilyName();
 };
 
 class SocketAddress {
@@ -269,8 +267,8 @@ class SocketAddress {
 
 struct QuicPath : public ngtcp2_path {
   QuicPath(
-    SocketAddress* local,
-    SocketAddress* remote) {
+      SocketAddress* local,
+      SocketAddress* remote) {
     ngtcp2_addr_init(&this->local, **local, local->Size(), nullptr);
     ngtcp2_addr_init(&this->remote, **remote, remote->Size(), nullptr);
   }
@@ -300,23 +298,9 @@ class QuicCID {
     str_ = std::string(cid_.data, cid_.data + cid_.datalen);
   }
 
-  std::string ToStr() const { return str_; }
+  inline std::string ToStr() const;
 
-  std::string ToHex() const {
-    if (hex_.empty() && cid_.datalen > 0) {
-      size_t len = cid_.datalen * 2;
-      MaybeStackBuffer<char, 64> dest;
-      dest.AllocateSufficientStorage(len);
-      dest.SetLengthAndZeroTerminate(len);
-      size_t written = StringBytes::hex_encode(
-          reinterpret_cast<const char*>(cid_.data),
-          cid_.datalen,
-          *dest,
-          dest.length());
-      hex_ = std::string(*dest, written);
-    }
-    return hex_;
-  }
+  inline std::string ToHex() const;
 
   const ngtcp2_cid* operator*() const { return &cid_; }
 
@@ -356,43 +340,24 @@ void IncrementStat(
 // reset the timer; Stop to halt the timer.
 class Timer final : public MemoryRetainer {
  public:
-  explicit Timer(Environment* env, std::function<void()> fn)
-    : env_(env),
-      fn_(fn) {
-    uv_timer_init(env_->event_loop(), &timer_);
-    timer_.data = this;
-  }
+  inline explicit Timer(Environment* env, std::function<void()> fn);
 
   // Stops the timer with the side effect of the timer no longer being usable.
   // It will be cleaned up and the Timer object will be destroyed.
-  void Stop() {
-    if (stopped_)
-      return;
-    stopped_ = true;
-
-    if (timer_.data == this) {
-      uv_timer_stop(&timer_);
-      timer_.data = nullptr;
-    }
-  }
+  inline void Stop();
 
   // If the timer is not currently active, interval must be either 0 or greater.
   // If the timer is already active, interval is ignored.
-  void Update(uint64_t interval) {
-    if (stopped_)
-      return;
-    uv_timer_start(&timer_, OnTimeout, interval, interval);
-    uv_unref(reinterpret_cast<uv_handle_t*>(&timer_));
-  }
+  inline void Update(uint64_t interval);
 
-  static void Free(Timer* timer);
+  static inline void Free(Timer* timer);
 
   SET_NO_MEMORY_INFO()
   SET_MEMORY_INFO_NAME(Timer)
   SET_SELF_SIZE(Timer)
 
  private:
-  static void OnTimeout(uv_timer_t* timer);
+  static inline void OnTimeout(uv_timer_t* timer);
 
   bool stopped_ = false;
   Environment* env_;
@@ -402,8 +367,8 @@ class Timer final : public MemoryRetainer {
 
 using TimerPointer = DeleteFnPtr<Timer, Timer::Free>;
 
-ngtcp2_crypto_level from_ossl_level(OSSL_ENCRYPTION_LEVEL ossl_level);
-const char* crypto_level_name(ngtcp2_crypto_level level);
+inline ngtcp2_crypto_level from_ossl_level(OSSL_ENCRYPTION_LEVEL ossl_level);
+inline const char* crypto_level_name(ngtcp2_crypto_level level);
 
 }  // namespace quic
 }  // namespace node
