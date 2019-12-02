@@ -4,6 +4,7 @@
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
 #include "node.h"
+#include "node_sockaddr.h"
 #include "uv.h"
 #include "v8.h"
 
@@ -92,185 +93,22 @@ struct QuicError {
   inline const char* GetFamilyName();
 };
 
-class SocketAddress {
- public:
-  // std::hash specialization for sockaddr instances (ipv4 or ipv6) used
-  // for tracking the number of connections per client.
-  struct Hash {
-    size_t operator()(const sockaddr* addr) const {
-      size_t hash = 0;
-      switch (addr->sa_family) {
-        case AF_INET: {
-          const sockaddr_in* ipv4 =
-              reinterpret_cast<const sockaddr_in*>(addr);
-          hash_combine(&hash, ipv4->sin_port, ipv4->sin_addr.s_addr);
-          break;
-        }
-        case AF_INET6: {
-          const sockaddr_in6* ipv6 =
-              reinterpret_cast<const sockaddr_in6*>(addr);
-          const uint64_t* a =
-              reinterpret_cast<const uint64_t*>(&ipv6->sin6_addr);
-          hash_combine(&hash, ipv6->sin6_port, a[0], a[1]);
-          break;
-        }
-        default:
-          UNREACHABLE();
-      }
-      return hash;
-    }
-  };
+inline size_t GetMaxPktLen(const sockaddr* addr);
 
-  // std::equal_to specialization for sockaddr instances (ipv4 or ipv6).
-  struct Compare {
-    bool operator()(const sockaddr* laddr, const sockaddr* raddr) const {
-      CHECK(laddr->sa_family == AF_INET || laddr->sa_family == AF_INET6);
-      return memcmp(laddr, raddr, GetAddressLen(laddr)) == 0;
-    }
-  };
+inline bool ResolvePreferredAddress(
+    Environment* env,
+    int local_address_family,
+    const ngtcp2_preferred_addr* paddr,
+    uv_getaddrinfo_t* req);
 
-  static bool numeric_host(const char* hostname) {
-    return numeric_host(hostname, AF_INET) || numeric_host(hostname, AF_INET6);
-  }
-
-  static bool numeric_host(const char* hostname, int family) {
-    std::array<uint8_t, sizeof(struct in6_addr)> dst;
-    return inet_pton(family, hostname, dst.data()) == 1;
-  }
-
-  static size_t GetMaxPktLen(const sockaddr* addr) {
-    return addr->sa_family == AF_INET6 ?
-        NGTCP2_MAX_PKTLEN_IPV6 :
-        NGTCP2_MAX_PKTLEN_IPV4;
-  }
-
-  static bool ResolvePreferredAddress(
-      Environment* env,
-      int local_address_family,
-      const ngtcp2_preferred_addr* paddr,
-      uv_getaddrinfo_t* req) {
-    int af;
-    const uint8_t* binaddr;
-    uint16_t port;
-    constexpr uint8_t empty_addr[] = {0, 0, 0, 0, 0, 0, 0, 0,
-                                      0, 0, 0, 0, 0, 0, 0, 0};
-
-    if (local_address_family == AF_INET &&
-        memcmp(empty_addr, paddr->ipv4_addr, sizeof(paddr->ipv4_addr)) != 0) {
-      af = AF_INET;
-      binaddr = paddr->ipv4_addr;
-      port = paddr->ipv4_port;
-    } else if (local_address_family == AF_INET6 &&
-               memcmp(empty_addr,
-                      paddr->ipv6_addr,
-                      sizeof(paddr->ipv6_addr)) != 0) {
-      af = AF_INET6;
-      binaddr = paddr->ipv6_addr;
-      port = paddr->ipv6_port;
-    } else {
-      return false;
-    }
-
-    char host[NI_MAXHOST];
-    if (uv_inet_ntop(af, binaddr, host, sizeof(host)) != 0)
-      return false;
-
-    addrinfo hints{};
-    hints.ai_flags = AI_NUMERICHOST | AI_NUMERICSERV;
-    hints.ai_family = af;
-    hints.ai_socktype = SOCK_DGRAM;
-
-    return
-        uv_getaddrinfo(
-            env->event_loop(),
-            req,
-            nullptr,
-            host,
-            std::to_string(port).c_str(),
-            &hints) == 0;
-  }
-
-  static int ToSockAddr(
-      int32_t family,
-      const char* host,
-      uint32_t port,
-      sockaddr_storage* addr) {
-    CHECK(family == AF_INET || family == AF_INET6);
-    switch (family) {
-       case AF_INET:
-        return uv_ip4_addr(host, port, reinterpret_cast<sockaddr_in*>(addr));
-      case AF_INET6:
-        return uv_ip6_addr(host, port, reinterpret_cast<sockaddr_in6*>(addr));
-       default:
-        CHECK(0 && "unexpected address family");
-    }
-  }
-
-  static int GetPort(const sockaddr* addr) {
-    return ntohs(addr->sa_family == AF_INET ?
-        reinterpret_cast<const sockaddr_in*>(addr)->sin_port :
-        reinterpret_cast<const sockaddr_in6*>(addr)->sin6_port);
-  }
-
-  static void GetAddress(const sockaddr* addr, char* host, size_t host_len) {
-    const void* src = addr->sa_family == AF_INET ?
-        static_cast<const void*>(
-            &(reinterpret_cast<const sockaddr_in*>(addr)->sin_addr)) :
-        static_cast<const void*>(
-            &(reinterpret_cast<const sockaddr_in6*>(addr)->sin6_addr));
-    uv_inet_ntop(addr->sa_family, src, host, host_len);
-  }
-
-  static size_t GetAddressLen(const sockaddr* addr) {
-    return
-        addr->sa_family == AF_INET6 ?
-            sizeof(sockaddr_in6) :
-            sizeof(sockaddr_in);
-  }
-
-  static size_t GetAddressLen(const sockaddr_storage* addr) {
-    return
-        addr->ss_family == AF_INET6 ?
-            sizeof(sockaddr_in6) :
-            sizeof(sockaddr_in);
-  }
-
-  void Copy(SocketAddress* addr) {
-    Copy(**addr);
-  }
-
-  void Copy(const sockaddr* source) {
-    memcpy(&address_, source, GetAddressLen(source));
-  }
-
-  void Update(const ngtcp2_addr* addr) {
-    memcpy(&address_, addr->addr, addr->addrlen);
-  }
-
-  const sockaddr* operator*() const {
-    return reinterpret_cast<const sockaddr*>(&address_);
-  }
-
-  ngtcp2_addr ToAddr() {
-    return ngtcp2_addr{Size(), reinterpret_cast<uint8_t*>(&address_), nullptr};
-  }
-
-  size_t Size() {
-    return GetAddressLen(&address_);
-  }
-
-  int GetFamily() { return address_.ss_family; }
-
- private:
-  sockaddr_storage address_;
-};
+inline ngtcp2_addr* ToNgtcp2Addr(SocketAddress* addr, ngtcp2_addr* dest);
 
 struct QuicPath : public ngtcp2_path {
   QuicPath(
       SocketAddress* local,
       SocketAddress* remote) {
-    ngtcp2_addr_init(&this->local, **local, local->Size(), nullptr);
-    ngtcp2_addr_init(&this->remote, **remote, remote->Size(), nullptr);
+    ngtcp2_addr_init(&this->local, **local, local->GetLength(), nullptr);
+    ngtcp2_addr_init(&this->remote, **remote, remote->GetLength(), nullptr);
   }
 };
 

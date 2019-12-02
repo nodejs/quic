@@ -30,6 +30,63 @@ std::string QuicCID::ToHex() const {
   return std::string(*dest, written);
 }
 
+ngtcp2_addr* ToNgtcp2Addr(SocketAddress* addr, ngtcp2_addr* dest) {
+  if (dest == nullptr)
+    dest = new ngtcp2_addr();
+  return ngtcp2_addr_init(dest, **addr, addr->GetLength(), nullptr);
+}
+
+size_t GetMaxPktLen(const sockaddr* addr) {
+  return addr->sa_family == AF_INET6 ?
+      NGTCP2_MAX_PKTLEN_IPV6 :
+      NGTCP2_MAX_PKTLEN_IPV4;
+}
+
+bool ResolvePreferredAddress(
+    Environment* env,
+    int local_address_family,
+    const ngtcp2_preferred_addr* paddr,
+    uv_getaddrinfo_t* req) {
+  int af;
+  const uint8_t* binaddr;
+  uint16_t port;
+  constexpr uint8_t empty_addr[] = {0, 0, 0, 0, 0, 0, 0, 0,
+                                    0, 0, 0, 0, 0, 0, 0, 0};
+
+  if (local_address_family == AF_INET &&
+      memcmp(empty_addr, paddr->ipv4_addr, sizeof(paddr->ipv4_addr)) != 0) {
+    af = AF_INET;
+    binaddr = paddr->ipv4_addr;
+    port = paddr->ipv4_port;
+  } else if (local_address_family == AF_INET6 &&
+              memcmp(empty_addr,
+                    paddr->ipv6_addr,
+                    sizeof(paddr->ipv6_addr)) != 0) {
+    af = AF_INET6;
+    binaddr = paddr->ipv6_addr;
+    port = paddr->ipv6_port;
+  } else {
+    return false;
+  }
+
+  char host[NI_MAXHOST];
+  if (uv_inet_ntop(af, binaddr, host, sizeof(host)) != 0)
+    return false;
+
+  addrinfo hints{};
+  hints.ai_flags = AI_NUMERICHOST | AI_NUMERICSERV;
+  hints.ai_family = af;
+  hints.ai_socktype = SOCK_DGRAM;
+
+  return
+      uv_getaddrinfo(
+          env->event_loop(),
+          req,
+          nullptr,
+          host,
+          std::to_string(port).c_str(),
+          &hints) == 0;
+}
 
 Timer::Timer(Environment* env, std::function<void()> fn)
   : env_(env),

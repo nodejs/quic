@@ -4,6 +4,7 @@
 #include "node_crypto_common.h"
 #include "node_quic_session-inl.h"
 #include "node_quic_util-inl.h"
+#include "node_sockaddr-inl.h"
 #include "node_url.h"
 #include "string_bytes.h"
 #include "v8.h"
@@ -144,7 +145,7 @@ bool GenerateRetryToken(
   ngtcp2_crypto_ctx ctx;
   ngtcp2_crypto_ctx_initial(&ctx);
 
-  const size_t addrlen = SocketAddress::GetAddressLen(addr);
+  const size_t addrlen = SocketAddress::GetLength(addr);
   size_t ivlen = ngtcp2_crypto_packet_protection_ivlen(&ctx.aead);
 
   uint64_t now = uv_hrtime();
@@ -203,7 +204,7 @@ bool InvalidRetryToken(
   ngtcp2_crypto_ctx_initial(&ctx);
 
   size_t ivlen = ngtcp2_crypto_packet_protection_ivlen(&ctx.aead);
-  const size_t addrlen = SocketAddress::GetAddressLen(addr);
+  const size_t addrlen = SocketAddress::GetLength(addr);
 
   if (hd->tokenlen < TOKEN_RAND_DATALEN)
     return  true;
@@ -420,7 +421,7 @@ int VerifyHostnameIdentity(
   //    check. It's possible that the X509_check_ip_asc covers this. If so,
   //    we can remove this check.
 
-  if (SocketAddress::numeric_host(hostname)) {
+  if (SocketAddress::is_numeric_host(hostname)) {
     auto ips = altnames.equal_range("ip");
     for (auto ip = ips.first; ip != ips.second; ++ip) {
       if (ip->second.compare(hostname) == 0) {
@@ -638,7 +639,7 @@ void SetHostname(SSL* ssl, const std::string& hostname) {
   // TODO(@jasnell): Need to determine if setting localhost
   // here is the right thing to do.
   if (hostname.length() == 0 ||
-      SocketAddress::numeric_host(hostname.c_str())) {
+      SocketAddress::is_numeric_host(hostname.c_str())) {
     SSL_set_tlsext_host_name(ssl, "localhost");
   } else {
     SSL_set_tlsext_host_name(ssl, hostname.c_str());

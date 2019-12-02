@@ -11,6 +11,7 @@
 #include "node_quic_session-inl.h"
 #include "node_quic_socket.h"
 #include "node_quic_util-inl.h"
+#include "node_sockaddr-inl.h"
 #include "req_wrap-inl.h"
 #include "util.h"
 #include "uv.h"
@@ -44,7 +45,7 @@ namespace {
 inline uint32_t GenerateReservedVersion(
     const sockaddr* addr,
     uint32_t version) {
-  socklen_t addrlen = SocketAddress::GetAddressLen(addr);
+  socklen_t addrlen = SocketAddress::GetLength(addr);
   uint32_t h = 0x811C9DC5u;
   const uint8_t* p = reinterpret_cast<const uint8_t*>(addr);
   const uint8_t* ep = p + addrlen;
@@ -160,14 +161,8 @@ void QuicSocket::AssociateCID(
 }
 
 void QuicSocket::OnAfterBind() {
-  sockaddr_storage addr_buf;
-  sockaddr* addr = reinterpret_cast<sockaddr*>(&addr_buf);
-  int addrlen = sizeof(addr_buf);
-
-  CHECK_EQ(udp_->GetSockName(addr, &addrlen), 0);
-  local_address_.Copy(addr);
+  udp_->GetSockName(&local_address_);
   Debug(this, "Socket bound");
-
   socket_stats_.bound_at = uv_hrtime();
 }
 
@@ -403,8 +398,7 @@ void QuicSocket::SendInitialConnectionClose(
   EntropySource(scid.data, NGTCP2_SV_SCIDLEN);
   scid.datalen = NGTCP2_SV_SCIDLEN;
 
-  SocketAddress remote_address;
-  remote_address.Copy(addr);
+  SocketAddress remote_address(addr);
   QuicPath path(GetLocalAddress(), &remote_address);
 
   ngtcp2_conn_callbacks callbacks;
@@ -723,11 +717,9 @@ int QuicSocket::SendPacket(
   if (buffer->Length() == 0 || buffer->RemainingLength() == 0)
     return 0;
 
-  {
-    char host[INET6_ADDRSTRLEN];
-    SocketAddress::GetAddress(dest, host, sizeof(host));
-    Debug(this, "Sending to %s at port %d", host, SocketAddress::GetPort(dest));
-  }
+  Debug(this, "Sending to %s at port %d",
+        SocketAddress::GetAddress(dest).c_str(),
+        SocketAddress::GetPort(dest));
 
   // Remaining Length should never be zero at this point
   CHECK_GT(buffer->RemainingLength(), 0);
@@ -961,7 +953,7 @@ void QuicSocketListen(const FunctionCallbackInfo<Value>& args) {
             preferred_address_family,
             *preferred_address_host,
             preferred_address_port,
-            &preferred_address_storage) == 0) {
+            &preferred_address_storage) != nullptr) {
       preferred_address =
           reinterpret_cast<const sockaddr*>(&preferred_address_storage);
     }

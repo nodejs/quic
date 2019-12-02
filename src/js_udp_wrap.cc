@@ -1,6 +1,7 @@
 #include "udp_wrap.h"
 #include "async_wrap-inl.h"
 #include "node_errors.h"
+#include "node_sockaddr-inl.h"
 
 namespace node {
 
@@ -27,6 +28,8 @@ class JSUDPWrap final : public UDPWrapBase, public AsyncWrap {
                const sockaddr* addr) override;
   int GetPeerName(sockaddr* name, int* namelen) override;
   int GetSockName(sockaddr* name, int* namelen) override;
+  SocketAddress* GetPeerName(SocketAddress* addr = nullptr) override;
+  SocketAddress* GetSockName(SocketAddress* addr = nullptr) override;
   int GetSockaddr(sockaddr* name, int* namelen, bool peer);
   AsyncWrap* GetAsyncWrap() override { return this; }
 
@@ -118,6 +121,16 @@ int JSUDPWrap::GetPeerName(sockaddr* name, int* namelen) {
 
 int JSUDPWrap::GetSockName(sockaddr* name, int* namelen) {
   return GetSockaddr(name, namelen, false);
+}
+
+SocketAddress* JSUDPWrap::GetPeerName(SocketAddress* addr) {
+  // TODO(jasnell): Maybe turn this into a real JS-based method.
+  return SocketAddress::New("127.0.0.1", 1337, AF_INET, addr);
+}
+
+SocketAddress* JSUDPWrap::GetSockName(SocketAddress* addr) {
+  // TODO(jasnell): Maybe turn this into a real JS-based method.
+  return SocketAddress::New("127.0.0.1", 1337, AF_INET, addr);
 }
 
 int JSUDPWrap::GetSockaddr(sockaddr* name, int* namelen, bool peer) {
