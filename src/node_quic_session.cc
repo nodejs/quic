@@ -20,6 +20,7 @@
 #include "node_quic_util-inl.h"
 #include "node_quic_default_application.h"
 #include "node_quic_http3_application.h"
+#include "node_sockaddr-inl.h"
 #include "v8.h"
 #include "uv.h"
 
@@ -1348,7 +1349,7 @@ void QuicSession::PathValidation(
     Debug(this,
           "Path validation succeeded. Updating local and remote addresses");
     SetLocalAddress(&path->local);
-    remote_address_.Update(&path->remote);
+    remote_address_.Update(path->remote.addr, path->remote.addrlen);
     IncrementStat(
         1, &session_stats_,
         &session_stats::path_validation_success_count);
@@ -1466,7 +1467,7 @@ bool QuicSession::Receive(
   // It's possible for the remote address to change from one
   // packet to the next so we have to look at the addr on
   // every packet.
-  remote_address_.Copy(addr);
+  remote_address_ = addr;
   QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
 
   {
@@ -1765,7 +1766,7 @@ bool QuicSession::SelectPreferredAddress(
       SocketAddress* local_address = Socket()->GetLocalAddress();
       uv_getaddrinfo_t req;
 
-      if (!SocketAddress::ResolvePreferredAddress(
+      if (!ResolvePreferredAddress(
               env(), local_address->GetFamily(),
               paddr, &req)) {
         return false;
@@ -1791,7 +1792,7 @@ bool QuicSession::SendPacket(
   ngtcp2_path_storage* path) {
   sendbuf_.Push(std::move(buf));
   // TODO(@jasnell): Update the local endpoint also?
-  remote_address_.Update(&path->path.remote);
+  remote_address_.Update(path->path.remote.addr, path->path.remote.addrlen);
   return SendPacket("stream data");
 }
 
@@ -1986,7 +1987,8 @@ bool QuicSession::SetSocket(QuicSocket* socket, bool nat_rebinding) {
   // Step 4: Update ngtcp2
   SocketAddress* local_address = socket->GetLocalAddress();
   if (nat_rebinding) {
-    ngtcp2_addr addr = local_address->ToAddr();
+    ngtcp2_addr addr;
+    ToNgtcp2Addr(local_address, &addr);
     ngtcp2_conn_set_local_addr(Connection(), &addr);
   } else {
     QuicPath path(local_address, &remote_address_);
@@ -2274,7 +2276,7 @@ bool QuicSession::WritePackets(const char* diagnostic_label) {
     }
 
     data.Realloc(nwrite);
-    remote_address_.Update(&path.path.remote);
+    remote_address_.Update(path.path.remote.addr, path.path.remote.addrlen);
     sendbuf_.Push(std::move(data));
     if (!SendPacket(diagnostic_label))
       return false;
@@ -2400,8 +2402,8 @@ void QuicSession::InitServer(
   ExtendMaxStreamsBidi(DEFAULT_MAX_STREAMS_BIDI);
   ExtendMaxStreamsUni(DEFAULT_MAX_STREAMS_UNI);
 
-  remote_address_.Copy(addr);
-  max_pktlen_ = SocketAddress::GetMaxPktLen(addr);
+  remote_address_ = addr;
+  max_pktlen_ = GetMaxPktLen(addr);
 
   config->SetOriginalConnectionID(ocid);
   config->GenerateStatelessResetToken();
@@ -2512,8 +2514,8 @@ bool QuicSession::InitClient(
     QlogMode qlog) {
   CHECK_NULL(connection_);
 
-  remote_address_.Copy(addr);
-  max_pktlen_ = SocketAddress::GetMaxPktLen(addr);
+  remote_address_ = addr;
+  max_pktlen_ = GetMaxPktLen(addr);
 
   QuicSessionConfig config(env());
   max_crypto_buffer_ = config.GetMaxCryptoBuffer();
@@ -3073,7 +3075,7 @@ void QuicSessionGetRemoteAddress(
   Environment* env = session->env();
   CHECK(args[0]->IsObject());
   args.GetReturnValue().Set(
-      AddressToJS(env, **session->GetRemoteAddress(), args[0].As<Object>()));
+      session->GetRemoteAddress()->ToJS(env, args[0].As<Object>()));
 }
 
 void QuicSessionGetCertificate(
@@ -3131,9 +3133,8 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
   std::string hostname(*servername);
 
   sockaddr_storage addr;
-  int err = SocketAddress::ToSockAddr(family, *address, port, &addr);
-  if (err != 0)
-    return args.GetReturnValue().Set(err);
+  if (SocketAddress::ToSockAddr(family, *address, port, &addr) == nullptr)
+    return args.GetReturnValue().Set(-1);
 
   int select_preferred_address_policy = QUIC_PREFERRED_ADDRESS_IGNORE;
   if (!args[10]->Int32Value(env->context())

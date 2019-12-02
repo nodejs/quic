@@ -9,6 +9,7 @@
 #include "ngtcp2/ngtcp2.h"
 #include "node_quic_session.h"
 #include "node_quic_util.h"
+#include "node_sockaddr.h"
 #include "env.h"
 #include "udp_wrap.h"
 #include "v8.h"

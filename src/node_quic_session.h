@@ -14,6 +14,7 @@
 #include "node_quic_buffer.h"
 #include "node_quic_crypto.h"
 #include "node_quic_util.h"
+#include "node_sockaddr.h"
 #include "v8.h"
 #include "uv.h"
 

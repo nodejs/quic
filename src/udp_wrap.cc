@@ -22,6 +22,7 @@
 #include "udp_wrap.h"
 #include "env-inl.h"
 #include "node_buffer.h"
+#include "node_sockaddr-inl.h"
 #include "handle_wrap.h"
 #include "req_wrap-inl.h"
 #include "util-inl.h"
@@ -590,6 +591,14 @@ int UDPWrap::GetPeerName(sockaddr* name, int* namelen) {
 
 int UDPWrap::GetSockName(sockaddr* name, int* namelen) {
   return uv_udp_getsockname(&handle_, name, namelen);
+}
+
+SocketAddress* UDPWrap::GetPeerName(SocketAddress* addr) {
+  return SocketAddress::FromPeerName(&handle_, addr);
+}
+
+SocketAddress* UDPWrap::GetSockName(SocketAddress* addr) {
+  return SocketAddress::FromSockName(&handle_, addr);
 }
 
 void UDPWrapBase::RecvStart(const FunctionCallbackInfo<Value>& args) {
