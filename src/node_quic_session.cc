@@ -699,6 +699,38 @@ void QuicCryptoContext::WriteHandshake(
   handshake_[level].Push(std::move(buffer));
 }
 
+void QuicApplication::StreamHeaders(
+    int64_t stream_id,
+    int kind,
+    std::vector<std::unique_ptr<QuicHeader>>* headers) {
+  HandleScope scope(env()->isolate());
+  Context::Scope context_scope(env()->context());
+  std::vector<Local<Value>> head;
+  for (const auto& header : *headers) {
+    // name and value should never be empty here, and if
+    // they are, there's an actual bug so go ahead and crash
+    Local<Value> pair[] = {
+      header->GetName(Session()->Application()).ToLocalChecked(),
+      header->GetValue(Session()->Application()).ToLocalChecked()
+    };
+    head.push_back(Array::New(env()->isolate(), pair, arraysize(pair)));
+  }
+  Local<Value> argv[] = {
+      Number::New(env()->isolate(), static_cast<double>(stream_id)),
+      Array::New(
+          env()->isolate(),
+          head.data(),
+          head.size()),
+      Integer::New(
+          env()->isolate(),
+          kind)
+  };
+  BaseObjectPtr<QuicSession> ptr(Session());
+  Session()->MakeCallback(
+      env()->quic_on_stream_headers_function(),
+      arraysize(argv), argv);
+}
+
 void QuicApplication::StreamClose(
     int64_t stream_id,
     uint64_t app_error_code) {

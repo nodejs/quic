@@ -37,6 +37,20 @@ enum QuicStreamHeadersKind : int {
   QUICSTREAM_HEADERS_KIND_TRAILING
 };
 
+// QuicHeader is a base class for implementing QUIC application
+// specific headers. Each type of QUIC application may have
+// different internal representations for a header name+value
+// pair. QuicApplication implementations that support headers
+// per stream must create a specialization of the Header class.
+class QuicHeader {
+  public:
+  QuicHeader() {}
+
+  virtual ~QuicHeader() {}
+  virtual v8::MaybeLocal<v8::String> GetName(QuicApplication* app) const = 0;
+  virtual v8::MaybeLocal<v8::String> GetValue(QuicApplication* app) const = 0;
+};
+
 // QuicStream's are simple data flows that, fortunately, do not
 // require much. They may be:
 //
@@ -105,20 +119,6 @@ enum QuicStreamHeadersKind : int {
 // ngtcp2 level.
 class QuicStream : public AsyncWrap, public StreamBase {
  public:
-  // Header is a base class for implementing QUIC application
-  // specific headers. Each type of QUIC application may have
-  // different internal representations for a header name+value
-  // pair. QuicApplication implementations that support headers
-  // per stream must create a specialization of the Header class.
-  class Header {
-   public:
-    Header() {}
-
-    virtual ~Header() {}
-    virtual v8::MaybeLocal<v8::String> GetName(QuicApplication* app) const = 0;
-    virtual v8::MaybeLocal<v8::String> GetValue(QuicApplication* app) const = 0;
-  };
-
   enum QuicStreamStates : uint32_t {
     // QuicStream is fully open. Readable and Writable
     QUICSTREAM_FLAG_INITIAL = 0x0,
@@ -361,7 +361,7 @@ class QuicStream : public AsyncWrap, public StreamBase {
   // Returns false if the header cannot be added. This will
   // typically only happen if a maximimum number of headers
   // has been reached.
-  bool AddHeader(std::unique_ptr<Header> header);
+  bool AddHeader(std::unique_ptr<QuicHeader> header);
   void EndHeaders();
 
   // Sets the kind of headers currently being processed.
@@ -428,7 +428,7 @@ class QuicStream : public AsyncWrap, public StreamBase {
   size_t available_outbound_length_ = 0;
   size_t inbound_consumed_data_while_paused_ = 0;
 
-  std::vector<std::unique_ptr<Header>> headers_;
+  std::vector<std::unique_ptr<QuicHeader>> headers_;
   QuicStreamHeadersKind headers_kind_;
 
   struct stream_stats {

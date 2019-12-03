@@ -32,6 +32,7 @@ using ConnectionPointer = DeleteFnPtr<ngtcp2_conn, ngtcp2_conn_del>;
 
 class QuicSocket;
 class QuicStream;
+class QuicHeader;
 
 enum class QlogMode {
   kDisabled,
@@ -361,6 +362,10 @@ class QuicApplication : public MemoryRetainer {
   virtual void ExtendMaxStreamData(int64_t stream_id, uint64_t max_data) {}
   virtual bool SendPendingData() = 0;
   virtual bool SendStreamData(QuicStream* stream) = 0;
+  virtual void StreamHeaders(
+      int64_t stream_id,
+      int kind,
+      std::vector<std::unique_ptr<QuicHeader>>* headers);
   virtual void StreamClose(
       int64_t stream_id,
       uint64_t app_error_code);
