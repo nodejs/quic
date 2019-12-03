@@ -1307,7 +1307,8 @@ QuicSession::~QuicSession() {
         "  Streams Out Count: %" PRIu64 "\n"
         "  Remaining sendbuf_: %" PRIu64 "\n"
         "  Remaining handshake_: %" PRIu64 "\n"
-        "  Remaining txbuf_: %" PRIu64 "\n",
+        "  Remaining txbuf_: %" PRIu64 "\n"
+        "  Max In Flight Bytes: %" PRIu64 "\n",
         uv_hrtime() - session_stats_.created_at,
         session_stats_.handshake_start_at,
         session_stats_.handshake_completed_at,
@@ -1319,7 +1320,8 @@ QuicSession::~QuicSession() {
         session_stats_.streams_out_count,
         sendbuf_length,
         handshake_length,
-        txbuf_length);
+        txbuf_length,
+        session_stats_.max_bytes_in_flight);
 
   connection_.reset();
 
@@ -1821,6 +1823,9 @@ bool QuicSession::Receive(
     // and HandleScope are both exited before continuing on with the
     // function. This allows any nextTicks and queued tasks to be processed
     // before we continue.
+    auto update_stats = OnScopeLeave([&](){
+      UpdateDataStats();
+    });
     Debug(this, "Processing received packet");
     HandleScope handle_scope(env()->isolate());
     InternalCallbackScope callback_scope(this);
@@ -2564,6 +2569,7 @@ bool QuicSession::WritePackets(const char* diagnostic_label) {
     data.Realloc(nwrite);
     remote_address_.Update(path.path.remote.addr, path.path.remote.addrlen);
     sendbuf_.Push(std::move(data));
+    UpdateDataStats();
     if (!SendPacket(diagnostic_label))
       return false;
   }
@@ -2720,6 +2726,7 @@ void QuicSession::InitServer(
   connection_.reset(conn);
 
   InitializeTLS(this);
+  UpdateDataStats();
   UpdateIdleTimer();
 }
 
@@ -2752,6 +2759,16 @@ void QuicSession::UpdateRecoveryStats() {
   recovery_stats_.min_rtt = static_cast<double>(stat->min_rtt);
   recovery_stats_.latest_rtt = static_cast<double>(stat->latest_rtt);
   recovery_stats_.smoothed_rtt = static_cast<double>(stat->smoothed_rtt);
+}
+
+void QuicSession::UpdateDataStats() {
+  state_[IDX_QUIC_SESSION_STATE_MAX_DATA_LEFT] =
+    static_cast<double>(ngtcp2_conn_get_max_data_left(Connection()));
+  size_t bytes_in_flight = ngtcp2_conn_get_bytes_in_flight(Connection());
+  state_[IDX_QUIC_SESSION_STATE_BYTES_IN_FLIGHT] =
+    static_cast<double>(bytes_in_flight);
+  if (bytes_in_flight > session_stats_.max_bytes_in_flight)
+    session_stats_.max_bytes_in_flight = bytes_in_flight;
 }
 
 BaseObjectPtr<QuicSession> QuicSession::CreateClient(
@@ -2869,6 +2886,7 @@ bool QuicSession::InitClient(
   }
 
   UpdateIdleTimer();
+  UpdateDataStats();
   return true;
 }
 
