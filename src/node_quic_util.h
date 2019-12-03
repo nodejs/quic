@@ -85,6 +85,7 @@ struct QuicError {
   inline QuicError(
       int32_t family_ = QUIC_ERROR_SESSION,
       uint64_t code_ = NGTCP2_NO_ERROR);
+  inline QuicError(ngtcp2_connection_close_error_code code);
   inline QuicError(
       Environment* env,
       v8::Local<v8::Value> codeArg,
