@@ -162,9 +162,40 @@ enum QuicSessionState : int {
   IDX_QUIC_SESSION_STATE_MAX_STREAMS_BIDI,
   IDX_QUIC_SESSION_STATE_MAX_STREAMS_UNI,
 
+  // Communicates the current maxinum number of bytes that
+  // the local endpoint can send in this connection
+  // (updated immediately after processing sent/received packets)
+  IDX_QUIC_SESSION_STATE_MAX_DATA_LEFT,
+
+  // Communicates the current total number of bytes in flight
+  IDX_QUIC_SESSION_STATE_BYTES_IN_FLIGHT,
+
   // Just the number of session state enums for use when
   // creating the AliasedBuffer.
   IDX_QUIC_SESSION_STATE_COUNT
+};
+
+enum QuicSessionStatsIdx : int {
+  IDX_QUIC_SESSION_STATS_CREATED_AT,
+  IDX_QUIC_SESSION_STATS_HANDSHAKE_START_AT,
+  IDX_QUIC_SESSION_STATS_HANDSHAKE_SEND_AT,
+  IDX_QUIC_SESSION_STATS_HANDSHAKE_CONTINUE_AT,
+  IDX_QUIC_SESSION_STATS_HANDSHAKE_COMPLETED_AT,
+  IDX_QUIC_SESSION_STATS_HANDSHAKE_ACKED_AT,
+  IDX_QUIC_SESSION_STATS_SENT_AT,
+  IDX_QUIC_SESSION_STATS_RECEIVED_AT,
+  IDX_QUIC_SESSION_STATS_CLOSING_AT,
+  IDX_QUIC_SESSION_STATS_BYTES_RECEIVED,
+  IDX_QUIC_SESSION_STATS_BYTES_SENT,
+  IDX_QUIC_SESSION_STATS_BIDI_STREAM_COUNT,
+  IDX_QUIC_SESSION_STATS_UNI_STREAM_COUNT,
+  IDX_QUIC_SESSION_STATS_STREAMS_IN_COUNT,
+  IDX_QUIC_SESSION_STATS_STREAMS_OUT_COUNT,
+  IDX_QUIC_SESSION_STATS_KEYUPDATE_COUNT,
+  IDX_QUIC_SESSION_STATS_RETRY_COUNT,
+  IDX_QUIC_SESSION_STATS_LOSS_RETRANSMIT_COUNT,
+  IDX_QUIC_SESSION_STATS_ACK_DELAY_RETRANSMIT_COUNT,
+  IDX_QUIC_SESSION_STATS_PATH_VALIDATION_SUCCESS_COUNT,IDX_QUIC_SESSION_STATS_PATH_VALIDATION_FAILURE_COUNT,IDX_QUIC_SESSION_STATS_MAX_BYTES_IN_FLIGHT
 };
 
 class QuicSessionListener {
@@ -961,6 +992,7 @@ class QuicSession : public AsyncWrap,
       uint64_t app_error_code);
   bool WritePackets(const char* diagnostic_label = nullptr);
   void UpdateRecoveryStats();
+  void UpdateDataStats();
 
   void VersionNegotiation(
       const ngtcp2_pkt_hd* hd,
@@ -1309,6 +1341,8 @@ class QuicSession : public AsyncWrap,
     uint64_t path_validation_success_count;
     // The total number of failed path validations
     uint64_t path_validation_failure_count;
+    // The max number of in flight bytes recorded
+    uint64_t max_bytes_in_flight;
   };
   session_stats session_stats_{};
 
