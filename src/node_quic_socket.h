@@ -44,6 +44,40 @@ enum QuicSocketOptions : uint32_t {
   QUICSOCKET_OPTIONS_VALIDATE_ADDRESS_LRU = 0x2,
 };
 
+class QuicSocket;
+
+// This is the generic interface for objects that control QuicSocket
+// instances. The default `JSQuicSocketListener` emits events to
+// JavaScript
+class QuicSocketListener {
+ public:
+  virtual ~QuicSocketListener();
+
+  virtual void OnError(ssize_t code);
+  virtual void OnError(int code);
+  virtual void OnSessionReady(BaseObjectPtr<QuicSession> session);
+  virtual void OnServerBusy(bool busy);
+  virtual void OnDone();
+  virtual void OnDestroy();
+
+  QuicSocket* Socket() { return socket_; }
+
+ private:
+  QuicSocket* socket_ = nullptr;
+  QuicSocketListener* previous_listener_ = nullptr;
+  friend class QuicSocket;
+};
+
+class JSQuicSocketListener : public QuicSocketListener {
+ public:
+  void OnError(ssize_t code) override;
+  void OnError(int code) override;
+  void OnSessionReady(BaseObjectPtr<QuicSession> session) override;
+  void OnServerBusy(bool busy) override;
+  void OnDone() override;
+  void OnDestroy() override;
+};
+
 class QuicSocket : public AsyncWrap,
                    public UDPListener,
                    public mem::NgLibMemoryManager<QuicSocket, ngtcp2_mem> {
@@ -125,6 +159,9 @@ class QuicSocket : public AsyncWrap,
       const QuicCID& dcid,
       const QuicCID& scid,
       const sockaddr* addr);
+
+  void PushListener(QuicSocketListener* listener);
+  void RemoveListener(QuicSocketListener* listener);
 
  private:
   static void OnAlloc(
@@ -237,6 +274,8 @@ class QuicSocket : public AsyncWrap,
   double rx_loss_ = 0.0;
   double tx_loss_ = 0.0;
 
+  QuicSocketListener* listener_;
+  JSQuicSocketListener default_listener_;
   SocketAddress local_address_;
   QuicSessionConfig server_session_config_;
   QlogMode qlog_ = QlogMode::kDisabled;
@@ -346,6 +385,8 @@ class QuicSocket : public AsyncWrap,
   int Send(const sockaddr* addr,
            MallocedBuffer<char>&& data,
            const char* diagnostic_label = "unspecified");
+
+  friend class QuicSocketListener;
 };
 
 }  // namespace quic
