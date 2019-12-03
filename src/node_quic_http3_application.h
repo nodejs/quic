@@ -49,7 +49,7 @@ constexpr size_t DEFAULT_MAX_PUSHES = 65535;
 
 using Http3ConnectionPointer = DeleteFnPtr<nghttp3_conn, nghttp3_conn_del>;
 
-class Http3Header : public QuicStream::Header {
+class Http3Header : public QuicHeader {
  public:
   Http3Header(int32_t token, nghttp3_rcbuf* name, nghttp3_rcbuf* value);
   Http3Header(Http3Header&& other) noexcept :

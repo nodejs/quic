@@ -387,7 +387,7 @@ void QuicStream::SetHeadersKind(QuicStreamHeadersKind kind) {
   headers_kind_ = kind;
 }
 
-bool QuicStream::AddHeader(std::unique_ptr<Header> header) {
+bool QuicStream::AddHeader(std::unique_ptr<QuicHeader> header) {
   Debug(this, "Header Added");
   headers_.emplace_back(std::move(header));
   // TODO(@jasnell): We need to limit the maximum number of headers.
@@ -400,28 +400,8 @@ void QuicStream::EndHeaders() {
   // Upon completion of a block of headers, convert the
   // vector of Header objects into an array of name+value
   // pairs, then call the on_stream_headers function.
-  std::vector<Local<Value>> headers;
-  for (const auto& header : headers_) {
-    // name and value should never be empty here, and if
-    // they are, there's an actual bug so go ahead and crash
-    Local<Value> pair[] = {
-      header->GetName(Session()->Application()).ToLocalChecked(),
-      header->GetValue(Session()->Application()).ToLocalChecked()
-    };
-    headers.push_back(Array::New(env()->isolate(), pair, arraysize(pair)));
-  }
-  Local<Value> argv[] = {
-      Array::New(
-          env()->isolate(),
-          headers.data(),
-          headers.size()),
-      Integer::New(
-          env()->isolate(),
-          headers_kind_)
-  };
+  Session()->Application()->StreamHeaders(GetID(), headers_kind_, &headers_);
   headers_.clear();
-  BaseObjectPtr<QuicStream> ptr(this);
-  MakeCallback(env()->quic_on_stream_headers_function(), arraysize(argv), argv);
 }
 
 void QuicStream::MemoryInfo(MemoryTracker* tracker) const {
