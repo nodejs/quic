@@ -553,19 +553,7 @@ void Http3Application::H3AckedStreamData(
 void Http3Application::H3StreamClose(
     int64_t stream_id,
     uint64_t app_error_code) {
-  Environment* env = Session()->env();
-  Local<Value> argv[] = {
-    Number::New(env->isolate(), static_cast<double>(stream_id)),
-    Number::New(env->isolate(), static_cast<double>(app_error_code))
-  };
-
-  // Grab a shared pointer to this to prevent the QuicSession
-  // from being freed while the MakeCallback is running.
-  BaseObjectPtr<QuicSession> ptr(Session());
-  Session()->MakeCallback(
-      env->quic_on_stream_close_function(),
-      arraysize(argv),
-      argv);
+  Session()->Listener()->OnStreamClose(stream_id, app_error_code);
 }
 
 QuicStream* Http3Application::FindOrCreateStream(int64_t stream_id) {

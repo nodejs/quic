@@ -167,6 +167,90 @@ enum QuicSessionState : int {
   IDX_QUIC_SESSION_STATE_COUNT
 };
 
+class QuicSessionListener {
+ public:
+  virtual ~QuicSessionListener();
+
+  virtual void OnKeylog(const char* str, size_t size);
+  virtual void OnClientHello(
+      const char* alpn,
+      const char* server_name);
+  virtual void OnCert(const char* server_name);
+  virtual void OnOCSP(const std::string& ocsp);
+  virtual void OnStreamHeaders(
+      int64_t stream_id,
+      int kind,
+      std::vector<std::unique_ptr<QuicHeader>>* headers);
+  virtual void OnStreamClose(
+      int64_t stream_id,
+      uint64_t app_error_code);
+  virtual void OnStreamReset(
+      int64_t stream_id,
+      uint64_t final_size,
+      uint64_t app_error_code);
+  virtual void OnSessionDestroyed();
+  virtual void OnSessionClose(QuicError error);
+  virtual void OnStreamReady(BaseObjectPtr<QuicStream> stream);
+  virtual void OnHandshakeCompleted();
+  virtual void OnPathValidation(
+      ngtcp2_path_validation_result res,
+      const sockaddr* local,
+      const sockaddr* remote);
+  virtual void OnSessionTicket(int size, SSL_SESSION* session);
+  virtual void OnSessionSilentClose(bool stateless_reset, QuicError error);
+  virtual void OnVersionNegotiation(
+      uint32_t supported_version,
+      const uint32_t* versions,
+      size_t vcnt);
+  virtual void OnQLog(const uint8_t* data, size_t len);
+
+  QuicSession* Session() { return session_; }
+
+ private:
+  QuicSession* session_ = nullptr;
+  QuicSessionListener* previous_listener_ = nullptr;
+  friend class QuicSession;
+};
+
+class JSQuicSessionListener : public QuicSessionListener {
+ public:
+  void OnKeylog(const char* str, size_t size) override;
+  void OnClientHello(
+      const char* alpn,
+      const char* server_name) override;
+  void OnCert(const char* server_name) override;
+  void OnOCSP(const std::string& ocsp) override;
+  void OnStreamHeaders(
+      int64_t stream_id,
+      int kind,
+      std::vector<std::unique_ptr<QuicHeader>>* headers) override;
+  void OnStreamClose(
+      int64_t stream_id,
+      uint64_t app_error_code) override;
+  void OnStreamReset(
+      int64_t stream_id,
+      uint64_t final_size,
+      uint64_t app_error_code) override;
+  void OnSessionDestroyed() override;
+  void OnSessionClose(QuicError error) override;
+  void OnStreamReady(BaseObjectPtr<QuicStream> stream) override;
+  void OnHandshakeCompleted() override;
+  void OnPathValidation(
+      ngtcp2_path_validation_result res,
+      const sockaddr* local,
+      const sockaddr* remote) override;
+  void OnSessionTicket(int size, SSL_SESSION* session) override;
+  void OnSessionSilentClose(bool stateless_reset, QuicError error) override;
+  void OnVersionNegotiation(
+      uint32_t supported_version,
+      const uint32_t* versions,
+      size_t vcnt) override;
+  void OnQLog(const uint8_t* data, size_t len) override;
+
+ private:
+  friend class QuicSession;
+};
+
 // The QuicCryptoContext class encapsulates all of the crypto/TLS
 // handshake details on behalf of a QuicSession.
 class QuicCryptoContext : public MemoryRetainer {
@@ -526,6 +610,7 @@ class QuicSession : public AsyncWrap,
     ssize_t nread);
 
   QuicCryptoContext* CryptoContext() { return crypto_context_.get(); }
+  QuicSessionListener* Listener() { return listener_; }
 
   QuicStream* CreateStream(int64_t id);
   QuicStream* FindStream(int64_t id);
@@ -789,6 +874,9 @@ class QuicSession : public AsyncWrap,
   // without transmitting any additional frames to the
   // peer.
   void SilentClose(bool stateless_reset = false);
+
+  void PushListener(QuicSessionListener* listener);
+  void RemoveListener(QuicSessionListener* listener);
 
   // Tracks whether or not we are currently within an ngtcp2 callback
   // function. Certain ngtcp2 APIs are not supposed to be called when
@@ -1144,6 +1232,9 @@ class QuicSession : public AsyncWrap,
   size_t connection_close_attempts_ = 0;
   size_t connection_close_limit_ = 1;
 
+  QuicSessionListener* listener_;
+  JSQuicSessionListener default_listener_;
+
   TimerPointer idle_;
   TimerPointer retransmit_;
 
@@ -1244,6 +1335,8 @@ class QuicSession : public AsyncWrap,
   static const ngtcp2_conn_callbacks callbacks[2];
 
   friend class QuicCryptoContext;
+  friend class QuicSessionListener;
+  friend class JSQuicSessionListener;
 };
 
 }  // namespace quic
