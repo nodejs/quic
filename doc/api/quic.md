@@ -56,7 +56,191 @@ socket.on('listening', () => {
 });
 ```
 
-## quic.createSocket([options])
+## QUIC Basics
+
+QUIC is a UDP-based network transport protocol that includes built in security
+via TLS 1.3, flow control, error correction, connection migration,
+multiplexing, and more.
+
+Within the Node.js implementation of the QUIC protocol, there are three main
+components: the `QuicSocket`, the `QuicSession` and the `QuicStream`.
+
+### QuicSocket
+
+A `QuicSocket` encapsulates a binding to a local UDP port. It is used to send
+data to, and receive data from, remote endpoints. Once created, a `QuicSocket`
+is associated with a local network address and IP port and can act as both a
+QUIC client and server simultaneously. User code at the JavaScript level
+interacts with the `QuicSocket` object to:
+
+* Query or modified the properties of the local UDP binding;
+* Create client `QuicSession` instances;
+* Wait for server `QuicSession` instances; or
+* Query activity statistics
+
+Unlike the `net.Socket` and `tls.TLSSocket`, a `QuicSocket` instance cannot be
+directly used by user code at the JavaScript level to send or receive data.
+
+### Client and Server QuicSessions
+
+A `QuicSession` represents a logical connection between two QUIC endpoints (a
+client and a server). In the JavaScript API, each is represented by the
+`QuicClientSession` and `QuicServerSession` specializations.
+
+At any given time, a `QuicSession` exists is one of four possible states:
+
+* `Initial` - Entered as soon as the `QuicSession` is created.
+* `Handshake` - Entered as soon as the TLS 1.3 handshake between the client and
+  server begins. The handshake is always initiated by the client.
+* `Ready` - Entered as soon as the TLS 1.3 handshake completes. Once the
+  `QuicSession` enters the `Ready` state, it may be used to exchange
+  application data using `QuicStream` instances.
+* `Closed` - Entere as soon as the `QuicSession` connection has been
+  terminated.
+
+New instances of `QuicClientSession` are created using the `connect()`
+function on a `QuicSocket` as in the example below:
+
+```js
+const { createSocket } = require('quic');
+
+// Create a QuicSocket associated with localhost and port 1234
+const socket = createSocket({ port: 1234 });
+
+const client = client.connect({
+  address: 'example.com',
+  port: 4567,
+  alpn: 'foo'
+});
+```
+
+As soon as the `QuicClientSession` is created, the `address` provided in
+the connect options will be resolved to an IP address (if necessary), and
+the TLS 1.3 handshake will begin. The `QuicClientSession` cannot be used
+to exchange application data until after the `'secure'` event has been
+emitted by the `QuicClientSession` object, signaling the completion of
+the TLS 1.3 handshake.
+
+```js
+client.on('secure', () => {
+  // The QuicClientSession can now be used for application data
+});
+```
+
+New instance of `QuicServerSession` are created internally by the
+`QuicSocket` if it has been configured to listen for new connections
+using the `listen()` method.
+
+```
+const key = getTLSKeySomehow();
+const cert = getTLSCertSomehow();
+
+socket.listen({
+  key,
+  cert,
+  alpn: 'foo'
+});
+
+socket.on('session', (session) => {
+  session.on('secure', () => {
+    // The QuicServerSession can now be used for application data
+  });
+});
+```
+
+As with client `QuicSession` instances, the `QuicServerSession` cannot be
+used to exhange application data until the `'secure'` event has been emitted.
+
+### QuicSession and ALPN
+
+QUIC uses the TLS 1.3 ALPN ("Application-Layer Protocol Negotiation") extension
+to identify the application level protocol that is using the QUIC connection.
+Every `QuicSession` instance has an ALPN identifier that *must* be specified
+in either the `connect()` or `listen()` options. ALPN identifiers that are
+known to Node.js (such as the ALPN identifier for HTTP/3) may alter how the
+`QuicSession` and `QuicStream` objects operate internally, but the QUIC
+implementation for Node.js has been designed to allow any ALPN to be specified
+and used.
+
+### QuicStream
+
+Once a `QuicSession` transitions to the `Ready` state, `QuicStream` instances
+may be created and used to exchange application data. On a general level, all
+`QuicStream` instances are simply Node.js Duplex Streams that allow
+bidirectional data flow between the QUIC client and server. However, the
+application protocol negotiated for the `QuicSession` may alter the semantics
+and operation of a `QuicStream` associated with the session. Specifically,
+some features of the `QuicStream` (e.g. headers) are enabled only if the
+application protocol selected is known by Node.js to support those features.
+
+Once the `QuicSession` is ready, a `QuicStream` may be created by either the
+client or server, and may be unidirectional or bidirectional.
+
+The `openStream()` method is used to create a new `QuicStream`:
+
+```js
+// Create a new bidirectional stream
+const stream1 = session.openStream();
+
+// Create a new unidirectional stream
+const stream2 = session.openStream({ halfOpen: true });
+```
+
+As suggested by the names, a bidirectional stream can send data to, and receive
+data from, the QUIC peer; while a unidirectional stream can only be used to
+send data to the peer.
+
+The `'stream'` event is emitted by the `QuicSession` when a new `QuicStream`
+has been initated by the connected peer:
+
+```js
+session.on('stream', (stream) => {
+  if (stream.bidirectional) {
+    stream.write('Hello World');
+    stream.end();
+  }
+  stream.on('data', console.log);
+  stream.on('end', () => {});
+});
+```
+
+#### QuicStream Headers
+
+Some QUIC application protocols (like HTTP/3) make use of headers.
+
+There are three specific kinds of headers that the Node.js QUIC
+implementation is capable of handling dependent entirely on known
+application protocol support:
+
+* Informational Headers
+* Initial Headers
+* Trailing Headers
+
+These categories correlate exactly with the equivalent HTTP
+concepts:
+
+* Informational Headers == Any response headers transmitted within
+  a block of headers using a `1xx` status code.
+* Initial Headers == HTTP request or response headers
+* Traiing Headers == A block of headers that follow the body of a
+  request or response.
+
+If headers are supported by the application protocol in use for
+a given `QuicSession`, the `'initialHeaders'`, `'informationalHeaders'`,
+and `'trailingHeaders'` events will be emitted by the `QuicStream`
+object when headers are received; and the `submitInformationalHeaders()`,
+`submitInitialHeaders()`, and `submitTrailingHeaders()` methods can be
+used to send headers.
+
+## QUIC and HTTP/3
+
+HTTP/3 is an application layer protocol that uses QUIC as the transport.
+
+TBD
+
+## QUIC JavaScript API
+
+### quic.createSocket([options])
 <!-- YAML
 added: REPLACEME
 -->
@@ -69,7 +253,7 @@ added: REPLACEME
     using `quicsocket.connect()`.
   * `lookup` {Function} A custom DNS lookup function. Default `dns.lookup()`.
   * `maxConnectionsPerHost` {number} The maximum number of inbound connections
-    per remote host. Default: `100`.
+    allowed per remote host. Default: `100`.
   * `port` {number} The local port to bind to.
   * `qlog` {boolean} Whether to emit ['qlog'][] events for incoming sessions.
     (For outgoing client sessions, set `client.qlog`.) Default: `false`.
@@ -88,9 +272,10 @@ added: REPLACEME
     `false`.
   * `ipv6Only` {boolean}
 
-Creates a new `QuicSocket` instance.
+The `quic.createSocket()` function is used to create new `QuicSocket` instances
+associated with a local UDP address.
 
-## Class: QuicSession exends EventEmitter
+### Class: QuicSession exends EventEmitter
 <!-- YAML
 added: REPLACEME
 -->
@@ -101,14 +286,14 @@ properties that are shared by both `QuicClientSession` and `QuicServerSession`.
 
 Users will not create instances of `QuicSession` directly.
 
-### Event: `'close'`
+#### Event: `'close'`
 <!-- YAML
 added: REPLACEME
 -->
 
-Emiitted after the `QuicSession` has been destroyed.
+Emiitted after the `QuicSession` has been destroyed and is no longer usable.
 
-### Event: `'error'`
+#### Event: `'error'`d
 <!-- YAML
 added: REPLACEME
 -->
@@ -116,7 +301,11 @@ added: REPLACEME
 Emitted immediately before the `'close'` event if the `QuicSession` was
 destroyed with an error.
 
-### Event: `'keylog'`
+The callback will be invoked with a single argument:
+
+* `error` {Object} An `Error` object.
+
+#### Event: `'keylog'`
 <!-- YAML
 added: REPLACEME
 -->
@@ -139,7 +328,7 @@ const log = fs.createWriteStream('/tmp/ssl-keys.log', { flags: 'a' });
 session.on('keylog', (line) => log.write(line));
 ```
 
-### Event: `'pathValidation'`
+#### Event: `'pathValidation'`
 <!-- YAML
 added: REPLACEME
 -->
@@ -155,7 +344,7 @@ The callback will be invoked with three arguments:
 * `local` {Object} The local address component of the tested path.
 * `remote` {Object} The remote address component of the tested path.
 
-### Event: `'qlog'`
+#### Event: `'qlog'`
 <!-- YAML
 added: REPLACEME
 -->
@@ -167,7 +356,7 @@ Emitted if the `qlog: true` option was passed to `quicsocket.connect()` or
 
 The argument is a JSON fragment according to the [qlog standard][].
 
-### Event: `'secure'`
+#### Event: `'secure'`
 <!-- YAML
 added: REPLACEME
 -->
@@ -185,14 +374,39 @@ The callback will be invoked with two arguments:
 These will also be available using the `quicsession.servername`,
 `quicsession.alpnProtocol`, and `quicsession.cipher` properties.
 
-### Event: `'stream'`
+#### Event: `'stream'`
 <!-- YAML
 added: REPLACEME
 -->
 
 Emitted when a new `QuicStream` has been initiated by the connected peer.
 
-### quicsession.alpnProtocol
+#### quicsession.ackDelayRetransmitCount
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BigInt` representing the number of retranmissions caused by delayed
+acknowledgements.
+
+#### quicsession.address
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {Object}
+  * `address` {string} The local IPv4 or IPv6 address to which the `QuicSession`
+    is bound.
+  * `family` {string} Either `'IPv4'` or `'IPv6'`.
+  * `port` {number} The local IP port to which the `QuicSocket` is bound.
+
+An object containing the local address information for the `QuicSocket` to which
+the `QuicSession` is currently associated.
+
+
+#### quicsession.alpnProtocol
 <!-- YAML
 added: REPLACEME
 -->
@@ -201,7 +415,61 @@ added: REPLACEME
 
 The ALPN protocol identifier negotiated for this session.
 
-### quicsession.cipher
+#### quicsession.authenticated
+<!--YAML
+added: REPLACEME
+-->
+* Type: {boolean}
+
+True if the certificate provided by the peer during the TLS 1.3
+handshake has been verified.
+
+#### quicsession.authenticationError
+
+* Type: {Object} An error object
+
+If `quicsession.authenticated` is false, returns an `Error` object
+representing the reason the peer certificate verification failed.
+
+#### quicsession.bidiStreamCount
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BigInt` representing the total number of bidirectional streams
+created for this `QuicSession`.
+
+#### quicsession.bytesInFlight
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {number}
+
+The total number of unacknoledged bytes this QUIC endpoint has tramitted
+to the connected peer.
+
+#### quicsession.bytesReceived
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BigInt` representing the total number of bytes received from the peer.
+
+#### quicsession.bytesSent
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BigInt` representing the total number of bytes sent to the peer.
+
+#### quicsession.cipher
 <!-- YAML
 added: REPLACEME
 -->
@@ -212,7 +480,7 @@ added: REPLACEME
 
 Information about the cipher algorithm selected for the session.
 
-### quicsession.close([callback])
+#### quicsession.close([callback])
 <!-- YAML
 added: REPLACEME
 -->
@@ -224,7 +492,17 @@ will be permitted to close naturally. New `QuicStream` instances will not be
 permitted. Once all `QuicStream` instances have closed, the `QuicSession`
 instance will be destroyed.
 
-### quicsession.closing
+#### quicsession.closeCode
+<!-- YAML
+added: REPLACEME
+-->
+* Type: {Object}
+  * `code` {number} The error code reported when the `QuicSession` closed.
+  * `family` {number} The type of error code reported (`0` indicates a QUIC
+    protocol level error, `1` indicates a TLS error, `2` represents an
+    application level error.)
+
+#### quicsession.closing
 <!-- YAML
 added: REPLACEME
 -->
@@ -233,7 +511,7 @@ added: REPLACEME
 
 Set to `true` if the `QuicSession` is in the process of a graceful shutdown.
 
-### quicsession.destroy([error])
+#### quicsession.destroy([error])
 <!-- YAML
 added: REPLACEME
 -->
@@ -246,7 +524,7 @@ before the `close` event.
 
 Any `QuicStream` instances that are still opened will be abruptly closed.
 
-### quicsession.destroyed
+#### quicsession.destroyed
 <!-- YAML
 added: REPLACEME
 -->
@@ -255,7 +533,16 @@ added: REPLACEME
 
 Set to `true` if the `QuicSession` has been destroyed.
 
-### quicsession.getCertificate()
+#### quicsession.duration
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BigInt` representing the length of time the `QuicSession` was active.
+
+#### quicsession.getCertificate()
 <!-- YAML
 added: REPLACEME
 -->
@@ -268,7 +555,7 @@ some properties corresponding to the fields of the certificate.
 If there is no local certificate, or if the `QuicSession` has been destroyed,
 an empty object will be returned.
 
-### quicsession.getPeerCertificate([detailed])
+#### quicsession.getPeerCertificate([detailed])
 <!-- YAML
 added: REPLACEME
 -->
@@ -285,7 +572,21 @@ If the full certificate chain was requested (`details` equals `true`), each
 certificate will include an `issuerCertificate` property containing an object
 representing the issuer's certificate.
 
-### quicsession.handshakeComplete
+#### quicsession.handshakeAckHistogram
+<!-- YAML
+added: REPLACEME
+-->
+
+TBD
+
+#### quicsession.handshakeContinuationHistogram
+<!-- YAML
+added: REPLACEME
+-->
+
+TBD
+
+#### quicsession.handshakeComplete
 <!-- YAML
 added: REPLACEME
 -->
@@ -294,7 +595,65 @@ added: REPLACEME
 
 Set to `true` if the TLS handshake has completed.
 
-### quicsession.maxStreams
+#### quicsession.handshakeDuration
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BigInt` representing the length of time taken to complete the TLS handshake.
+
+#### quicsession.keyUpdateCount
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BigInt` representing the number of key update operations that have
+occured.
+
+#### quicsession.latestRTT
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+The most recently recorded RTT for this `QuicSession`.
+
+#### quicsession.lossRetransmitCount
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BigInt` representing the number of lost-packet retranmissions that have been
+performed on this `QuicSession`.
+
+#### quicsession.maxDataLeft
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {Number}
+
+The total number of bytes the `QuicSession` is *currently* allowed to
+send to the connected peer.
+
+#### quicsession.maxInFlightBytes
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BigInt` representing the maximum number of in flight bytes recorded
+for this `QuicSession`.
+
+#### quicsession.maxStreams
 <!-- YAML
 added: REPLACEME
 -->
@@ -308,7 +667,16 @@ that can currently be opened. The values are set initially by configuration
 parameters when the `QuicSession` is created, then updated over the lifespan
 of the `QuicSession` as the connected peer allows new streams to be created.
 
-### quicsession.openStream([options])
+#### quicsession.minRTT
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+The minimum RTT recorded so far for this `QuicSession`.
+
+#### quicsession.openStream([options])
 <!-- YAML
 added: REPLACEME
 -->
@@ -323,7 +691,7 @@ Returns a new `QuicStream`.
 An error will be thrown if the `QuicSession` has been destroyed or is in the
 process of a graceful shutdown.
 
-### quicsession.ping()
+#### quicsession.ping()
 <!--YAML
 added: REPLACEME
 -->
@@ -336,7 +704,40 @@ that ignores any errors that may occur during the serialization and send
 operations. There is no return value and there is no way to monitor the status
 of the `ping()` operation.
 
-### quicsession.servername
+#### quicsession.peerInitiatedStreamCount
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BigInt` representing the total number of `QuicStreams` initated by the
+connected peer.
+
+#### quicsession.remoteAddress
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {Object}
+  * `address` {string} The local IPv4 or IPv6 address to which the `QuicSession`
+    is connected.
+  * `family` {string} Either `'IPv4'` or `'IPv6'`.
+  * `port` {number} The local IP port to which the `QuicSocket` is bound.
+
+An object containing the remote address information for the connected peer.
+
+#### quicsession.selfInitiatedStreamCount
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BigInt` representing the total number of `QuicStream` instances initiated
+by this `QuicSession`.
+
+#### quicsession.servername
 <!-- YAML
 added: REPLACEME
 -->
@@ -345,7 +746,16 @@ added: REPLACEME
 
 The SNI servername requested for this session by the client.
 
-### quicsession.socket
+#### quicsession.smoothedRTT
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+The modified RTT calculated for this `QuicSession`.
+
+#### quicsession.socket
 <!-- YAML
 added: REPLACEME
 -->
@@ -354,7 +764,26 @@ added: REPLACEME
 
 The `QuicSocket` the `QuicSession` is associated with.
 
-### quicsession.updateKey()
+#### quicsession.statelessReset
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {Boolean}
+
+True if the `QuicSession` was closed due to QUIC stateless reset.
+
+#### quicsession.uniStreamCount
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BigInt` representing the total number of unidirectional streams
+created on this `QuicSession`.
+
+#### quicsession.updateKey()
 <!-- YAML
 added: REPLACEME
 -->
@@ -364,7 +793,7 @@ added: REPLACEME
 
 Initiates QuicSession key update.
 
-## Class: QuicClientSession extends QuicSession
+### Class: QuicClientSession extends QuicSession
 <!-- YAML
 added: REPLACEME
 -->
@@ -374,7 +803,7 @@ added: REPLACEME
 The `QuicClientSession` class implements the client side of a QUIC connection.
 Instances are created using the `quicsocket.connect()` method.
 
-### Event: `'OCSPResponse'`
+#### Event: `'OCSPResponse'`
 <!-- YAML
 added: REPLACEME
 -->
@@ -389,7 +818,7 @@ The callback is invoked with a single argument:
 Node.js does not perform any automatic validation or processing of the
 response.
 
-### Event: `'sessionTicket'`
+#### Event: `'sessionTicket'`
 <!-- YAML
 added: REPLACEME
 -->
@@ -406,7 +835,7 @@ three arguments:
 The `sessionTicket` and `remoteTransportParams` are useful when creating a new
 `QuicClientSession` to more quickly resume an existing session.
 
-### quicclientsession.ephemeralKeyInfo
+#### quicclientsession.ephemeralKeyInfo
 <!-- YAML
 added: REPLACEME
 -->
@@ -421,7 +850,7 @@ empty object when the key exchange is not ephemeral. The supported types are
 
 For example: `{ type: 'ECDH', name: 'prime256v1', size: 256 }`.
 
-### quicclientsession.ready
+#### quicclientsession.ready
 <!-- YAML
 added: REPLACEME
 -->
@@ -431,7 +860,7 @@ added: REPLACEME
 Set to `true` if the `QuicClientSession` is ready for use. False if the
 `QuicSocket` has not yet been bound.
 
-### quicclientsession.setSocket(socket, callback])
+#### quicclientsession.setSocket(socket, callback])
 <!-- YAML
 added: REPLACEME
 -->
@@ -446,7 +875,7 @@ to attempting the migration. If the `QuicClientSession` is not yet ready to
 migrate, the callback will be invoked with an `Error` using the code
 `ERR_QUICCLIENTSESSION_FAILED_SETSOCKET`.
 
-## Class: QuicServerSession extends QuicSession
+### Class: QuicServerSession extends QuicSession
 <!-- YAML
 added: REPLACEME
 -->
@@ -457,7 +886,7 @@ The `QuicServerSession` class implements the server side of a QUIC connection.
 Instances are created internally and are emitted using the `QuicSocket`
 `'session'` event.
 
-### Event: `'clientHello'`
+#### Event: `'clientHello'`
 <!-- YAML
 added: REPLACEME
 -->
@@ -477,7 +906,7 @@ The callback is invoked with four arguments:
 * `callback` {Function} A callback function that must be called in order for
   the TLS handshake to continue.
 
-### Event: `'OCSPRequest'`
+#### Event: `'OCSPRequest'`
 <!-- YAML
 added: REPLACEME
 -->
@@ -493,7 +922,17 @@ The callback is invoked with three arguments:
 
 The callback *must* be invoked in order for the TLS handshake to continue.
 
-## Class: QuicSocket
+#### quicserversession.addContext(servername[, context])
+<!-- YAML
+added: REPLACEME
+-->
+
+* `servername` {String} A DNS name to associate with the given context.
+* `context` {Object} A TLS SecureContext to associate with the `servername`.
+
+TBD
+
+### Class: QuicSocket
 <!-- YAML
 added: REPLACEME
 -->
@@ -504,14 +943,14 @@ method.
 Once created, a `QuicSocket` can be configured to work as both a client and a
 server.
 
-### Event: `'close'`
+#### Event: `'close'`
 <!-- YAML
 added: REPLACEME
 -->
 
 Emitted after the `QuicSocket` has been destroyed and is no longer usable.
 
-### Event: `'error'`
+#### Event: `'error'`
 <!-- YAML
 added: REPLACEME
 -->
@@ -519,21 +958,21 @@ added: REPLACEME
 Emitted before the `'close'` event if the `QuicSocket` was destroyed with an
 `error`.
 
-### Event: `'ready'`
+#### Event: `'ready'`
 <!-- YAML
 added: REPLACEME
 -->
 
 Emitted once the `QuicSocket` has been bound to a local UDP port.
 
-### Event: `'session'`
+#### Event: `'session'`
 <!-- YAML
 added: REPLACEME
 -->
 
 Emitted when a new `QuicServerSession` has been created.
 
-### quicsocket.addMembership(address, iface)
+#### quicsocket.addMembership(address, iface)
 <!-- YAML
 added: REPLACEME
 -->
@@ -548,7 +987,7 @@ choose one interface and will add membership to it. To add membership to every
 available interface, call `quicsocket.addMembership()` multiple times, once per
 interface.
 
-### quicsocket.address
+#### quicsocket.address
 <!-- YAML
 added: REPLACEME
 -->
@@ -566,7 +1005,7 @@ The object will contain the properties:
 
 If the `QuicSocket` is not bound, `quicsocket.address` is an empty object.
 
-### quicsocket.bound
+#### quicsocket.bound
 <!-- YAML
 added: REPLACEME
 -->
@@ -576,7 +1015,7 @@ added: REPLACEME
 Will be `true` if the `QuicSocket` has been successfully bound to the local UDP
 port.
 
-### quicsocket.close([callback])
+#### quicsocket.close([callback])
 <!-- YAML
 added: REPLACEME
 -->
@@ -587,7 +1026,7 @@ Gracefully closes the `QuicSocket`. Existing `QuicSession` instances will be
 permitted to close naturally. New `QuicClientSession` and `QuicServerSession`
 instances will not be allowed.
 
-### quicsocket.connect([options])
+#### quicsocket.connect([options])
 <!-- YAML
 added: REPLACEME
 -->
@@ -713,7 +1152,7 @@ Create a new `QuicClientSession`. This function can be called multiple times
 to create sessions associated with different endpoints on the same
 client endpoint.
 
-### quicsocket.destroy([error])
+#### quicsocket.destroy([error])
 <!-- YAML
 added: REPLACEME
 -->
@@ -723,7 +1162,7 @@ added: REPLACEME
 Destroys the `QuicSocket` then emits the `'close'` event when done. The `'error'`
 event will be emitted after `'close'` if the `error` is not `undefined`.
 
-### quicsocket.destroyed
+#### quicsocket.destroyed
 <!-- YAML
 added: REPLACEME
 -->
@@ -732,7 +1171,7 @@ added: REPLACEME
 
 Will be `true` if the `QuicSocket` has been destroyed.
 
-### quicsocket.dropMembership(address, iface)
+#### quicsocket.dropMembership(address, iface)
 <!-- YAML
 added: REPLACEME
 -->
@@ -748,7 +1187,7 @@ never have reason to call this.
 If `multicastInterface` is not specified, the operating system will attempt to
 drop membership on all valid interfaces.
 
-### quicsocket.fd
+#### quicsocket.fd
 <!-- YAML
 added: REPLACEME
 -->
@@ -758,7 +1197,7 @@ added: REPLACEME
 The system file descriptor the `QuicSocket` is bound to. This property
 is not set on Windows.
 
-### quicsocket.listen([options][, callback])
+#### quicsocket.listen([options][, callback])
 <!-- YAML
 added: REPLACEME
 -->
@@ -869,7 +1308,7 @@ Listen for new peer-initiated sessions.
 If a `callback` is given, it is registered as a handler for the
 `'session'` event.
 
-### quicsocket.pending
+#### quicsocket.pending
 <!-- YAML
 added: REPLACEME
 -->
@@ -878,12 +1317,12 @@ added: REPLACEME
 
 Set to `true` if the socket is not yet bound to the local UDP port.
 
-### quicsocket.ref()
+#### quicsocket.ref()
 <!-- YAML
 added: REPLACEME
 -->
 
-### quicsocket.setBroadcast([on])
+#### quicsocket.setBroadcast([on])
 <!-- YAML
 added: REPLACEME
 -->
@@ -893,7 +1332,7 @@ added: REPLACEME
 Sets or clears the `SO_BROADCAST` socket option. When set to `true`, UDP
 packets may be sent to a local interface's broadcast address.
 
-### quicsocket.setMulticastLoopback([on])
+#### quicsocket.setMulticastLoopback([on])
 <!-- YAML
 added: REPLACEME
 -->
@@ -903,7 +1342,7 @@ added: REPLACEME
 Sets or clears the `IP_MULTICAST_LOOP` socket option. When set to `true`,
 multicast packets will also be received on the local interface.
 
-### quicsocket.setMulticastInterface(iface)
+#### quicsocket.setMulticastInterface(iface)
 <!-- YAML
 added: REPLACEME
 -->
@@ -929,7 +1368,7 @@ also use explicit scope in addresses, so only packets sent to a multicast
 address without specifying an explicit scope are affected by the most recent
 successful use of this call.
 
-#### Examples: IPv6 Outgoing Multicast Interface
+##### Examples: IPv6 Outgoing Multicast Interface
 <!-- YAML
 added: REPLACEME
 -->
@@ -953,7 +1392,7 @@ socket.on('ready', () => {
 });
 ```
 
-#### Example: IPv4 Outgoing Multicast Interface
+##### Example: IPv4 Outgoing Multicast Interface
 <!-- YAML
 added: REPLACEME
 -->
@@ -967,7 +1406,7 @@ socket.on('ready', () => {
 });
 ```
 
-#### Call Results
+##### Call Results
 
 A call on a socket that is not ready to send or no longer open may throw a
 Not running Error.
@@ -987,7 +1426,7 @@ A socket's address family's ANY address (IPv4 `'0.0.0.0'` or IPv6 `'::'`)
 can be used to return control of the sockets default outgoing interface to
 the system for future multicast packets.
 
-### quicsocket.setMulticastTTL(ttl)
+#### quicsocket.setMulticastTTL(ttl)
 <!-- YAML
 added: REPLACEME
 -->
@@ -1003,7 +1442,7 @@ decremented to `0` by a router, it will not be forwarded.
 The argument passed to `socket.setMulticastTTL()` is a number of hops between
 `0` and `255`. The default on most systems is `1` but can vary.
 
-### quicsocket.setServerBusy([on])
+#### quicsocket.setServerBusy([on])
 <!-- YAML
 added: REPLACEME
 -->
@@ -1016,7 +1455,7 @@ to reject all new incoming connection requests using the `SERVER_BUSY` QUIC
 error code. To begin receiving connections again, disable busy mode by calling
 `setServerBusy(false)`.
 
-### quicsocket.setTTL(ttl)
+#### quicsocket.setTTL(ttl)
 <!-- YAML
 added: REPLACEME
 -->
@@ -1032,19 +1471,19 @@ Changing TTL values is typically done for network probes or when multicasting.
 The argument to `socket.setTTL()` is a number of hops between `1` and `255`.
 The default on most systems is `64` but can vary.
 
-### quicsocket.unref();
+#### quicsocket.unref();
 <!-- YAML
 added: REPLACEME
 -->
 
-## Class: QuicStream extends stream.Duplex
+### Class: QuicStream extends stream.Duplex
 <!-- YAML
 added: REPLACEME
 -->
 
 * Extends: {stream.Duplex}
 
-### Event: `'abort'`
+#### Event: `'abort'`
 <!-- YAML
 added: REPLACEME
 -->
@@ -1058,7 +1497,7 @@ The callback is invoked with two arguments:
 * `finalSize` {number} The total number of bytes received by the `QuicStream`
   as of the moment the stream was closed.
 
-### Event: `'close'`
+#### Event: `'close'`
 <!-- YAML
 added: REPLACEME
 -->
@@ -1066,22 +1505,22 @@ added: REPLACEME
 Emitted when the `QuicStream` has is completely closed and the underlying
 resources have been freed.
 
-### Event: `'data'`
+#### Event: `'data'`
 <!-- YAML
 added: REPLACEME
 -->
 
-### Event: `'end'`
+#### Event: `'end'`
 <!-- YAML
 added: REPLACEME
 -->
 
-### Event: `'error'`
+#### Event: `'error'`
 <!-- YAML
 added: REPLACEME
 -->
 
-### Event: `'informationalHeaders'`
+#### Event: `'informationalHeaders'`
 <!-- YAML
 added: REPLACEME
 -->
@@ -1101,7 +1540,7 @@ stream('informationalHeaders', (headers) => {
 });
 ```
 
-### Event: `'initialHeaders'`
+#### Event: `'initialHeaders'`
 <!-- YAML
 added: REPLACEME
 -->
@@ -1123,7 +1562,7 @@ stream('initialHeaders', (headers) => {
 });
 ```
 
-### Event: `'ready'`
+#### Event: `'ready'`
 <!-- YAML
 added: REPLACEME
 -->
@@ -1132,7 +1571,7 @@ Emitted when the underlying `QuicSession` has emitted its `secure` event
 this stream has received its id, which is accessible as `stream.id` once this
 event is emitted.
 
-### Event: `'trailingHeaders'`
+#### Event: `'trailingHeaders'`
 <!-- YAML
 added: REPLACEME
 -->
@@ -1154,12 +1593,20 @@ stream('trailingHeaders', (headers) => {
 });
 ```
 
-### Event: `'readable'`
+#### Event: `'readable'`
 <!-- YAML
 added: REPLACEME
 -->
 
-### quicstream.bidirectional
+#### quicstream.aborted
+<!-- YAML
+added: REPLACEME
+-->
+* Type: {boolean}
+
+True if dataflow on the `QuicStream` was prematured terminated.
+
+#### quicstream.bidirectional
 <!--YAML
 added: REPLACEME
 -->
@@ -1168,7 +1615,7 @@ added: REPLACEME
 
 Set to `true` if the `QuicStream` is bidirectional.
 
-### quicstream.clientInitiated
+#### quicstream.clientInitiated
 <!-- YAML
 added: REPLACEME
 -->
@@ -1178,7 +1625,36 @@ added: REPLACEME
 Set to `true` if the `QuicStream` was initiated by a `QuicClientSession`
 instance.
 
-### quicstream.id
+#### quicstream.close(code)
+<!-- YAML
+added: REPLACEME
+-->
+
+* `code` {number}
+
+Closes the `QuicStream`.
+
+#### quicstream.dataAckHistogram
+<!-- YAML
+added: REPLACEME
+-->
+
+TBD
+
+#### quicstream.dataRateHistogram
+<!-- YAML
+added: REPLACEME
+-->
+
+TBD
+
+#### quicstream.dataSizeHistogram
+<!-- YAML
+added: REPLACEME
+-->
+TBD
+
+#### quicstream.id
 <!-- YAML
 added: REPLACEME
 -->
@@ -1187,7 +1663,7 @@ added: REPLACEME
 
 The numeric identifier of the `QuicStream`.
 
-### quicstream.pending
+#### quicstream.pending
 <!-- YAML
 added: REPLACEME
 -->
@@ -1197,7 +1673,7 @@ added: REPLACEME
 This property is `true` if the underlying session is not finished yet,
 i.e. before the `'ready'` event is emitted.
 
-### quicstream.serverInitiated
+#### quicstream.serverInitiated
 <!-- YAML
 added: REPLACEME
 -->
@@ -1207,7 +1683,7 @@ added: REPLACEME
 Set to `true` if the `QuicStream` was initiated by a `QuicServerSession`
 instance.
 
-### quicstream.session
+#### quicstream.session
 <!-- YAML
 added: REPLACEME
 -->
@@ -1216,7 +1692,7 @@ added: REPLACEME
 
 The `QuicServerSession` or `QuicClientSession`.
 
-### quicstream.sendFD(fd[, options])
+#### quicstream.sendFD(fd[, options])
 <!-- YAML
 added: REPLACEME
 -->
@@ -1242,7 +1718,7 @@ Using the same file descriptor concurrently for multiple streams
 is not supported and may result in data loss. Re-using a file descriptor
 after a stream has finished is supported.
 
-### quicstream.sendFile(path[, options])
+#### quicstream.sendFile(path[, options])
 <!-- YAML
 added: REPLACEME
 -->
@@ -1264,7 +1740,31 @@ If `offset` is set to a non-negative number, reading starts from that position.
 If `length` is set to a non-negative number, it gives the maximum number of
 bytes that are read from the file.
 
-### quicstream.unidirectional
+#### quicstream.submitInformationalHeaders(headers)
+<!-- YAML
+added: REPLACEME
+-->
+* {headers} {Object}
+
+TBD
+
+#### quicstream.submitInitialHeaders(headers)
+<!-- YAML
+added: REPLACEME
+-->
+* {headers} {Object}
+
+TBD
+
+#### quicstream.submitTrailingHeaders(headers)
+<!-- YAML
+added: REPLACEME
+-->
+* {headers} {Object}
+
+TBD
+
+#### quicstream.unidirectional
 <!-- YAML
 added: REPLACEME
 -->
