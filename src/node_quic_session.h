@@ -938,6 +938,7 @@ class QuicSession : public AsyncWrap,
   void ExtendMaxStreamsRemoteUni(uint64_t max_streams);
   void ExtendMaxStreamsRemoteBidi(uint64_t max_streams);
   int GetNewConnectionID(ngtcp2_cid* cid, uint8_t* token, size_t cidlen);
+  void GetConnectionCloseInfo();
   void HandshakeCompleted();
   void PathValidation(
     const ngtcp2_path* path,

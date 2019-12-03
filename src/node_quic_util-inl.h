@@ -185,6 +185,21 @@ QuicError::QuicError(
   }
 }
 
+QuicError::QuicError(ngtcp2_connection_close_error_code ccec) :
+    code(ccec.error_code), family(QUIC_ERROR_SESSION) {
+  switch (ccec.type) {
+    case NGTCP2_CONNECTION_CLOSE_ERROR_CODE_TYPE_APPLICATION:
+      family = QUIC_ERROR_APPLICATION;
+      break;
+    case NGTCP2_CONNECTION_CLOSE_ERROR_CODE_TYPE_TRANSPORT:
+      if (code & NGTCP2_CRYPTO_ERROR)
+        family = QUIC_ERROR_CRYPTO;
+      break;
+    default:
+      UNREACHABLE();
+  }
+}
+
 QuicError::QuicError(
   Environment* env,
   v8::Local<v8::Value> codeArg,

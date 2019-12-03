@@ -1865,6 +1865,7 @@ bool QuicSession::Receive(
     // If processing the packet puts us into draining period, there's
     // absolutely nothing left for us to do except silently close
     // and destroy this QuicSession.
+    GetConnectionCloseInfo();
     SilentClose();
     return true;
   } else {
@@ -1888,6 +1889,14 @@ bool QuicSession::ReceiveClientInitial(const ngtcp2_cid* dcid) {
   Debug(this, "Receiving client initial parameters.");
   return DeriveAndInstallInitialKey(this, dcid) &&
          initial_connection_close_ == NGTCP2_NO_ERROR;
+}
+
+// Captures the error code and family information from a received
+// connection close frame.
+void QuicSession::GetConnectionCloseInfo() {
+  ngtcp2_connection_close_error_code close_code;
+  ngtcp2_conn_get_connection_close_error_code(Connection(), &close_code);
+  SetLastError(QuicError(close_code));
 }
 
 bool QuicSession::ReceivePacket(
