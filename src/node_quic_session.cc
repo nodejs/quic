@@ -2402,10 +2402,12 @@ bool QuicSession::StartClosingPeriod() {
           error.code,
           uv_hrtime());
   if (nwrite < 0) {
-    if (nwrite == NGTCP2_ERR_PKT_NUM_EXHAUSTED)
+    if (nwrite == NGTCP2_ERR_PKT_NUM_EXHAUSTED) {
+      SetLastError(QUIC_ERROR_SESSION, NGTCP2_ERR_PKT_NUM_EXHAUSTED);
       SilentClose();
-    else
+    } else {
       SetLastError(QUIC_ERROR_SESSION, static_cast<int>(nwrite));
+    }
     return false;
   }
   conn_closebuf_.Realloc(nwrite);
