@@ -7,14 +7,6 @@ const common = require('../common');
 if (!common.hasQuic)
   common.skip('missing quic');
 
-const { internalBinding } = require('internal/test/binding');
-const {
-  constants: {
-    NGTCP2_NO_ERROR,
-    QUIC_ERROR_APPLICATION,
-  }
-} = internalBinding('quic');
-
 const Countdown = require('../common/countdown');
 const assert = require('assert');
 const fs = require('fs');
@@ -35,7 +27,6 @@ const kClientPort = process.env.NODE_DEBUG_KEYLOG ? 5679 : 0;
 let client;
 const server = createSocket({ port: kServerPort, validateAddress: true });
 
-const unidata = ['I wonder if it worked.', 'test'];
 const kServerName = 'agent2';  // Intentionally the wrong servername
 const kALPN = 'h3-24';
 
