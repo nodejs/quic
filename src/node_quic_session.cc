@@ -1,7 +1,7 @@
 #include "aliased_buffer.h"
 #include "debug_utils.h"
 #include "env-inl.h"
-#include "node_crypto_common-inl.h"
+#include "node_crypto_common.h"
 #include "ngtcp2/ngtcp2.h"
 #include "ngtcp2/ngtcp2_crypto.h"
 #include "ngtcp2/ngtcp2_crypto_openssl.h"

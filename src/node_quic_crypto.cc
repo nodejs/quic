@@ -1,7 +1,7 @@
 #include "node_quic_crypto.h"
 #include "env-inl.h"
 #include "node_crypto.h"
-#include "node_crypto_common-inl.h"
+#include "node_crypto_common.h"
 #include "node_quic_session-inl.h"
 #include "node_quic_util.h"
 #include "node_url.h"

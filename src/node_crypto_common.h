@@ -26,8 +26,8 @@ std::string GetSSLOCSPResponse(SSL* ssl);
 
 bool SetTLSSession(SSL* ssl, const unsigned char* buf, size_t length);
 
-std::unordered_multimap<std::string, std::string> GetCertificateAltNames(
-    X509* cert);
+std::unordered_multimap<std::string, std::string>
+GetCertificateAltNames(X509* cert);
 
 std::string GetCertificateCN(X509* cert);
 
@@ -35,21 +35,27 @@ int VerifyPeerCertificate(SSL* ssl, int def = X509_V_ERR_UNSPECIFIED);
 
 int UseSNIContext(SSL* ssl, SecureContext* context);
 
+const char* GetClientHelloALPN(SSL* ssl);
+
 const char* GetClientHelloServerName(SSL* ssl);
+
+const char* GetServerName(SSL* ssl);
+
+v8::Local<v8::Array> GetClientHelloCiphers(Environment* env, SSL* ssl);
 
 bool SetGroups(SecureContext* sc, const char* groups);
 
 const char* X509ErrorCode(int err);
 
+v8::Local<v8::Value> GetValidationErrorReason(Environment* env, int err);
+
+v8::Local<v8::Value> GetValidationErrorCode(Environment* env, int err);
+
 v8::Local<v8::Value> GetCert(Environment* env, SSL* ssl);
 
-v8::Local<v8::Value> GetCipherName(
-    Environment* env,
-    SSL* ssl);
+v8::Local<v8::Value> GetCipherName(Environment* env, SSL* ssl);
 
-v8::Local<v8::Value> GetCipherVersion(
-    Environment* env,
-    SSL* ssl);
+v8::Local<v8::Value> GetCipherVersion(Environment* env, SSL* ssl);
 
 v8::Local<v8::Value> GetEphemeralKey(Environment* env, SSL* ssl);
 
