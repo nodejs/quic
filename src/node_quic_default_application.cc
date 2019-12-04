@@ -3,6 +3,7 @@
 #include "node_quic_session-inl.h"
 #include "node_quic_stream.h"
 #include "node_quic_util-inl.h"
+#include "node_sockaddr-inl.h"
 #include <ngtcp2/ngtcp2.h>
 
 namespace node {

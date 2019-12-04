@@ -5,6 +5,7 @@
 #include "node_quic_session-inl.h"
 #include "node_quic_stream.h"
 #include "node_quic_util-inl.h"
+#include "node_sockaddr-inl.h"
 #include "node_http_common-inl.h"
 
 #include <nghttp3/nghttp3.h>
@@ -536,7 +537,9 @@ ssize_t Http3Application::H3ReadData(
   // available to send but there might be later, so return WOULDBLOCK
   // to tell nghttp3 to hold off attempting to serialize any more
   // data for this stream until it is resumed.
-  return count == 0 ? NGHTTP3_ERR_WOULDBLOCK : count;
+  if (count == 0)
+    return NGHTTP3_ERR_WOULDBLOCK;
+  return count;
 }
 
 // Outgoing data is retained in memory until it is acknowledged.
