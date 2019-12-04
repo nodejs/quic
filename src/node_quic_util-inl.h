@@ -180,13 +180,15 @@ QuicError::QuicError(
       break;
     case QUIC_ERROR_APPLICATION:
       code = code_;
+      break;
     default:
       UNREACHABLE();
   }
 }
 
 QuicError::QuicError(ngtcp2_connection_close_error_code ccec) :
-    code(ccec.error_code), family(QUIC_ERROR_SESSION) {
+    family(QUIC_ERROR_SESSION),
+    code(ccec.error_code) {
   switch (ccec.type) {
     case NGTCP2_CONNECTION_CLOSE_ERROR_CODE_TYPE_APPLICATION:
       family = QUIC_ERROR_APPLICATION;
@@ -201,12 +203,12 @@ QuicError::QuicError(ngtcp2_connection_close_error_code ccec) :
 }
 
 QuicError::QuicError(
-  Environment* env,
-  v8::Local<v8::Value> codeArg,
-  v8::Local<v8::Value> familyArg,
-  int32_t family_) :
-  code(NGTCP2_NO_ERROR),
-  family(family_) {
+    Environment* env,
+    v8::Local<v8::Value> codeArg,
+    v8::Local<v8::Value> familyArg,
+    int32_t family_) :
+    family(family_),
+    code(NGTCP2_NO_ERROR) {
   if (codeArg->IsBigInt()) {
     code = codeArg.As<v8::BigInt>()->Int64Value();
   } else if (codeArg->IsNumber()) {

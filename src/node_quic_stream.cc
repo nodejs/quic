@@ -9,6 +9,7 @@
 #include "node_quic_stream.h"
 #include "node_quic_socket.h"
 #include "node_quic_util-inl.h"
+#include "node_sockaddr-inl.h"
 #include "v8.h"
 #include "uv.h"
 

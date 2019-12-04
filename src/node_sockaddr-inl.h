@@ -139,6 +139,7 @@ SocketAddress& SocketAddress::operator=(const sockaddr* addr) {
 
 SocketAddress& SocketAddress::operator=(const SocketAddress& addr) {
   memcpy(&address_, &addr.address_, addr.GetLength());
+  return *this;
 }
 
 const sockaddr* SocketAddress::operator*() const {
@@ -166,7 +167,7 @@ void SocketAddress::Update(uint8_t* data, size_t len) {
 }
 
 template <typename T, typename F>
-static SocketAddress* SocketAddress::FromUVHandle(
+SocketAddress* SocketAddress::FromUVHandle(
     F fn,
     T* handle,
     SocketAddress* addr) {
