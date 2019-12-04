@@ -28,6 +28,7 @@
 #include "node_errors.h"
 #include "node_mutex.h"
 #include "node_process.h"
+#include "base_object-inl.h"
 #include "tls_wrap.h"  // TLSWrap
 
 #include "async_wrap-inl.h"
@@ -2488,7 +2489,6 @@ void SSLWrap<Base>::GetEphemeralKeyInfo(
   Base* w;
   ASSIGN_OR_RETURN_UNWRAP(&w, args.Holder());
   Environment* env = Environment::GetCurrent(args);
-  Local<Context> context = env->context();
 
   CHECK(w->ssl_);
 
