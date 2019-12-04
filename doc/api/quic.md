@@ -107,7 +107,7 @@ const { createSocket } = require('quic');
 // Create a QuicSocket associated with localhost and port 1234
 const socket = createSocket({ port: 1234 });
 
-const client = client.connect({
+const client = socket.connect({
   address: 'example.com',
   port: 4567,
   alpn: 'foo'
@@ -131,7 +131,7 @@ New instance of `QuicServerSession` are created internally by the
 `QuicSocket` if it has been configured to listen for new connections
 using the `listen()` method.
 
-```
+```js
 const key = getTLSKeySomehow();
 const cert = getTLSCertSomehow();
 
@@ -404,7 +404,6 @@ added: REPLACEME
 
 An object containing the local address information for the `QuicSocket` to which
 the `QuicSession` is currently associated.
-
 
 #### quicsession.alpnProtocol
 <!-- YAML

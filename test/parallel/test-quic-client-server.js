@@ -144,7 +144,7 @@ server.on('session', common.mustCall((session) => {
     // cause anything else to fail.
 
     // TODO(@jasnell): Move updateKey to a separate test
-    //setTimeout(() => assert(session.updateKey()), 500);
+    // setTimeout(() => assert(session.updateKey()), 500);
 
     debug('QuicServerSession TLS Handshake Complete');
     debug('  Server name: %s', servername);
