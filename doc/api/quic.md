@@ -58,7 +58,7 @@ socket.on('listening', () => {
 
 ## QUIC Basics
 
-QUIC is a UDP-based network transport protocol that includes built in security
+QUIC is a UDP-based network transport protocol that includes built-in security
 via TLS 1.3, flow control, error correction, connection migration,
 multiplexing, and more.
 
@@ -388,7 +388,7 @@ added: REPLACEME
 
 * Type: {BigInt}
 
-A `BigInt` representing the number of retranmissions caused by delayed
+A `BigInt` representing the number of retransmissions caused by delayed
 acknowledgements.
 
 #### quicsession.address
@@ -448,7 +448,7 @@ added: REPLACEME
 
 * Type: {number}
 
-The total number of unacknoledged bytes this QUIC endpoint has tramitted
+The total number of unacknowledged bytes this QUIC endpoint has transmitted
 to the connected peer.
 
 #### quicsession.bytesReceived
@@ -630,7 +630,7 @@ added: REPLACEME
 
 * Type: {BigInt}
 
-A `BigInt` representing the number of lost-packet retranmissions that have been
+A `BigInt` representing the number of lost-packet retransmissions that have been
 performed on this `QuicSession`.
 
 #### quicsession.maxDataLeft
@@ -650,7 +650,7 @@ added: REPLACEME
 
 * Type: {BigInt}
 
-A `BigInt` representing the maximum number of in flight bytes recorded
+A `BigInt` representing the maximum number of in-flight bytes recorded
 for this `QuicSession`.
 
 #### quicsession.maxStreams
@@ -711,7 +711,7 @@ added: REPLACEME
 
 * Type: {BigInt}
 
-A `BigInt` representing the total number of `QuicStreams` initated by the
+A `BigInt` representing the total number of `QuicStreams` initiated by the
 connected peer.
 
 #### quicsession.remoteAddress
@@ -928,7 +928,7 @@ added: REPLACEME
 -->
 
 * `servername` {String} A DNS name to associate with the given context.
-* `context` {Object} A TLS SecureContext to associate with the `servername`.
+* `context` {tls.SecureContext} A TLS SecureContext to associate with the `servername`.
 
 TBD
 
@@ -1604,7 +1604,7 @@ added: REPLACEME
 -->
 * Type: {boolean}
 
-True if dataflow on the `QuicStream` was prematured terminated.
+True if dataflow on the `QuicStream` was prematurely terminated.
 
 #### quicstream.bidirectional
 <!--YAML

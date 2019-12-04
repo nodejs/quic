@@ -592,7 +592,7 @@ void JSQuicSessionListener::OnSessionTicket(int size, SSL_SESSION* session) {
 
   AllocatedBuffer session_ticket = env->AllocateManaged(size);
   unsigned char* session_data =
-    reinterpret_cast<unsigned char*>(session_ticket.data());
+      reinterpret_cast<unsigned char*>(session_ticket.data());
   memset(session_data, 0, size);
   i2d_SSL_SESSION(session, &session_data);
   if (!session_ticket.empty())
