@@ -85,6 +85,13 @@ QuicStream::QuicStream(
           FIXED_ONE_BYTE_STRING(env()->isolate(), "data_rx_ack"),
           data_rx_ack_->object(),
           PropertyAttribute::ReadOnly).IsNothing()) return;
+
+  ngtcp2_transport_params params;
+  ngtcp2_conn_get_local_transport_params(Session()->Connection(), &params);
+  IncrementStat(
+      params.initial_max_data,
+      &stream_stats_,
+      &stream_stats::max_offset);
 }
 
 std::string QuicStream::diagnostic_name() const {
@@ -246,6 +253,10 @@ int QuicStream::ReadStart() {
   CHECK(IsReadable());
   SetReadStart();
   SetReadResume();
+  IncrementStat(
+      inbound_consumed_data_while_paused_,
+      &stream_stats_,
+      &stream_stats::max_offset);
   session_->ExtendStreamOffset(this, inbound_consumed_data_while_paused_);
   return 0;
 }
@@ -327,8 +338,13 @@ void QuicStream::ReceiveData(
       // so that pausing does not throw off our flow control.
       if (read_paused)
         inbound_consumed_data_while_paused_ += avail;
-      else
+      else {
+        IncrementStat(
+            avail,
+            &stream_stats_,
+            &stream_stats::max_offset);
         session_->ExtendStreamOffset(this, avail);
+      }
     }
   }
 

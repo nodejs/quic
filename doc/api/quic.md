@@ -1628,6 +1628,26 @@ added: REPLACEME
 
 Set to `true` if the `QuicStream` is bidirectional.
 
+#### quicstream.bytesReceived
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BigInt` representing the total number of bytes received for this
+`QuicStream`.
+
+#### quicstream.bytesSent
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BigInt` representing the total number of bytes sent by this
+`QuicStream`.
+
 #### quicstream.clientInitiated
 <!-- YAML
 added: REPLACEME
@@ -1667,6 +1687,15 @@ added: REPLACEME
 -->
 TBD
 
+#### quicstream.duration
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BigInt` representing the length of time the `QuicStream` has been active.
+
 #### quicstream.id
 <!-- YAML
 added: REPLACEME
@@ -1675,6 +1704,16 @@ added: REPLACEME
 * Type: {number}
 
 The numeric identifier of the `QuicStream`.
+
+#### quicstream.maxExtendedOffset
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BigInt` representing the maximum extended data offset that has been
+reported to the connected peer.
 
 #### quicstream.pending
 <!-- YAML
