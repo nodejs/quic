@@ -678,6 +678,22 @@ void JSQuicSessionListener::OnQLog(const uint8_t* data, size_t len) {
       &str);
 }
 
+// Generates and associates a new connection ID for this QuicSession.
+// ngtcp2 will call this multiple times at the start of a new connection
+// in order to build a pool of available CIDs.
+void RandomConnectionIDStrategy::GetNewConnectionID(
+    QuicSession* session,
+    ngtcp2_cid* cid,
+    uint8_t* token,
+    size_t cidlen) {
+  cid->datalen = cidlen;
+  // cidlen shouldn't ever be zero here but just in case that
+  // behavior changes in ngtcp2 in the future...
+  if (cidlen > 0)
+    EntropySource(cid->data, cidlen);
+  EntropySource(token, NGTCP2_STATELESS_RESET_TOKENLEN);
+}
+
 // Check required capabilities were not excluded from the OpenSSL build:
 // - OPENSSL_NO_SSL_TRACE excludes SSL_trace()
 // - OPENSSL_NO_STDIO excludes BIO_new_fp()
@@ -1243,6 +1259,7 @@ QuicSession::QuicSession(
         sizeof(recovery_stats_) / sizeof(double),
         reinterpret_cast<double*>(&recovery_stats_)) {
   PushListener(&default_listener_);
+  SetConnectionIDStrategory(&default_connection_id_strategy_);
   crypto_context_.reset(new QuicCryptoContext(this, ctx, side, options));
   application_.reset(SelectApplication(this));
   if (rcid != nullptr)
@@ -1607,6 +1624,11 @@ uint32_t QuicSession::GetNegotiatedVersion() {
   return ngtcp2_conn_get_negotiated_version(Connection());
 }
 
+void QuicSession::SetConnectionIDStrategory(ConnectionIDStrategy* strategy) {
+  CHECK_NOT_NULL(strategy);
+  connection_id_strategy_ = strategy;
+}
+
 // Generates and associates a new connection ID for this QuicSession.
 // ngtcp2 will call this multiple times at the start of a new connection
 // in order to build a pool of available CIDs.
@@ -1615,12 +1637,8 @@ int QuicSession::GetNewConnectionID(
     uint8_t* token,
     size_t cidlen) {
   DCHECK(!IsFlagSet(QUICSESSION_FLAG_DESTROYED));
-  cid->datalen = cidlen;
-  // cidlen shouldn't ever be zero here but just in case that
-  // behavior changes in ngtcp2 in the future...
-  if (cidlen > 0)
-    EntropySource(cid->data, cidlen);
-  EntropySource(token, NGTCP2_STATELESS_RESET_TOKENLEN);
+  CHECK_NOT_NULL(connection_id_strategy_);
+  connection_id_strategy_->GetNewConnectionID(this, cid, token, cidlen);
   AssociateCID(cid);
   return 0;
 }
