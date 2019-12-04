@@ -142,9 +142,9 @@ void QuicSocket::MemoryInfo(MemoryTracker* tracker) const {
 }
 
 void QuicSocket::AddSession(
-    QuicCID* cid,
+    const QuicCID& cid,
     BaseObjectPtr<QuicSession> session) {
-  sessions_[cid->ToStr()] = session;
+  sessions_[cid.ToStr()] = session;
   IncrementSocketAddressCounter(**session->GetRemoteAddress());
   IncrementSocketStat(
       1, &socket_stats_,
@@ -154,9 +154,9 @@ void QuicSocket::AddSession(
 }
 
 void QuicSocket::AssociateCID(
-    QuicCID* cid,
-    QuicCID* scid) {
-  dcid_to_scid_.emplace(cid->ToStr(), scid->ToStr());
+    const QuicCID& cid,
+    const QuicCID& scid) {
+  dcid_to_scid_.emplace(cid.ToStr(), scid.ToStr());
 }
 
 void QuicSocket::OnAfterBind() {
@@ -171,9 +171,9 @@ void QuicSocket::OnAfterBind() {
   socket_stats_.bound_at = uv_hrtime();
 }
 
-void QuicSocket::DisassociateCID(QuicCID* cid) {
-  Debug(this, "Removing associations for cid %s", cid->ToHex().c_str());
-  dcid_to_scid_.erase(cid->ToStr());
+void QuicSocket::DisassociateCID(const QuicCID& cid) {
+  Debug(this, "Removing associations for cid %s", cid.ToHex().c_str());
+  dcid_to_scid_.erase(cid.ToStr());
 }
 
 void QuicSocket::Listen(
@@ -327,8 +327,8 @@ void QuicSocket::Receive(
       // the session shared_ptr will be empty on return.
       session = AcceptInitialPacket(
           pversion,
-          &dcid,
-          &scid,
+          dcid,
+          scid,
           nread,
           data,
           addr,
@@ -375,8 +375,8 @@ int QuicSocket::ReceiveStop() {
   return udp_->RecvStop();
 }
 
-void QuicSocket::RemoveSession(QuicCID* cid, const sockaddr* addr) {
-  sessions_.erase(cid->ToStr());
+void QuicSocket::RemoveSession(const QuicCID& cid, const sockaddr* addr) {
+  sessions_.erase(cid.ToStr());
   DecrementSocketAddressCounter(addr);
 }
 
@@ -391,7 +391,7 @@ void QuicSocket::ReportSendError(int error) {
 void QuicSocket::SendInitialConnectionClose(
     uint32_t version,
     uint64_t error_code,
-    QuicCID* dcid,
+    const QuicCID& dcid,
     const sockaddr* addr) {
 
   // ngtcp2 currently does not provide a convenient API for serializing
@@ -415,7 +415,7 @@ void QuicSocket::SendInitialConnectionClose(
   ngtcp2_conn* conn;
   ngtcp2_conn_server_new(
     &conn,
-    **dcid,
+    *dcid,
     &scid,
     *path,
     version,
@@ -447,8 +447,8 @@ void QuicSocket::SendInitialConnectionClose(
 
 void QuicSocket::SendVersionNegotiation(
       uint32_t version,
-      QuicCID* dcid,
-      QuicCID* scid,
+      const QuicCID& dcid,
+      const QuicCID& scid,
       const sockaddr* addr) {
   std::array<uint32_t, 2> sv;
   sv[0] = GenerateReservedVersion(addr, version);
@@ -462,10 +462,10 @@ void QuicSocket::SendVersionNegotiation(
       reinterpret_cast<uint8_t*>(buf.data),
       NGTCP2_MAX_PKTLEN_IPV6,
       unused_random,
-      dcid->data(),
-      dcid->length(),
-      scid->data(),
-      scid->length(),
+      dcid.data(),
+      dcid.length(),
+      scid.data(),
+      scid.length(),
       sv.data(),
       sv.size());
   if (nwrite <= 0)
@@ -476,8 +476,8 @@ void QuicSocket::SendVersionNegotiation(
 
 bool QuicSocket::SendRetry(
     uint32_t version,
-    QuicCID* dcid,
-    QuicCID* scid,
+    const QuicCID& dcid,
+    const QuicCID& scid,
     const sockaddr* addr) {
   std::array<uint8_t, 256> token;
   size_t tokenlen = token.size();
@@ -486,7 +486,7 @@ bool QuicSocket::SendRetry(
           token.data(),
           &tokenlen,
           addr,
-          **dcid,
+          *dcid,
           &token_secret_)) {
     return false;
   }
@@ -499,7 +499,7 @@ bool QuicSocket::SendRetry(
   hd.token = nullptr;
   hd.tokenlen = 0;
   hd.len = 0;
-  hd.dcid = ***scid;
+  hd.dcid = **scid;
   hd.scid.datalen = NGTCP2_SV_SCIDLEN;
 
   EntropySource(hd.scid.data, NGTCP2_SV_SCIDLEN);
@@ -510,7 +510,7 @@ bool QuicSocket::SendRetry(
           reinterpret_cast<uint8_t*>(buf.data),
           NGTCP2_MAX_PKTLEN_IPV4,
           &hd,
-          **dcid,
+          *dcid,
           token.data(),
           tokenlen);
   if (nwrite <= 0)
@@ -544,8 +544,8 @@ bool QuicSocket::IsValidatedAddress(const sockaddr* addr) const {
 
 BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
     uint32_t version,
-    QuicCID* dcid,
-    QuicCID* scid,
+    const QuicCID& dcid,
+    const QuicCID& scid,
     ssize_t nread,
     const uint8_t* data,
     const struct sockaddr* addr,
@@ -634,9 +634,9 @@ BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
       QuicSession::CreateServer(
           this,
           &server_session_config_,
-          **dcid,
+          *dcid,
           addr,
-          **scid,
+          *scid,
           ocid_ptr,
           version,
           server_alpn_,

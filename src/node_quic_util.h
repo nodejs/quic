@@ -353,7 +353,7 @@ class QuicCID {
 
   const ngtcp2_cid* operator*() const { return &cid_; }
 
-  uint8_t* data() { return cid_.data; }
+  const uint8_t* data() const { return cid_.data; }
   size_t length() const { return cid_.datalen; }
 
  private:
