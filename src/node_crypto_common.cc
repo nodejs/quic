@@ -1,6 +1,3 @@
-#ifndef SRC_NODE_CRYPTO_COMMON_INL_H_
-#define SRC_NODE_CRYPTO_COMMON_INL_H_
-
 #include "env-inl.h"
 #include "node_crypto.h"
 #include "node_crypto_common.h"
@@ -28,7 +25,7 @@ using v8::Value;
 
 namespace crypto {
 
-inline void LogSecret(
+void LogSecret(
     SSL* ssl,
     const char* name,
     const unsigned char* secret,
@@ -46,26 +43,27 @@ inline void LogSecret(
   }
 }
 
-inline void SetALPN(SSL* ssl, const std::string& alpn) {
+void SetALPN(SSL* ssl, const std::string& alpn) {
   CHECK_EQ(SSL_set_alpn_protos(
       ssl,
       reinterpret_cast<const uint8_t*>(alpn.c_str()),
       alpn.length()), 0);
 }
 
-inline std::string GetSSLOCSPResponse(SSL* ssl) {
+std::string GetSSLOCSPResponse(SSL* ssl) {
   const unsigned char* resp;
   int len = SSL_get_tlsext_status_ocsp_resp(ssl, &resp);
   if (len < 0) len = 0;
   return std::string(reinterpret_cast<const char*>(resp), len);
 }
 
-inline bool SetTLSSession(SSL* ssl, const unsigned char* buf, size_t length) {
+bool SetTLSSession(SSL* ssl, const unsigned char* buf, size_t length) {
   SSLSessionPointer s(d2i_SSL_SESSION(nullptr, &buf, length));
   return s != nullptr && SSL_set_session(ssl, s.get()) == 1;
 }
 
-inline std::unordered_multimap<std::string, std::string> GetCertificateAltNames(
+std::unordered_multimap<std::string, std::string>
+GetCertificateAltNames(
     X509* cert) {
   std::unordered_multimap<std::string, std::string> map;
   crypto::BIOPointer bio(BIO_new(BIO_s_mem()));
@@ -113,11 +111,10 @@ inline std::unordered_multimap<std::string, std::string> GetCertificateAltNames(
     }
   }
   sk_GENERAL_NAME_pop_free(names, GENERAL_NAME_free);
-  bio.reset();
   return map;
 }
 
-inline std::string GetCertificateCN(X509* cert) {
+std::string GetCertificateCN(X509* cert) {
   X509_NAME* subject = X509_get_subject_name(cert);
   if (subject != nullptr) {
     int nid = OBJ_txt2nid("CN");
@@ -136,7 +133,7 @@ inline std::string GetCertificateCN(X509* cert) {
   return std::string();
 }
 
-inline int VerifyPeerCertificate(SSL* ssl, int def) {
+int VerifyPeerCertificate(SSL* ssl, int def) {
   int err = def;
   if (X509* peer_cert = SSL_get_peer_certificate(ssl)) {
     X509_free(peer_cert);
@@ -145,7 +142,7 @@ inline int VerifyPeerCertificate(SSL* ssl, int def) {
   return err;
 }
 
-inline int UseSNIContext(SSL* ssl, SecureContext* context) {
+int UseSNIContext(SSL* ssl, SecureContext* context) {
   SSL_CTX* ctx = context->ctx_.get();
   X509* x509 = SSL_CTX_get0_certificate(ctx);
   EVP_PKEY* pkey = SSL_CTX_get0_privatekey(ctx);
@@ -161,8 +158,7 @@ inline int UseSNIContext(SSL* ssl, SecureContext* context) {
   return err;
 }
 
-
-inline const char* GetClientHelloALPN(SSL* ssl) {
+const char* GetClientHelloALPN(SSL* ssl) {
     const unsigned char* buf;
     size_t len;
     size_t rem;
@@ -181,7 +177,7 @@ inline const char* GetClientHelloALPN(SSL* ssl) {
     return reinterpret_cast<const char*>(buf);
 }
 
-inline const char* GetClientHelloServerName(SSL* ssl) {
+const char* GetClientHelloServerName(SSL* ssl) {
   const unsigned char* buf;
   size_t len;
   size_t rem;
@@ -213,11 +209,11 @@ inline const char* GetClientHelloServerName(SSL* ssl) {
   return reinterpret_cast<const char*>(buf);
 }
 
-inline const char* GetServerName(SSL* ssl) {
+const char* GetServerName(SSL* ssl) {
   return SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
 }
 
-inline Local<Array> GetClientHelloCiphers(Environment* env, SSL* ssl) {
+Local<Array> GetClientHelloCiphers(Environment* env, SSL* ssl) {
   const unsigned char* buf;
   size_t len = SSL_client_hello_get0_ciphers(ssl, &buf);
   std::vector<Local<Value>> ciphers_array;
@@ -240,11 +236,11 @@ inline Local<Array> GetClientHelloCiphers(Environment* env, SSL* ssl) {
   return Array::New(env->isolate(), ciphers_array.data(), ciphers_array.size());
 }
 
-inline bool SetGroups(SecureContext* sc, const char* groups) {
+bool SetGroups(SecureContext* sc, const char* groups) {
   return SSL_CTX_set1_groups_list(**sc, groups) == 1;
 }
 
-inline const char* X509ErrorCode(int err) {
+const char* X509ErrorCode(int err) {
   const char* code = "UNSPECIFIED";
 #define CASE_X509_ERR(CODE) case X509_V_ERR_##CODE: code = #CODE; break;
   switch (err) {
@@ -281,16 +277,16 @@ inline const char* X509ErrorCode(int err) {
   return code;
 }
 
-inline Local<Value> GetValidationErrorReason(Environment* env, int err) {
+Local<Value> GetValidationErrorReason(Environment* env, int err) {
   const char* reason = X509_verify_cert_error_string(err);
   return OneByteString(env->isolate(), reason);
 }
 
-inline Local<Value> GetValidationErrorCode(Environment* env, int err) {
+Local<Value> GetValidationErrorCode(Environment* env, int err) {
   return OneByteString(env->isolate(), X509ErrorCode(err));
 }
 
-inline Local<Value> GetCert(Environment* env, SSL* ssl) {
+Local<Value> GetCert(Environment* env, SSL* ssl) {
   ClearErrorOnReturn clear_error_on_return;
   Local<Value> value = v8::Undefined(env->isolate());
   X509* cert = SSL_get_certificate(ssl);
@@ -299,7 +295,7 @@ inline Local<Value> GetCert(Environment* env, SSL* ssl) {
   return value;
 }
 
-inline Local<Value> GetCipherName(Environment* env, SSL* ssl) {
+Local<Value> GetCipherName(Environment* env, SSL* ssl) {
   Local<Value> cipher;
   const SSL_CIPHER* c = SSL_get_current_cipher(ssl);
   if (c != nullptr) {
@@ -309,7 +305,7 @@ inline Local<Value> GetCipherName(Environment* env, SSL* ssl) {
   return cipher;
 }
 
-inline Local<Value> GetCipherVersion(Environment* env, SSL* ssl) {
+Local<Value> GetCipherVersion(Environment* env, SSL* ssl) {
   Local<Value> version;
   const SSL_CIPHER* c = SSL_get_current_cipher(ssl);
   if (c != nullptr) {
@@ -319,7 +315,7 @@ inline Local<Value> GetCipherVersion(Environment* env, SSL* ssl) {
   return version;
 }
 
-inline Local<Value> GetEphemeralKey(Environment* env, SSL* ssl) {
+Local<Value> GetEphemeralKey(Environment* env, SSL* ssl) {
   Local<Context> context = env->context();
 
   Local<Object> info = Object::New(env->isolate());
@@ -370,7 +366,7 @@ inline Local<Value> GetEphemeralKey(Environment* env, SSL* ssl) {
   return info;
 }
 
-inline Local<Value> GetPeerCert(
+Local<Value> GetPeerCert(
     Environment* env,
     SSL* ssl,
     bool abbreviated,
@@ -419,5 +415,3 @@ inline Local<Value> GetPeerCert(
 
 }  // namespace crypto
 }  // namespace node
-
-#endif  // SRC_NODE_CRYPTO_COMMON_INL_H_
