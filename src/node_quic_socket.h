@@ -54,7 +54,8 @@ enum QuicSocketStatsIdx : int {
     IDX_QUIC_SOCKET_STATS_PACKETS_IGNORED,
     IDX_QUIC_SOCKET_STATS_PACKETS_SENT,
     IDX_QUIC_SOCKET_STATS_SERVER_SESSIONS,
-    IDX_QUIC_SOCKET_STATS_CLIENT_SESSIONS
+    IDX_QUIC_SOCKET_STATS_CLIENT_SESSIONS,
+    IDX_QUIC_SOCKET_STATS_STATELESS_RESET_COUNT
 };
 
 class QuicSocket;
@@ -107,7 +108,8 @@ class QuicSocket : public AsyncWrap,
       uint64_t retry_token_expiration,
       size_t max_connections_per_host,
       uint32_t options = 0,
-      QlogMode qlog = QlogMode::kDisabled);
+      QlogMode qlog = QlogMode::kDisabled,
+      const uint8_t* session_reset_secret = nullptr);
   ~QuicSocket() override;
 
   SocketAddress* GetLocalAddress() { return &local_address_; }
@@ -157,6 +159,8 @@ class QuicSocket : public AsyncWrap,
   void IncreaseAllocatedSize(size_t size);
   void DecreaseAllocatedSize(size_t size);
 
+  ResetTokenSecret* GetSessionResetSecret() { return &reset_token_secret_; }
+
   // Implementation for UDPWrapListener
   uv_buf_t OnAlloc(size_t suggested_size) override;
   void OnRecv(ssize_t nread,
@@ -171,6 +175,10 @@ class QuicSocket : public AsyncWrap,
       uint32_t version,
       const QuicCID& dcid,
       const QuicCID& scid,
+      const sockaddr* addr);
+
+  bool SendStatelessReset(
+      const QuicCID& cid,
       const sockaddr* addr);
 
   void PushListener(QuicSocketListener* listener);
@@ -296,7 +304,8 @@ class QuicSocket : public AsyncWrap,
   std::string server_alpn_;
   std::unordered_map<std::string, BaseObjectPtr<QuicSession>> sessions_;
   std::unordered_map<std::string, std::string> dcid_to_scid_;
-  std::array<uint8_t, TOKEN_SECRETLEN> token_secret_;
+  RetryTokenSecret token_secret_;
+  ResetTokenSecret reset_token_secret_;
 
   // Counts the number of active connections per remote
   // address. A custom std::hash specialization for
@@ -351,8 +360,11 @@ class QuicSocket : public AsyncWrap,
     // The total number of client QuicSessions that have been
     // associated with this QuicSocket instance.
     uint64_t client_sessions;
+
+    // The total number of stateless resets that have been sent
+    uint64_t stateless_reset_count;
   };
-  socket_stats socket_stats_{0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+  socket_stats socket_stats_{};
 
   AliasedBigUint64Array stats_buffer_;
 

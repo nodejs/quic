@@ -295,7 +295,6 @@ class ConnectionIDStrategy {
   virtual void GetNewConnectionID(
       QuicSession* session,
       ngtcp2_cid* cid,
-      uint8_t* token,
       size_t cidlen) = 0;
 };
 
@@ -304,8 +303,25 @@ class RandomConnectionIDStrategy : public ConnectionIDStrategy {
   void GetNewConnectionID(
       QuicSession* session,
       ngtcp2_cid* cid,
-      uint8_t* token,
       size_t cidlen) override;
+};
+
+class StatelessResetTokenStrategy {
+ public:
+  virtual void GetNewStatelessToken(
+      QuicSession* session,
+      ngtcp2_cid* cid,
+      uint8_t* token,
+      size_t tokenlen) = 0;
+};
+
+class CryptoStatelessResetTokenStrategy : public StatelessResetTokenStrategy {
+ public:
+  void GetNewStatelessToken(
+      QuicSession* session,
+      ngtcp2_cid* cid,
+      uint8_t* token,
+      size_t tokenlen) override;
 };
 
 // The QuicCryptoContext class encapsulates all of the crypto/TLS
@@ -935,6 +951,7 @@ class QuicSession : public AsyncWrap,
   void RemoveListener(QuicSessionListener* listener);
 
   void SetConnectionIDStrategory(ConnectionIDStrategy* strategy);
+  void SetStatelessResetTokenStrategy(StatelessResetTokenStrategy* strategy);
 
   // Report that the stream data is flow control blocked
   void StreamDataBlocked(int64_t stream_id);
@@ -1297,6 +1314,9 @@ class QuicSession : public AsyncWrap,
 
   ConnectionIDStrategy* connection_id_strategy_ = nullptr;
   RandomConnectionIDStrategy default_connection_id_strategy_;
+
+  StatelessResetTokenStrategy* stateless_reset_strategy_ = nullptr;
+  CryptoStatelessResetTokenStrategy default_stateless_reset_strategy_;
 
   QuicSessionListener* listener_ = nullptr;
   JSQuicSessionListener default_listener_;

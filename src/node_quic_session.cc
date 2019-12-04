@@ -678,20 +678,27 @@ void JSQuicSessionListener::OnQLog(const uint8_t* data, size_t len) {
       &str);
 }
 
-// Generates and associates a new connection ID for this QuicSession.
+// Generates a new connection ID for this QuicSession.
 // ngtcp2 will call this multiple times at the start of a new connection
 // in order to build a pool of available CIDs.
 void RandomConnectionIDStrategy::GetNewConnectionID(
     QuicSession* session,
     ngtcp2_cid* cid,
-    uint8_t* token,
     size_t cidlen) {
   cid->datalen = cidlen;
   // cidlen shouldn't ever be zero here but just in case that
   // behavior changes in ngtcp2 in the future...
   if (cidlen > 0)
     EntropySource(cid->data, cidlen);
-  EntropySource(token, NGTCP2_STATELESS_RESET_TOKENLEN);
+}
+
+void CryptoStatelessResetTokenStrategy::GetNewStatelessToken(
+    QuicSession* session,
+    ngtcp2_cid* cid,
+    uint8_t* token,
+    size_t tokenlen) {
+  ResetTokenSecret* secret = session->Socket()->GetSessionResetSecret();
+  CHECK(GenerateResetToken(token, secret->data(), secret->size(), cid));
 }
 
 // Check required capabilities were not excluded from the OpenSSL build:
@@ -1260,6 +1267,7 @@ QuicSession::QuicSession(
         reinterpret_cast<double*>(&recovery_stats_)) {
   PushListener(&default_listener_);
   SetConnectionIDStrategory(&default_connection_id_strategy_);
+  SetStatelessResetTokenStrategy(&default_stateless_reset_strategy_);
   crypto_context_.reset(new QuicCryptoContext(this, ctx, side, options));
   application_.reset(SelectApplication(this));
   if (rcid != nullptr)
@@ -1634,6 +1642,12 @@ void QuicSession::SetConnectionIDStrategory(ConnectionIDStrategy* strategy) {
   connection_id_strategy_ = strategy;
 }
 
+void QuicSession::SetStatelessResetTokenStrategy(
+    StatelessResetTokenStrategy* strategy) {
+  CHECK_NOT_NULL(strategy);
+  stateless_reset_strategy_ = strategy;
+}
+
 // Generates and associates a new connection ID for this QuicSession.
 // ngtcp2 will call this multiple times at the start of a new connection
 // in order to build a pool of available CIDs.
@@ -1643,7 +1657,16 @@ int QuicSession::GetNewConnectionID(
     size_t cidlen) {
   DCHECK(!IsFlagSet(QUICSESSION_FLAG_DESTROYED));
   CHECK_NOT_NULL(connection_id_strategy_);
-  connection_id_strategy_->GetNewConnectionID(this, cid, token, cidlen);
+  connection_id_strategy_->GetNewConnectionID(
+      this,
+      cid,
+      cidlen);
+  stateless_reset_strategy_->GetNewStatelessToken(
+      this,
+      cid,
+      token,
+      NGTCP2_STATELESS_RESET_TOKENLEN);
+
   AssociateCID(cid);
   return 0;
 }

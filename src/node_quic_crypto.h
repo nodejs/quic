@@ -63,19 +63,25 @@ bool UpdateKey(
     std::vector<uint8_t>* current_rx_secret,
     std::vector<uint8_t>* current_tx_secret);
 
+bool GenerateResetToken(
+    uint8_t* token,
+    uint8_t* secret,
+    size_t secretlen,
+    const ngtcp2_cid* cid);
+
 bool GenerateRetryToken(
     uint8_t* token,
     size_t* tokenlen,
     const sockaddr* addr,
     const ngtcp2_cid* ocid,
-    const std::array<uint8_t, TOKEN_SECRETLEN>& token_secret);
+    const RetryTokenSecret& token_secret);
 
 bool InvalidRetryToken(
     Environment* env,
     ngtcp2_cid* ocid,
     const ngtcp2_pkt_hd* hd,
     const sockaddr* addr,
-    const std::array<uint8_t, TOKEN_SECRETLEN>& token_secret,
+    const RetryTokenSecret& token_secret,
     uint64_t verification_expiration);
 
 int VerifyHostnameIdentity(SSL* ssl, const char* hostname);

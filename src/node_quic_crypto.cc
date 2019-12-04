@@ -73,7 +73,7 @@ bool DeriveTokenKey(
     const uint8_t* rand_data,
     size_t rand_datalen,
     const ngtcp2_crypto_ctx& ctx,
-    const std::array<uint8_t, TOKEN_SECRETLEN>& token_secret) {
+    const RetryTokenSecret& token_secret) {
   TokenSecret secret;
 
   return
@@ -123,6 +123,23 @@ void GenerateRandData(uint8_t* buf, size_t len) {
 }
 }  // namespace
 
+bool GenerateResetToken(
+    uint8_t* token,
+    uint8_t* secret,
+    size_t secretlen,
+    const ngtcp2_cid* cid) {
+  ngtcp2_crypto_ctx ctx;
+  ngtcp2_crypto_ctx_initial(&ctx);
+  return NGTCP2_OK(ngtcp2_crypto_hkdf_expand(
+      token,
+      NGTCP2_STATELESS_RESET_TOKENLEN,
+      &ctx.md,
+      secret,
+      secretlen,
+      cid->data,
+      cid->datalen));
+}
+
 // The Retry Token is an encrypted token that is sent to the client
 // by the server as part of the path validation flow. The plaintext
 // format within the token is opaque and only meaningful the server.
@@ -137,7 +154,7 @@ bool GenerateRetryToken(
     size_t* tokenlen,
     const sockaddr* addr,
     const ngtcp2_cid* ocid,
-    const std::array<uint8_t, TOKEN_SECRETLEN>& token_secret) {
+    const RetryTokenSecret& token_secret) {
   std::array<uint8_t, 4096> plaintext;
 
   ngtcp2_crypto_ctx ctx;
@@ -195,7 +212,7 @@ bool InvalidRetryToken(
     ngtcp2_cid* ocid,
     const ngtcp2_pkt_hd* hd,
     const sockaddr* addr,
-    const std::array<uint8_t, TOKEN_SECRETLEN>& token_secret,
+    const RetryTokenSecret& token_secret,
     uint64_t verification_expiration) {
 
   ngtcp2_crypto_ctx ctx;

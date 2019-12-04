@@ -32,9 +32,16 @@ const { createSocket } = require('quic');
 
 const kServerPort = process.env.NODE_DEBUG_KEYLOG ? 5678 : 0;
 const kClientPort = process.env.NODE_DEBUG_KEYLOG ? 5679 : 0;
+const kStatelessResetToken =
+  Buffer.from('000102030405060708090A0B0C0D0E0F', 'hex');
 
 let client;
-const server = createSocket({ port: kServerPort, validateAddress: true });
+
+const server = createSocket({
+  port: kServerPort,
+  validateAddress: true,
+  statelessResetSecret: kStatelessResetToken
+});
 
 // Diagnostic Packet Loss allows packets to be randomly ignored
 // to simulate network packet loss conditions. This is not a

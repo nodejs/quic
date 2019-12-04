@@ -4,6 +4,7 @@
 #include "memory_tracker-inl.h"
 #include "nghttp2/nghttp2.h"
 #include "node.h"
+#include "node_buffer.h"
 #include "node_crypto.h"
 #include "node_internals.h"
 #include "node_mem-inl.h"
@@ -24,6 +25,7 @@ namespace node {
 using crypto::EntropySource;
 using crypto::SecureContext;
 
+using v8::ArrayBufferView;
 using v8::Boolean;
 using v8::Context;
 using v8::FunctionCallbackInfo;
@@ -150,7 +152,8 @@ QuicSocket::QuicSocket(
     uint64_t retry_token_expiration,
     size_t max_connections_per_host,
     uint32_t options,
-    QlogMode qlog)
+    QlogMode qlog,
+    const uint8_t* session_reset_secret)
   : AsyncWrap(env, wrap, AsyncWrap::PROVIDER_QUICSOCKET),
     alloc_info_(MakeAllocator()),
     options_(options),
@@ -177,6 +180,19 @@ QuicSocket::QuicSocket(
   EntropySource(token_secret_.data(), token_secret_.size());
   socket_stats_.created_at = uv_hrtime();
 
+  // Set the session reset secret to the one provided or random.
+  // Note that a random secret is going to make it exceedingly
+  // difficult for the session reset token to be useful.
+  if (session_reset_secret != nullptr) {
+    memcpy(reset_token_secret_.data(),
+           session_reset_secret,
+           reset_token_secret_.size());
+  } else {
+    EntropySource(
+        reset_token_secret_.data(),
+        reset_token_secret_.size());
+  }
+
   USE(wrap->DefineOwnProperty(
       env->context(),
       env->stats_string(),
@@ -197,7 +213,8 @@ QuicSocket::~QuicSocket() {
         "  Packets Sent: %" PRIu64 "\n"
         "  Packets Ignored: %" PRIu64 "\n"
         "  Server Sessions: %" PRIu64 "\n"
-        "  Client Sessions: %" PRIu64 "\n",
+        "  Client Sessions: %" PRIu64 "\n"
+        "  Stateless Resets: %" PRIu64 "\n",
         now - socket_stats_.created_at,
         socket_stats_.bound_at > 0 ? now - socket_stats_.bound_at : 0,
         socket_stats_.listen_at > 0 ? now - socket_stats_.listen_at : 0,
@@ -207,7 +224,8 @@ QuicSocket::~QuicSocket() {
         socket_stats_.packets_sent,
         socket_stats_.packets_ignored,
         socket_stats_.server_sessions,
-        socket_stats_.client_sessions);
+        socket_stats_.client_sessions,
+        socket_stats_.stateless_reset_count);
   QuicSocketListener* listener = listener_;
   listener_->OnDestroy();
   // Remove the listener if it didn't remove itself already.
@@ -317,6 +335,17 @@ void QuicSocket::OnRecv(
   Receive(nread, std::move(buf), addr, flags);
 }
 
+namespace {
+bool IsShortHeader(
+    uint32_t version,
+    const uint8_t* pscid,
+    size_t pscidlen) {
+  return version == NGTCP2_PROTO_VER &&
+         pscid == nullptr &&
+         pscidlen == 0;
+}
+}  // namespace
+
 void QuicSocket::Receive(
     ssize_t nread,
     AllocatedBuffer buf,
@@ -382,19 +411,6 @@ void QuicSocket::Receive(
     auto scid_it = dcid_to_scid_.find(dcid_str);
     if (scid_it == std::end(dcid_to_scid_)) {
       Debug(this, "There is no existing session for dcid %s", dcid_hex.c_str());
-
-      // TODO(@jasnell): If the DCID was previously known, and there is a
-      // known stateless reset token, then we should we ought to be able
-      // to send a stateless reset at this point. It's likely that the
-      // endpoint crashed and the peer is still trying to send data.
-      // Currently, however, we don't keep track of previously used CID's
-      // and their reset tokens so we can't implement this yet. A proper
-      // implementation will track CIDs and reset tokens but only across
-      // a single restart. These will be associated with the local address
-      // (that is, a QuicSocket bound to one local port should never use
-      // the CIDs and reset tokens from a QuicSocket bound to another).
-      // It's not entirely clear how this should be implemented.
-
       // AcceptInitialPacket will first validate that the packet can be
       // accepted, then create a new server QuicSession instance if able
       // to do so. If a new instance cannot be created (for any reason),
@@ -417,7 +433,27 @@ void QuicSocket::Receive(
       // or (in the future) a CONNECTION_CLOSE packet.
       if (!session) {
         Debug(this, "Could not initialize a new server QuicSession.");
-        IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
+
+        // Ignore the packet if it's an unacceptable long header (initial)
+        if (!IsShortHeader(pversion, pscid, pscidlen)) {
+          IncrementSocketStat(
+              1, &socket_stats_,
+              &socket_stats::packets_ignored);
+        } else {
+          // Attempt to send a stateless reset. If it fails, we just ignore
+          // TODO(@jasnell): Need to verify that stateless reset is occurring
+          // correctly. Also need to determine how to test.
+          if (!SendStatelessReset(dcid, addr)) {
+            IncrementSocketStat(
+                1, &socket_stats_,
+                &socket_stats::packets_ignored);
+          } else {
+            IncrementSocketStat(
+                1, &socket_stats_,
+                &socket_stats::stateless_reset_count);
+          }
+        }
+
         return;
       }
     } else {
@@ -541,6 +577,34 @@ void QuicSocket::SendVersionNegotiation(
     return;
   buf.Realloc(nwrite);
   Send(addr, std::move(buf), "version negotiation");
+}
+
+bool QuicSocket::SendStatelessReset(
+    const QuicCID& cid,
+    const sockaddr* addr) {
+  constexpr static size_t RANDLEN = NGTCP2_MIN_STATELESS_RESET_RANDLEN * 5;
+  uint8_t token[NGTCP2_STATELESS_RESET_TOKENLEN];
+  uint8_t random[RANDLEN];
+
+  GenerateResetToken(
+      token,
+      reset_token_secret_.data(),
+      reset_token_secret_.size(), cid.cid());
+  EntropySource(random, RANDLEN);
+
+  MallocedBuffer<char> buf(NGTCP2_MAX_PKTLEN_IPV4);
+  ssize_t nwrite =
+      ngtcp2_pkt_write_stateless_reset(
+        reinterpret_cast<uint8_t*>(buf.data),
+        NGTCP2_MAX_PKTLEN_IPV4,
+        token,
+        random,
+        RANDLEN
+      );
+    if (nwrite <= 0)
+      return false;
+    buf.Realloc(nwrite);
+    return Send(addr, std::move(buf), "stateless reset") == 0;
 }
 
 bool QuicSocket::SendRetry(
@@ -987,14 +1051,23 @@ void NewQuicSocket(const FunctionCallbackInfo<Value>& args) {
   CHECK_GE(retry_token_expiration, MIN_RETRYTOKEN_EXPIRATION);
   CHECK_LE(retry_token_expiration, MAX_RETRYTOKEN_EXPIRATION);
 
-  new QuicSocket(
-      env,
-      args.This(),
-      args[0].As<Object>(),
-      retry_token_expiration,
-      max_connections_per_host,
-      options,
-      args[4]->IsTrue() ? QlogMode::kEnabled : QlogMode::kDisabled);
+  const uint8_t* session_reset_secret = nullptr;
+  if (args[5]->IsArrayBufferView()) {
+    ArrayBufferViewContents<uint8_t> buf(args[5].As<ArrayBufferView>());
+    CHECK_EQ(buf.length(), TOKEN_SECRETLEN);
+    session_reset_secret = buf.data();
+  }
+
+  QuicSocket* socket =
+      new QuicSocket(
+          env,
+          args.This(),
+          args[0].As<Object>(),
+          retry_token_expiration,
+          max_connections_per_host,
+          options,
+          args[4]->IsTrue() ? QlogMode::kEnabled : QlogMode::kDisabled,
+          session_reset_secret);
 }
 
 // Enabling diagnostic packet loss enables a mode where the QuicSocket

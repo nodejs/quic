@@ -1596,6 +1596,15 @@ Changing TTL values is typically done for network probes or when multicasting.
 The argument to `socket.setTTL()` is a number of hops between `1` and `255`.
 The default on most systems is `64` but can vary.
 
+#### quicsocket.statelessResetCount
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BigInt` that represents the number of stateless resets that have been sent.
+
 #### quicsocket.unref();
 <!-- YAML
 added: REPLACEME
