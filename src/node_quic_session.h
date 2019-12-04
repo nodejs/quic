@@ -284,6 +284,26 @@ class JSQuicSessionListener : public QuicSessionListener {
   friend class QuicSession;
 };
 
+// Currently, we generate Connection IDs randomly. In the future,
+// however, there may be other strategies that need to be supported.
+class ConnectionIDStrategy {
+ public:
+  virtual void GetNewConnectionID(
+      QuicSession* session,
+      ngtcp2_cid* cid,
+      uint8_t* token,
+      size_t cidlen) = 0;
+};
+
+class RandomConnectionIDStrategy : public ConnectionIDStrategy {
+ public:
+  void GetNewConnectionID(
+      QuicSession* session,
+      ngtcp2_cid* cid,
+      uint8_t* token,
+      size_t cidlen) override;
+};
+
 // The QuicCryptoContext class encapsulates all of the crypto/TLS
 // handshake details on behalf of a QuicSession.
 class QuicCryptoContext : public MemoryRetainer {
@@ -911,6 +931,8 @@ class QuicSession : public AsyncWrap,
   void PushListener(QuicSessionListener* listener);
   void RemoveListener(QuicSessionListener* listener);
 
+  void SetConnectionIDStrategory(ConnectionIDStrategy* strategy);
+
   // Tracks whether or not we are currently within an ngtcp2 callback
   // function. Certain ngtcp2 APIs are not supposed to be called when
   // within a callback. We use this as a gate to check.
@@ -1267,7 +1289,10 @@ class QuicSession : public AsyncWrap,
   size_t connection_close_attempts_ = 0;
   size_t connection_close_limit_ = 1;
 
-  QuicSessionListener* listener_;
+  ConnectionIDStrategy* connection_id_strategy_ = nullptr;
+  RandomConnectionIDStrategy default_connection_id_strategy_;
+
+  QuicSessionListener* listener_ = nullptr;
   JSQuicSessionListener default_listener_;
 
   TimerPointer idle_;
