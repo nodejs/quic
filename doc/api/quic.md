@@ -441,6 +441,19 @@ added: REPLACEME
 A `BigInt` representing the total number of bidirectional streams
 created for this `QuicSession`.
 
+#### quicsession.blockCount
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BigInt` representing the total number of times the `QuicSession` has
+been blocked from sending stream data due to flow control.
+
+Such blocks indicate that transmitted stream data is not being consumed
+quickly enough by the connected peer.
+
 #### quicsession.bytesInFlight
 <!-- YAML
 added: REPLACEME

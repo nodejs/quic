@@ -460,6 +460,7 @@ bool Http3Application::SendPendingData() {
     if (nwrite < 0) {
       switch (nwrite) {
         case NGTCP2_ERR_STREAM_DATA_BLOCKED:
+          Session()->StreamDataBlocked(stream_id);
           if (Session()->GetMaxDataLeft() == 0)
             return true;
           // Fall through

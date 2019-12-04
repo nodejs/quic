@@ -177,6 +177,7 @@ bool DefaultApplication::SendStreamData(QuicStream* stream) {
           return false;
         case NGTCP2_ERR_STREAM_DATA_BLOCKED:
           Debug(stream, "Stream data blocked");
+          Session()->StreamDataBlocked(stream->GetID());
           return true;
         case NGTCP2_ERR_STREAM_SHUT_WR:
           Debug(stream, "Stream writable side is closed");

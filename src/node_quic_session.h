@@ -197,7 +197,8 @@ enum QuicSessionStatsIdx : int {
   IDX_QUIC_SESSION_STATS_ACK_DELAY_RETRANSMIT_COUNT,
   IDX_QUIC_SESSION_STATS_PATH_VALIDATION_SUCCESS_COUNT,
   IDX_QUIC_SESSION_STATS_PATH_VALIDATION_FAILURE_COUNT,
-  IDX_QUIC_SESSION_STATS_MAX_BYTES_IN_FLIGHT
+  IDX_QUIC_SESSION_STATS_MAX_BYTES_IN_FLIGHT,
+  IDX_QUIC_SESSION_STATS_BLOCK_COUNT,
 };
 
 class QuicSessionListener {
@@ -933,6 +934,9 @@ class QuicSession : public AsyncWrap,
 
   void SetConnectionIDStrategory(ConnectionIDStrategy* strategy);
 
+  // Report that the stream data is flow control blocked
+  void StreamDataBlocked(int64_t stream_id);
+
   // Tracks whether or not we are currently within an ngtcp2 callback
   // function. Certain ngtcp2 APIs are not supposed to be called when
   // within a callback. We use this as a gate to check.
@@ -1370,6 +1374,9 @@ class QuicSession : public AsyncWrap,
     uint64_t path_validation_failure_count;
     // The max number of in flight bytes recorded
     uint64_t max_bytes_in_flight;
+    // The total number of times the session has been
+    // flow control blocked.
+    uint64_t block_count;
   };
   session_stats session_stats_{};
 

@@ -1378,6 +1378,11 @@ void QuicSession::RemoveListener(QuicSessionListener* listener) {
   listener->previous_listener_ = nullptr;
 }
 
+void QuicSession::StreamDataBlocked(int64_t stream_id) {
+  // Increments the block count
+  IncrementStat(1, &session_stats_, &session_stats::block_count);
+}
+
 std::string QuicSession::diagnostic_name() const {
   return std::string("QuicSession ") +
       (IsServer() ? "Server" : "Client") +
