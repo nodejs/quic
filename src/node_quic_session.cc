@@ -959,26 +959,23 @@ void QuicSession::AckedStreamDataOffset(
 
 void QuicSession::AddToSocket(QuicSocket* socket) {
   QuicCID scid(scid_);
-  socket->AddSession(&scid, BaseObjectPtr<QuicSession>(this));
+  socket->AddSession(scid, BaseObjectPtr<QuicSession>(this));
 
   switch (crypto_context_->Side()) {
     case NGTCP2_CRYPTO_SIDE_SERVER: {
       QuicCID rcid(rcid_);
-      socket->AssociateCID(&rcid, &scid);
+      socket->AssociateCID(rcid, scid);
 
-      if (pscid_.datalen) {
-        QuicCID pscid(pscid_);
-        socket->AssociateCID(&pscid, &scid);
-      }
+      if (pscid_.datalen)
+        socket->AssociateCID(QuicCID(pscid_), scid);
+
       break;
     }
     case NGTCP2_CRYPTO_SIDE_CLIENT: {
       std::vector<ngtcp2_cid> cids(ngtcp2_conn_get_num_scid(Connection()));
       ngtcp2_conn_get_scid(Connection(), cids.data());
-      for (const ngtcp2_cid& cid : cids) {
-        QuicCID id(&cid);
-        socket->AssociateCID(&id, &scid);
-      }
+      for (const ngtcp2_cid& cid : cids)
+        socket->AssociateCID(QuicCID(&cid), scid);
       break;
     }
     default:
@@ -1021,9 +1018,7 @@ void QuicSession::AddStream(BaseObjectPtr<QuicStream> stream) {
 
 // Every QUIC session will have multiple CIDs associated with it.
 void QuicSession::AssociateCID(ngtcp2_cid* cid) {
-  QuicCID id(cid);
-  QuicCID scid(scid_);
-  Socket()->AssociateCID(&id, &scid);
+  Socket()->AssociateCID(QuicCID(cid), QuicCID(scid_));
 }
 
 // Like the silent close, the immediate close must start with
@@ -1089,10 +1084,8 @@ QuicStream* QuicSession::CreateStream(int64_t stream_id) {
 }
 
 void QuicSession::DisassociateCID(const ngtcp2_cid* cid) {
-  if (IsServer()) {
-    QuicCID id(cid);
-    Socket()->DisassociateCID(&id);
-  }
+  if (IsServer())
+    Socket()->DisassociateCID(QuicCID(cid));
 }
 
 // Mark the QuicSession instance destroyed. After this is called,
@@ -1568,8 +1561,8 @@ bool QuicSession::ReceivePacket(
           // scid and rcid here
           Socket()->SendRetry(
               GetNegotiatedVersion(),
-              &QuicCID(scid()),
-              &QuicCID(rcid()),
+              QuicCID(scid()),
+              QuicCID(rcid()),
               *remote_address_);
           ImmediateClose();
           break;
@@ -1629,26 +1622,20 @@ void QuicSession::RemoveConnectionID(const ngtcp2_cid* cid) {
 // the session object will be destroyed automatically.
 void QuicSession::RemoveFromSocket() {
   if (IsServer()) {
-    QuicCID rcid(rcid_);
-    socket_->DisassociateCID(&rcid);
+    socket_->DisassociateCID(QuicCID(rcid_));
 
-    if (pscid_.datalen > 0) {
-      QuicCID pscid(pscid_);
-      socket_->DisassociateCID(&pscid);
-    }
+    if (pscid_.datalen > 0)
+      socket_->DisassociateCID(QuicCID(pscid_));
   }
 
   std::vector<ngtcp2_cid> cids(ngtcp2_conn_get_num_scid(Connection()));
   ngtcp2_conn_get_scid(Connection(), cids.data());
 
-  for (auto &cid : cids) {
-    QuicCID id(&cid);
-    socket_->DisassociateCID(&id);
-  }
+  for (auto &cid : cids)
+    socket_->DisassociateCID(QuicCID(&cid));
 
   Debug(this, "Removed from the QuicSocket.");
-  QuicCID scid(scid_);
-  socket_->RemoveSession(&scid, **GetRemoteAddress());
+  socket_->RemoveSession(QuicCID(scid_), **GetRemoteAddress());
   socket_.reset();
 }
 

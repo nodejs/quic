@@ -67,13 +67,13 @@ class QuicSocket : public AsyncWrap,
   void MaybeClose();
 
   void AddSession(
-      QuicCID* cid,
+      const QuicCID& cid,
       BaseObjectPtr<QuicSession> session);
   void AssociateCID(
-      QuicCID* cid,
-      QuicCID* scid);
+      const QuicCID& cid,
+      const QuicCID& scid);
   void DisassociateCID(
-      QuicCID* cid);
+      const QuicCID& cid);
   void Listen(
       crypto::SecureContext* context,
       const sockaddr* preferred_address = nullptr,
@@ -82,7 +82,7 @@ class QuicSocket : public AsyncWrap,
   int ReceiveStart();
   int ReceiveStop();
   void RemoveSession(
-      QuicCID* cid,
+      const QuicCID& cid,
       const sockaddr* addr);
   void ReportSendError(
       int error);
@@ -121,8 +121,8 @@ class QuicSocket : public AsyncWrap,
 
   bool SendRetry(
       uint32_t version,
-      QuicCID* dcid,
-      QuicCID* scid,
+      const QuicCID& dcid,
+      const QuicCID& scid,
       const sockaddr* addr);
 
  private:
@@ -147,13 +147,13 @@ class QuicSocket : public AsyncWrap,
   void SendInitialConnectionClose(
       uint32_t version,
       uint64_t error_code,
-      QuicCID* dcid,
+      const QuicCID& dcid,
       const sockaddr* addr);
 
   void SendVersionNegotiation(
       uint32_t version,
-      QuicCID* dcid,
-      QuicCID* scid,
+      const QuicCID& dcid,
+      const QuicCID& scid,
       const sockaddr* addr);
 
   void OnSend(
@@ -167,8 +167,8 @@ class QuicSocket : public AsyncWrap,
 
   BaseObjectPtr<QuicSession> AcceptInitialPacket(
       uint32_t version,
-      QuicCID* dcid,
-      QuicCID* scid,
+      const QuicCID& dcid,
+      const QuicCID& scid,
       ssize_t nread,
       const uint8_t* data,
       const struct sockaddr* addr,
