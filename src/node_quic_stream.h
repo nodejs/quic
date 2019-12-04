@@ -37,6 +37,17 @@ enum QuicStreamHeadersKind : int {
   QUICSTREAM_HEADERS_KIND_TRAILING
 };
 
+enum QuicStreamStatsIdx : int {
+  IDX_QUIC_STREAM_STATS_CREATED_AT,
+  IDX_QUIC_STREAM_STATS_SENT_AT,
+  IDX_QUIC_STREAM_STATS_RECEIVED_AT,
+  IDX_QUIC_STREAM_STATS_ACKED_AT,
+  IDX_QUIC_STREAM_STATS_CLOSING_AT,
+  IDX_QUIC_STREAM_STATS_BYTES_RECEIVED,
+  IDX_QUIC_STREAM_STATS_BYTES_SENT,
+  IDX_QUIC_STREAM_STATS_MAX_OFFSET
+};
+
 // QuicHeader is a base class for implementing QUIC application
 // specific headers. Each type of QUIC application may have
 // different internal representations for a header name+value
@@ -447,8 +458,10 @@ class QuicStream : public AsyncWrap, public StreamBase {
     uint64_t bytes_received;
     // The total number of bytes sent
     uint64_t bytes_sent;
+    // The maximum extended stream offset
+    uint64_t max_offset;
   };
-  stream_stats stream_stats_{0, 0, 0, 0, 0, 0, 0};
+  stream_stats stream_stats_{};
 
   // data_rx_rate_ measures the elapsed time between data packets
   // for this stream. When used in combination with the data_rx_size,
