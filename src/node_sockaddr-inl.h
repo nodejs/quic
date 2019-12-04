@@ -132,12 +132,12 @@ SocketAddress::SocketAddress(const SocketAddress& addr) {
   memcpy(&address_, &addr.address_, addr.GetLength());
 }
 
-inline SocketAddress& SocketAddress::operator=(const sockaddr* addr) {
+SocketAddress& SocketAddress::operator=(const sockaddr* addr) {
   memcpy(&address_, addr, GetLength(addr));
   return *this;
 }
 
-inline SocketAddress& SocketAddress::operator=(const SocketAddress& addr) {
+SocketAddress& SocketAddress::operator=(const SocketAddress& addr) {
   memcpy(&address_, &addr.address_, addr.GetLength());
 }
 
