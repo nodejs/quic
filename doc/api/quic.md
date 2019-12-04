@@ -1027,6 +1027,44 @@ added: REPLACEME
 Will be `true` if the `QuicSocket` has been successfully bound to the local UDP
 port.
 
+#### quicsocket.boundDuration
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BitInt` representing the length of time this `QuicSocket` has been bound
+to a local port.
+
+#### quicsocket.bytesReceived
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BitInt` representing the number of bytes received by this `QuicSocket`.
+
+#### quicsocket.bytesSent
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BitInt` representing the number of bytes sent by this `QuicSocket`.
+
+#### quicsocket.clientSessions
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BitInt` representing the number of client `QuicSession` instances that
+have been associated with this `QuicSocket`.
+
 #### quicsocket.close([callback])
 <!-- YAML
 added: REPLACEME
@@ -1199,6 +1237,15 @@ never have reason to call this.
 If `multicastInterface` is not specified, the operating system will attempt to
 drop membership on all valid interfaces.
 
+#### quicsocket.duration
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BitInt` representing the length of time this `QuicSocket` has been active,
+
 #### quicsocket.fd
 <!-- YAML
 added: REPLACEME
@@ -1320,6 +1367,45 @@ Listen for new peer-initiated sessions.
 If a `callback` is given, it is registered as a handler for the
 `'session'` event.
 
+#### quicsocket.listenDuration
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BitInt` representing the length of time this `QuicSocket` has been listening
+for connections.
+
+#### quicsocket.packetsIgnored
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BitInt` representing the number of packets received by this `QuicSocket` that
+have been ignored.
+
+#### quicsocket.packetsReceived
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BitInt` representing the number of packets successfully received by this
+`QuicSocket`.
+
+#### quicsocket.packetsSent
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BitInt` representing the number of packets sent by this `QuicSocket`.
+
 #### quicsocket.pending
 <!-- YAML
 added: REPLACEME
@@ -1343,6 +1429,33 @@ added: REPLACEME
 
 Sets or clears the `SO_BROADCAST` socket option. When set to `true`, UDP
 packets may be sent to a local interface's broadcast address.
+
+#### quicsocket.serverSessions
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {BigInt}
+
+A `BitInt` representing the number of server `QuicSession` instances that
+have been associated with this `QuicSocket`.
+
+#### quicsocket.setDiagnosticPacketLoss(options)
+<!-- YAML-
+added: REPLACEME
+-->
+
+* `options` {Object}
+  * `rx` {double} A value in the range `0.0` to `1.0` that specifies the
+    probability of received packet loss.
+  * `tx` {double} A value in the range `0.0` to `1.0` that specifies the
+    probability of transmitted packet loss.
+
+The `quicsocket.setDiagnosticPacketLoss()` method is a diagnostic only tool
+that can be used to *simulate* packet loss conditions for this `QuicSocket`
+by artificially dropping received or transmitted packets.
+
+This method is *not* to be used in production applications.
 
 #### quicsocket.setMulticastLoopback([on])
 <!-- YAML
