@@ -224,7 +224,7 @@ void QuicSessionListener::OnOCSP(const std::string& ocsp) {
 void QuicSessionListener::OnStreamHeaders(
     int64_t stream_id,
     int kind,
-    std::vector<std::unique_ptr<QuicHeader>>* headers) {
+    const std::vector<std::unique_ptr<QuicHeader>>& headers) {
   if (previous_listener_ != nullptr)
     previous_listener_->OnStreamHeaders(stream_id, kind, headers);
 }
@@ -376,29 +376,25 @@ void JSQuicSessionListener::OnCert(const char* server_name) {
 void JSQuicSessionListener::OnStreamHeaders(
     int64_t stream_id,
     int kind,
-    std::vector<std::unique_ptr<QuicHeader>>* headers) {
+    const std::vector<std::unique_ptr<QuicHeader>>& headers) {
   Environment* env = Session()->env();
   HandleScope scope(env->isolate());
   Context::Scope context_scope(env->context());
-  std::vector<Local<Value>> head;
-  for (const auto& header : *headers) {
+  MaybeStackBuffer<Local<Value>, 16> head(headers.size());
+  size_t n = 0;
+  for (const auto& header : headers) {
     // name and value should never be empty here, and if
     // they are, there's an actual bug so go ahead and crash
     Local<Value> pair[] = {
       header->GetName(Session()->Application()).ToLocalChecked(),
       header->GetValue(Session()->Application()).ToLocalChecked()
     };
-    head.push_back(Array::New(env->isolate(), pair, arraysize(pair)));
+    head[n++] = Array::New(env->isolate(), pair, arraysize(pair));
   }
   Local<Value> argv[] = {
       Number::New(env->isolate(), static_cast<double>(stream_id)),
-      Array::New(
-          env->isolate(),
-          head.data(),
-          head.size()),
-      Integer::New(
-          env->isolate(),
-          kind)
+      Array::New(env->isolate(), head.out(), n),
+      Integer::New(env->isolate(), kind)
   };
   BaseObjectPtr<QuicSession> ptr(Session());
   Session()->MakeCallback(
@@ -643,16 +639,17 @@ void JSQuicSessionListener::OnVersionNegotiation(
   Local<Context> context = env->context();
   Context::Scope context_scope(context);
 
-  std::vector<Local<Value>> versions;
+  MaybeStackBuffer<Local<Value>, 4> versions(vcnt);
   for (size_t n = 0; n < vcnt; n++)
-    versions.push_back(Integer::New(env->isolate(), vers[n]));
+    versions[n] = Integer::New(env->isolate(), vers[n]);
+
 
   Local<Value> supported =
       Integer::New(env->isolate(), supported_version);
 
   Local<Value> argv[] = {
     Integer::New(env->isolate(), NGTCP2_PROTO_VER),
-    Array::New(env->isolate(), versions.data(), vcnt),
+    Array::New(env->isolate(), versions.out(), vcnt),
     Array::New(env->isolate(), &supported, 1)
   };
 
@@ -1115,7 +1112,7 @@ void QuicCryptoContext::WriteHandshake(
 void QuicApplication::StreamHeaders(
     int64_t stream_id,
     int kind,
-    std::vector<std::unique_ptr<QuicHeader>>* headers) {
+    const std::vector<std::unique_ptr<QuicHeader>>& headers) {
   Session()->Listener()->OnStreamHeaders(stream_id, kind, headers);
 }
 

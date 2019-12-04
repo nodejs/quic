@@ -400,7 +400,7 @@ void QuicStream::EndHeaders() {
   // Upon completion of a block of headers, convert the
   // vector of Header objects into an array of name+value
   // pairs, then call the on_stream_headers function.
-  Session()->Application()->StreamHeaders(GetID(), headers_kind_, &headers_);
+  Session()->Application()->StreamHeaders(GetID(), headers_kind_, headers_);
   headers_.clear();
 }
 

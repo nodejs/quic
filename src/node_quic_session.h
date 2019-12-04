@@ -213,7 +213,7 @@ class QuicSessionListener {
   virtual void OnStreamHeaders(
       int64_t stream_id,
       int kind,
-      std::vector<std::unique_ptr<QuicHeader>>* headers);
+      const std::vector<std::unique_ptr<QuicHeader>>& headers);
   virtual void OnStreamClose(
       int64_t stream_id,
       uint64_t app_error_code);
@@ -256,7 +256,7 @@ class JSQuicSessionListener : public QuicSessionListener {
   void OnStreamHeaders(
       int64_t stream_id,
       int kind,
-      std::vector<std::unique_ptr<QuicHeader>>* headers) override;
+      const std::vector<std::unique_ptr<QuicHeader>>& headers) override;
   void OnStreamClose(
       int64_t stream_id,
       uint64_t app_error_code) override;
@@ -482,7 +482,7 @@ class QuicApplication : public MemoryRetainer {
   virtual void StreamHeaders(
       int64_t stream_id,
       int kind,
-      std::vector<std::unique_ptr<QuicHeader>>* headers);
+      const std::vector<std::unique_ptr<QuicHeader>>& headers);
   virtual void StreamClose(
       int64_t stream_id,
       uint64_t app_error_code);
