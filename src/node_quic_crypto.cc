@@ -95,29 +95,20 @@ bool DeriveTokenKey(
           secret.size()));
 }
 
-bool MessageDigest(
-    std::array<uint8_t, 32>* dest,
-    const std::array<uint8_t, 16>& rand) {
+void GenerateRandData(uint8_t* buf, size_t len) {
+  std::array<uint8_t, 16> rand;
+  std::array<uint8_t, 32> md;
+
   const EVP_MD* meth = EVP_sha256();
+  unsigned int mdlen = EVP_MD_size(meth);
   DeleteFnPtr<EVP_MD_CTX, EVP_MD_CTX_free> ctx;
   ctx.reset(EVP_MD_CTX_new());
   CHECK(ctx);
 
-  if (EVP_DigestInit_ex(ctx.get(), meth, nullptr) != 1 ||
-      EVP_DigestUpdate(ctx.get(), rand.data(), rand.size()) != 1) {
-    return false;
-  }
-
-  unsigned int mdlen = EVP_MD_size(meth);
-
-  return EVP_DigestFinal_ex(ctx.get(), dest->data(), &mdlen) == 1;
-}
-
-void GenerateRandData(uint8_t* buf, size_t len) {
-  std::array<uint8_t, 16> rand;
-  std::array<uint8_t, 32> md;
   EntropySource(rand.data(), rand.size());
-  CHECK(MessageDigest(&md, rand));
+  CHECK_EQ(EVP_DigestInit_ex(ctx.get(), meth, nullptr), 1);
+  CHECK_EQ(EVP_DigestUpdate(ctx.get(), rand.data(), rand.size()), 1);
+  CHECK_EQ(EVP_DigestFinal_ex(ctx.get(), rand.data(), &mdlen), 1);
   CHECK_LE(len, md.size());
   std::copy_n(std::begin(md), len, buf);
 }
