@@ -2741,7 +2741,7 @@ void QuicSession::InitServer(
           &path,
           version,
           &callbacks[crypto_context_->Side()],
-          **config,
+          config->data(),
           &alloc_info_,
           static_cast<QuicSession*>(this)), 0);
 
@@ -2876,7 +2876,7 @@ bool QuicSession::InitClient(
           &path,
           NGTCP2_PROTO_VER,
           &callbacks[crypto_context_->Side()],
-          *config,
+          config.data(),
           &alloc_info_,
           static_cast<QuicSession*>(this)), 0);
 

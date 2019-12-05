@@ -492,7 +492,7 @@ Local<Value> GetALPNProtocol(QuicSession* session) {
   unsigned int alpnlen;
   QuicCryptoContext* ctx = session->CryptoContext();
 
-  SSL_get0_alpn_selected(**ctx, &alpn_buf, &alpnlen);
+  SSL_get0_alpn_selected(ctx->ssl(), &alpn_buf, &alpnlen);
   if (alpnlen == sizeof(NGTCP2_ALPN_H3) - 2 &&
       memcmp(alpn_buf, NGTCP2_ALPN_H3 + 1, sizeof(NGTCP2_ALPN_H3) - 2) == 0) {
     alpn = session->env()->quic_alpn_string();
@@ -649,10 +649,11 @@ void SetHostname(SSL* ssl, const std::string& hostname) {
 void InitializeTLS(QuicSession* session) {
   QuicCryptoContext* ctx = session->CryptoContext();
 
-  SSL_set_app_data(**ctx, session);
-  SSL_set_cert_cb(**ctx, CertCB, session);
-  SSL_set_verify(**ctx, SSL_VERIFY_NONE, crypto::VerifyCallback);
-  SSL_set_quic_early_data_enabled(**ctx, 1);
+  SSL* ssl = ctx->ssl();
+  SSL_set_app_data(ssl, session);
+  SSL_set_cert_cb(ssl, CertCB, session);
+  SSL_set_verify(ssl, SSL_VERIFY_NONE, crypto::VerifyCallback);
+  SSL_set_quic_early_data_enabled(ssl, 1);
 
   // Enable tracing if the `--trace-tls` command line flag
   // is used. TODO(@jasnell): Add process warning for this
@@ -661,20 +662,20 @@ void InitializeTLS(QuicSession* session) {
 
   switch (ctx->Side()) {
     case NGTCP2_CRYPTO_SIDE_CLIENT: {
-      SSL_set_connect_state(**ctx);
-      crypto::SetALPN(**ctx, session->GetALPN());
-      SetHostname(**ctx, session->GetHostname());
+      SSL_set_connect_state(ssl);
+      crypto::SetALPN(ssl, session->GetALPN());
+      SetHostname(ssl, session->GetHostname());
       if (ctx->IsOptionSet(QUICCLIENTSESSION_OPTION_REQUEST_OCSP))
-        SSL_set_tlsext_status_type(**ctx, TLSEXT_STATUSTYPE_ocsp);
+        SSL_set_tlsext_status_type(ssl, TLSEXT_STATUSTYPE_ocsp);
       break;
     }
     case NGTCP2_CRYPTO_SIDE_SERVER: {
-      SSL_set_accept_state(**ctx);
+      SSL_set_accept_state(ssl);
       if (ctx->IsOptionSet(QUICSERVERSESSION_OPTION_REQUEST_CERT)) {
         int verify_mode = SSL_VERIFY_PEER;
         if (ctx->IsOptionSet(QUICSERVERSESSION_OPTION_REJECT_UNAUTHORIZED))
           verify_mode |= SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
-        SSL_set_verify(**ctx, verify_mode, crypto::VerifyCallback);
+        SSL_set_verify(ssl, verify_mode, crypto::VerifyCallback);
       }
       break;
     }
@@ -682,7 +683,7 @@ void InitializeTLS(QuicSession* session) {
       UNREACHABLE();
   }
 
-  SetTransportParams(session->Connection(), **ctx);
+  SetTransportParams(session->Connection(), ssl);
 }
 
 void InitializeSecureContext(
@@ -734,10 +735,11 @@ bool SetCryptoSecrets(
   SessionKey tx_hp;
 
   QuicCryptoContext* ctx = session->CryptoContext();
+  SSL* ssl = ctx->ssl();
 
   if (NGTCP2_ERR(ngtcp2_crypto_derive_and_install_key(
           session->Connection(),
-          **ctx,
+          ssl,
           rx_key.data(),
           rx_iv.data(),
           rx_hp.data(),
@@ -755,31 +757,31 @@ bool SetCryptoSecrets(
   switch (level) {
   case NGTCP2_CRYPTO_LEVEL_EARLY:
     crypto::LogSecret(
-        **ctx,
+        ssl,
         QUIC_CLIENT_EARLY_TRAFFIC_SECRET,
         rx_secret,
         secretlen);
     break;
   case NGTCP2_CRYPTO_LEVEL_HANDSHAKE:
     crypto::LogSecret(
-        **ctx,
+        ssl,
         QUIC_CLIENT_HANDSHAKE_TRAFFIC_SECRET,
         rx_secret,
         secretlen);
     crypto::LogSecret(
-        **ctx,
+        ssl,
         QUIC_SERVER_HANDSHAKE_TRAFFIC_SECRET,
         tx_secret,
         secretlen);
     break;
   case NGTCP2_CRYPTO_LEVEL_APP:
     crypto::LogSecret(
-        **ctx,
+        ssl,
         QUIC_CLIENT_TRAFFIC_SECRET_0,
         rx_secret,
         secretlen);
     crypto::LogSecret(
-        **ctx,
+        ssl,
         QUIC_SERVER_TRAFFIC_SECRET_0,
         tx_secret,
         secretlen);

@@ -82,7 +82,10 @@ class QuicSessionConfig {
 
   void SetQlog(const ngtcp2_qlog_settings& qlog);
 
-  const ngtcp2_settings* operator*() const { return &settings_; }
+  const ngtcp2_settings& operator*() const { return settings_; }
+  const ngtcp2_settings* operator->() const { return &settings_; }
+
+  const ngtcp2_settings* data() { return &settings_; }
 
  private:
   uint64_t max_crypto_buffer_ = DEFAULT_MAX_CRYPTO_BUFFER;
@@ -309,8 +312,6 @@ class RandomConnectionIDStrategy : public ConnectionIDStrategy {
 // handshake details on behalf of a QuicSession.
 class QuicCryptoContext : public MemoryRetainer {
  public:
-  SSL* operator*() { return ssl_.get(); }
-
   uint64_t Cancel();
 
   // Outgoing crypto data must be retained in memory until it is
@@ -380,6 +381,7 @@ class QuicCryptoContext : public MemoryRetainer {
   ngtcp2_crypto_side Side() const { return side_; }
 
   SSL* ssl() { return ssl_.get(); }
+  SSL* operator->() { return ssl_.get(); }
 
   void WriteHandshake(
       ngtcp2_crypto_level level,
