@@ -556,7 +556,7 @@ bool QuicSocket::SendRetry(
           &tokenlen,
           addr,
           *dcid,
-          &token_secret_)) {
+          token_secret_)) {
     return false;
   }
 
@@ -685,7 +685,7 @@ BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
               &ocid,
               &hd,
               addr,
-              &token_secret_,
+              token_secret_,
               retry_token_expiration_)) {
         Debug(this, "A valid retry token was not found. Sending retry.");
         SendRetry(version, dcid, scid, addr);

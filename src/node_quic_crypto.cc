@@ -65,30 +65,32 @@ constexpr char QUIC_SERVER_HANDSHAKE_TRAFFIC_SECRET[] =
 constexpr char QUIC_SERVER_TRAFFIC_SECRET_0[] =
     "QUIC_SERVER_TRAFFIC_SECRET_0";
 
+namespace {
+// Used solely to derive the keys used to generate retry tokens.
 bool DeriveTokenKey(
     uint8_t* token_key,
     uint8_t* token_iv,
     const uint8_t* rand_data,
     size_t rand_datalen,
-    const ngtcp2_crypto_ctx* ctx,
-    std::array<uint8_t, TOKEN_SECRETLEN>* token_secret) {
+    const ngtcp2_crypto_ctx& ctx,
+    const std::array<uint8_t, TOKEN_SECRETLEN>& token_secret) {
   TokenSecret secret;
 
   return
       NGTCP2_OK(ngtcp2_crypto_hkdf_extract(
           secret.data(),
           secret.size(),
-          &ctx->md,
-          token_secret->data(),
-          token_secret->size(),
+          &ctx.md,
+          token_secret.data(),
+          token_secret.size(),
           rand_data,
           rand_datalen)) &&
       NGTCP2_OK(ngtcp2_crypto_derive_packet_protection_key(
           token_key,
           token_iv,
           nullptr,
-          &ctx->aead,
-          &ctx->md,
+          &ctx.aead,
+          &ctx.md,
           secret.data(),
           secret.size()));
 }
@@ -101,29 +103,25 @@ bool MessageDigest(
   ctx.reset(EVP_MD_CTX_new());
   CHECK(ctx);
 
-  if (EVP_DigestInit_ex(ctx.get(), meth, nullptr) != 1)
+  if (EVP_DigestInit_ex(ctx.get(), meth, nullptr) != 1 ||
+      EVP_DigestUpdate(ctx.get(), rand.data(), rand.size()) != 1) {
     return false;
-
-  if (EVP_DigestUpdate(ctx.get(), rand.data(), rand.size()) != 1)
-    return false;
+  }
 
   unsigned int mdlen = EVP_MD_size(meth);
 
   return EVP_DigestFinal_ex(ctx.get(), dest->data(), &mdlen) == 1;
 }
 
-bool GenerateRandData(uint8_t* buf, size_t len) {
+void GenerateRandData(uint8_t* buf, size_t len) {
   std::array<uint8_t, 16> rand;
   std::array<uint8_t, 32> md;
   EntropySource(rand.data(), rand.size());
-
-  if (!MessageDigest(&md, rand))
-    return false;
-
+  CHECK(MessageDigest(&md, rand));
   CHECK_LE(len, md.size());
   std::copy_n(std::begin(md), len, buf);
-  return true;
 }
+}  // namespace
 
 // The Retry Token is an encrypted token that is sent to the client
 // by the server as part of the path validation flow. The plaintext
@@ -139,7 +137,7 @@ bool GenerateRetryToken(
     size_t* tokenlen,
     const sockaddr* addr,
     const ngtcp2_cid* ocid,
-    std::array<uint8_t, TOKEN_SECRETLEN>* token_secret) {
+    const std::array<uint8_t, TOKEN_SECRETLEN>& token_secret) {
   std::array<uint8_t, 4096> plaintext;
 
   ngtcp2_crypto_ctx ctx;
@@ -159,15 +157,14 @@ bool GenerateRetryToken(
   TokenKey token_key;
   TokenIV token_iv;
 
-  if (!GenerateRandData(rand_data.data(), TOKEN_RAND_DATALEN))
-    return false;
+  GenerateRandData(rand_data.data(), TOKEN_RAND_DATALEN);
 
   if (!DeriveTokenKey(
           token_key.data(),
           token_iv.data(),
           rand_data.data(),
           TOKEN_RAND_DATALEN,
-          &ctx,
+          ctx,
           token_secret)) {
     return false;
   }
@@ -192,12 +189,13 @@ bool GenerateRetryToken(
   return true;
 }
 
+// True if the received retry token is invalid.
 bool InvalidRetryToken(
     Environment* env,
     ngtcp2_cid* ocid,
     const ngtcp2_pkt_hd* hd,
     const sockaddr* addr,
-    std::array<uint8_t, TOKEN_SECRETLEN>* token_secret,
+    const std::array<uint8_t, TOKEN_SECRETLEN>& token_secret,
     uint64_t verification_expiration) {
 
   ngtcp2_crypto_ctx ctx;
@@ -207,7 +205,7 @@ bool InvalidRetryToken(
   const size_t addrlen = SocketAddress::GetLength(addr);
 
   if (hd->tokenlen < TOKEN_RAND_DATALEN)
-    return  true;
+    return true;
 
   uint8_t* rand_data = hd->token + hd->tokenlen - TOKEN_RAND_DATALEN;
   uint8_t* ciphertext = hd->token;
@@ -221,7 +219,7 @@ bool InvalidRetryToken(
           token_iv.data(),
           rand_data,
           TOKEN_RAND_DATALEN,
-          &ctx,
+          ctx,
           token_secret)) {
     return true;
   }
