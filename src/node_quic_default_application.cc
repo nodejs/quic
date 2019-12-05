@@ -42,8 +42,9 @@ bool DefaultApplication::ReceiveStreamData(
     // empty stream frames to commit resources. Check that
     // here. Essentially, we only want to create a new stream
     // if the datalen is greater than 0, otherwise, we ignore
-    // the packet.
-    if (datalen == 0)
+    // the packet. ngtcp2 should be handling this for us,
+    // but we handle it just to be safe.
+    if (UNLIKELY(datalen == 0))
       return true;
 
     stream = Session()->CreateStream(stream_id);
@@ -62,7 +63,7 @@ void DefaultApplication::AcknowledgeStreamData(
   Debug(Session(), "Default QUIC Application acknowledging stream data");
   // It's possible that the stream has already been destroyed and
   // removed. If so, just silently ignore the ack
-  if (stream)
+  if (stream != nullptr)
     stream->AckedDataOffset(offset, datalen);
 }
 
@@ -126,7 +127,7 @@ bool DefaultApplication::SendStreamData(QuicStream* stream) {
   size_t remaining = stream->DrainInto(&vec);
   Debug(stream, "Sending %d bytes of stream data. Still writable? %s",
         remaining,
-        stream->IsWritable()?"yes":"no");
+        stream->IsWritable() ? "yes" : "no");
 
   // c and v are used to track the current serialization position
   // for each iteration of the for(;;) loop below.
