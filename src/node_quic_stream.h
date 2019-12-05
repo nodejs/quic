@@ -11,6 +11,7 @@
 #include "stream_base-inl.h"
 #include "v8.h"
 
+#include <string>
 #include <vector>
 
 namespace node {
@@ -60,6 +61,8 @@ class QuicHeader {
   virtual ~QuicHeader() {}
   virtual v8::MaybeLocal<v8::String> GetName(QuicApplication* app) const = 0;
   virtual v8::MaybeLocal<v8::String> GetValue(QuicApplication* app) const = 0;
+  virtual std::string GetName() const = 0;
+  virtual std::string GetValue() const = 0;
 };
 
 // QuicStream's are simple data flows that, fortunately, do not

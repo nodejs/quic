@@ -10,6 +10,7 @@
 
 #include <nghttp3/nghttp3.h>
 #include <algorithm>
+#include <string>
 
 namespace node {
 
@@ -59,6 +60,13 @@ Http3Header::Http3Header(
   value_.reset(value);
 }
 
+Http3Header::Http3Header(Http3Header&& other) noexcept :
+  token_(other.token_),
+  name_(std::move(other.name_)),
+  value_(std::move(other.value_)) {
+  other.token_ = -1;
+}
+
 MaybeLocal<String> Http3Header::GetName(QuicApplication* app) const {
   const char* header_name = to_http_header_name(token_);
   Environment* env = app->env();
@@ -95,6 +103,28 @@ MaybeLocal<String> Http3Header::GetValue(QuicApplication* app) const {
   return Http3RcBufferPointer::External::New(
       static_cast<Http3Application*>(app),
       value_);
+}
+
+std::string Http3Header::GetName() const {
+  const char* header_name = to_http_header_name(token_);
+  if (header_name != nullptr)
+    return std::string(header_name);
+
+  if (UNLIKELY(!name_))
+    return std::string();  // Empty String
+
+  return std::string(
+      reinterpret_cast<const char*>(name_.data()),
+      name_.len());
+}
+
+std::string Http3Header::GetValue() const {
+  if (UNLIKELY(!value_))
+    return std::string();  // Empty String
+
+  return std::string(
+      reinterpret_cast<const char*>(value_.data()),
+      value_.len());
 }
 
 namespace {

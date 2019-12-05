@@ -13,6 +13,7 @@
 #include <ngtcp2/ngtcp2.h>
 #include <nghttp3/nghttp3.h>
 
+#include <string>
 namespace node {
 
 namespace quic {
@@ -52,15 +53,13 @@ using Http3ConnectionPointer = DeleteFnPtr<nghttp3_conn, nghttp3_conn_del>;
 class Http3Header : public QuicHeader {
  public:
   Http3Header(int32_t token, nghttp3_rcbuf* name, nghttp3_rcbuf* value);
-  Http3Header(Http3Header&& other) noexcept :
-    token_(other.token_),
-    name_(std::move(other.name_)),
-    value_(std::move(other.value_)) {
-    other.token_ = -1;
-  }
+  Http3Header(Http3Header&& other) noexcept;
 
   v8::MaybeLocal<v8::String> GetName(QuicApplication* app) const override;
   v8::MaybeLocal<v8::String> GetValue(QuicApplication* app) const override;
+
+  std::string GetName() const override;
+  std::string GetValue() const override;
 
  private:
   int32_t token_ = -1;
