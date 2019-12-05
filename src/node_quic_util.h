@@ -141,7 +141,9 @@ class QuicCID {
 
   inline std::string ToHex() const;
 
-  const ngtcp2_cid* operator*() const { return &cid_; }
+  const ngtcp2_cid& operator*() const { return cid_; }
+  const ngtcp2_cid* operator->() const { return &cid_; }
+  const ngtcp2_cid* cid() const { return &cid_; }
 
   const uint8_t* data() const { return cid_.data; }
   size_t length() const { return cid_.datalen; }

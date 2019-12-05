@@ -484,7 +484,7 @@ void QuicSocket::SendInitialConnectionClose(
   ngtcp2_conn* conn;
   ngtcp2_conn_server_new(
     &conn,
-    *dcid,
+    dcid.cid(),
     &scid,
     &path,
     version,
@@ -555,7 +555,7 @@ bool QuicSocket::SendRetry(
           token.data(),
           &tokenlen,
           addr,
-          *dcid,
+          dcid.cid(),
           token_secret_)) {
     return false;
   }
@@ -568,7 +568,7 @@ bool QuicSocket::SendRetry(
   hd.token = nullptr;
   hd.tokenlen = 0;
   hd.len = 0;
-  hd.dcid = **scid;
+  hd.dcid = *scid.cid();
   hd.scid.datalen = NGTCP2_SV_SCIDLEN;
 
   EntropySource(hd.scid.data, NGTCP2_SV_SCIDLEN);
@@ -579,7 +579,7 @@ bool QuicSocket::SendRetry(
           reinterpret_cast<uint8_t*>(buf.data),
           NGTCP2_MAX_PKTLEN_IPV4,
           &hd,
-          *dcid,
+          dcid.cid(),
           token.data(),
           tokenlen);
   if (nwrite <= 0)
@@ -703,9 +703,9 @@ BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
       QuicSession::CreateServer(
           this,
           &server_session_config_,
-          *dcid,
+          dcid.cid(),
           addr,
-          *scid,
+          scid.cid(),
           ocid_ptr,
           version,
           server_alpn_,
