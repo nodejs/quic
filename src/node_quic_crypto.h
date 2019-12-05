@@ -68,14 +68,14 @@ bool GenerateRetryToken(
     size_t* tokenlen,
     const sockaddr* addr,
     const ngtcp2_cid* ocid,
-    std::array<uint8_t, TOKEN_SECRETLEN>* token_secret);
+    const std::array<uint8_t, TOKEN_SECRETLEN>& token_secret);
 
 bool InvalidRetryToken(
     Environment* env,
     ngtcp2_cid* ocid,
     const ngtcp2_pkt_hd* hd,
     const sockaddr* addr,
-    std::array<uint8_t, TOKEN_SECRETLEN>* token_secret,
+    const std::array<uint8_t, TOKEN_SECRETLEN>& token_secret,
     uint64_t verification_expiration);
 
 int VerifyHostnameIdentity(SSL* ssl, const char* hostname);
