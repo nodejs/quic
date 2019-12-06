@@ -650,7 +650,7 @@ performed on this `QuicSession`.
 added: REPLACEME
 -->
 
-* Type: {Number}
+* Type: {number}
 
 The total number of bytes the `QuicSession` is *currently* allowed to
 send to the connected peer.
@@ -781,7 +781,7 @@ The `QuicSocket` the `QuicSession` is associated with.
 added: REPLACEME
 -->
 
-* Type: {Boolean}
+* Type: {boolean}
 
 True if the `QuicSession` was closed due to QUIC stateless reset.
 
@@ -939,7 +939,7 @@ The callback *must* be invoked in order for the TLS handshake to continue.
 added: REPLACEME
 -->
 
-* `servername` {String} A DNS name to associate with the given context.
+* `servername` {string} A DNS name to associate with the given context.
 * `context` {tls.SecureContext} A TLS SecureContext to associate with the `servername`.
 
 TBD
@@ -1441,14 +1441,14 @@ A `BitInt` representing the number of server `QuicSession` instances that
 have been associated with this `QuicSocket`.
 
 #### quicsocket.setDiagnosticPacketLoss(options)
-<!-- YAML-
+<!-- YAML
 added: REPLACEME
 -->
 
 * `options` {Object}
-  * `rx` {double} A value in the range `0.0` to `1.0` that specifies the
+  * `rx` {number} A value in the range `0.0` to `1.0` that specifies the
     probability of received packet loss.
-  * `tx` {double} A value in the range `0.0` to `1.0` that specifies the
+  * `tx` {number} A value in the range `0.0` to `1.0` that specifies the
     probability of transmitted packet loss.
 
 The `quicsocket.setDiagnosticPacketLoss()` method is a diagnostic only tool
@@ -1917,7 +1917,7 @@ bytes that are read from the file.
 <!-- YAML
 added: REPLACEME
 -->
-* {headers} {Object}
+* `headers` {Object}
 
 TBD
 
@@ -1925,7 +1925,7 @@ TBD
 <!-- YAML
 added: REPLACEME
 -->
-* {headers} {Object}
+* `headers` {Object}
 
 TBD
 
@@ -1933,7 +1933,7 @@ TBD
 <!-- YAML
 added: REPLACEME
 -->
-* {headers} {Object}
+* `headers` {Object}
 
 TBD
 
