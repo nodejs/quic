@@ -1173,7 +1173,8 @@ QuicSession::QuicSession(
     QuicSessionConfig* config,
     Local<Object> wrap,
     const ngtcp2_cid* rcid,
-    const struct sockaddr* addr,
+    const SocketAddress& local_addr,
+    const struct sockaddr* remote_addr,
     const ngtcp2_cid* dcid,
     const ngtcp2_cid* ocid,
     uint32_t version,
@@ -1193,14 +1194,22 @@ QuicSession::QuicSession(
         options,
         QUIC_PREFERRED_ADDRESS_ACCEPT,  // Not used on server sessions
         initial_connection_close) {
-  InitServer(config, addr, dcid, ocid, version, qlog);
+  InitServer(
+      config,
+      local_addr,
+      remote_addr,
+      dcid,
+      ocid,
+      version,
+      qlog);
 }
 
 // Client QuicSession Constructor
 QuicSession::QuicSession(
     QuicSocket* socket,
     v8::Local<v8::Object> wrap,
-    const struct sockaddr* addr,
+    const SocketAddress& local_addr,
+    const struct sockaddr* remote_addr,
     SecureContext* context,
     Local<Value> early_transport_params,
     Local<Value> session_ticket,
@@ -1221,7 +1230,13 @@ QuicSession::QuicSession(
         nullptr,  // rcid only used on the server
         options,
         select_preferred_address_policy) {
-  CHECK(InitClient(addr, early_transport_params, session_ticket, dcid, qlog));
+  CHECK(InitClient(
+      local_addr,
+      remote_addr,
+      early_transport_params,
+      session_ticket,
+      dcid,
+      qlog));
 }
 
 // QuicSession is an abstract base class that defines the code used by both
@@ -1753,7 +1768,7 @@ void QuicSession::PathValidation(
     Debug(this,
           "Path validation succeeded. Updating local and remote addresses");
     SetLocalAddress(&path->local);
-    remote_address_.Update(path->remote.addr, path->remote.addrlen);
+    UpdateEndpoint(*path);
     IncrementStat(
         1, &session_stats_,
         &session_stats::path_validation_success_count);
@@ -1814,6 +1829,7 @@ bool QuicSession::ReceiveRetry() {
 bool QuicSession::Receive(
     ssize_t nread,
     const uint8_t* data,
+    const SocketAddress& local_addr,
     const struct sockaddr* remote_addr,
     unsigned int flags) {
   if (IsFlagSet(QUICSESSION_FLAG_DESTROYED)) {
@@ -1858,7 +1874,7 @@ bool QuicSession::Receive(
   // packet to the next so we have to look at the addr on
   // every packet.
   remote_address_ = remote_addr;
-  QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
+  QuicPath path(local_addr, remote_address_);
 
   {
     // These are within a scope to ensure that the InternalCallbackScope
@@ -2191,10 +2207,9 @@ bool QuicSession::SelectPreferredAddress(
 
 bool QuicSession::SendPacket(
   MallocedBuffer<uint8_t> buf,
-  ngtcp2_path_storage* path) {
+  const ngtcp2_path_storage& path) {
   sendbuf_.Push(std::move(buf));
-  // TODO(@jasnell): Update the local endpoint also?
-  remote_address_.Update(path->path.remote.addr, path->path.remote.addrlen);
+  UpdateEndpoint(path.path);
   return SendPacket("stream data");
 }
 
@@ -2242,7 +2257,13 @@ bool QuicSession::SendPacket(const char* diagnostic_label) {
   Debug(this, "There are %" PRIu64 " bytes in txbuf_ to send", txbuf_.Length());
   session_stats_.session_sent_at = uv_hrtime();
   ScheduleRetransmit();
+  Debug(this, "Sending to %s:%d from %s:%d",
+        remote_address_.GetAddress().c_str(),
+        remote_address_.GetPort(),
+        local_address_.GetAddress().c_str(),
+        local_address_.GetPort());
   int err = Socket()->SendPacket(
+      local_address_,
       remote_address_,
       &txbuf_,
       BaseObjectPtr<QuicSession>(this),
@@ -2611,12 +2632,18 @@ bool QuicSession::WritePackets(const char* diagnostic_label) {
     }
 
     data.Realloc(nwrite);
-    remote_address_.Update(path.path.remote.addr, path.path.remote.addrlen);
+    UpdateEndpoint(path.path);
     sendbuf_.Push(std::move(data));
     UpdateDataStats();
+
     if (!SendPacket(diagnostic_label))
       return false;
   }
+}
+
+void QuicSession::UpdateEndpoint(const ngtcp2_path& path) {
+  remote_address_.Update(path.remote.addr, path.remote.addrlen);
+  local_address_.Update(path.local.addr, path.local.addrlen);
 }
 
 bool QuicSession::SubmitInformation(
@@ -2692,7 +2719,8 @@ BaseObjectPtr<QuicSession> QuicSession::CreateServer(
     QuicSocket* socket,
     QuicSessionConfig* config,
     const ngtcp2_cid* rcid,
-    const struct sockaddr* addr,
+    const SocketAddress& local_addr,
+    const struct sockaddr* remote_addr,
     const ngtcp2_cid* dcid,
     const ngtcp2_cid* ocid,
     uint32_t version,
@@ -2712,7 +2740,8 @@ BaseObjectPtr<QuicSession> QuicSession::CreateServer(
           config,
           obj,
           rcid,
-          addr,
+          local_addr,
+          remote_addr,
           dcid,
           ocid,
           version,
@@ -2727,7 +2756,8 @@ BaseObjectPtr<QuicSession> QuicSession::CreateServer(
 
 void QuicSession::InitServer(
     QuicSessionConfig* config,
-    const struct sockaddr* addr,
+    const SocketAddress& local_addr,
+    const struct sockaddr* remote_addr,
     const ngtcp2_cid* dcid,
     const ngtcp2_cid* ocid,
     uint32_t version,
@@ -2738,8 +2768,9 @@ void QuicSession::InitServer(
   ExtendMaxStreamsBidi(DEFAULT_MAX_STREAMS_BIDI);
   ExtendMaxStreamsUni(DEFAULT_MAX_STREAMS_UNI);
 
-  remote_address_ = addr;
-  max_pktlen_ = GetMaxPktLen(addr);
+  local_address_ = local_addr;
+  remote_address_ = remote_addr;
+  max_pktlen_ = GetMaxPktLen(remote_addr);
 
   config->SetOriginalConnectionID(ocid);
   config->GenerateStatelessResetToken();
@@ -2749,7 +2780,7 @@ void QuicSession::InitServer(
   EntropySource(scid_.data, NGTCP2_SV_SCIDLEN);
   scid_.datalen = NGTCP2_SV_SCIDLEN;
 
-  QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
+  QuicPath path(local_addr, remote_address_);
 
   // NOLINTNEXTLINE(readability/pointer_notation)
   if (qlog == QlogMode::kEnabled) config->SetQlog({ *ocid, OnQlogWrite });
@@ -2838,6 +2869,7 @@ BaseObjectPtr<QuicSession> QuicSession::CreateClient(
       MakeDetachedBaseObject<QuicSession>(
           socket,
           obj,
+          *socket->GetLocalAddress(),
           addr,
           context,
           early_transport_params,
@@ -2854,15 +2886,22 @@ BaseObjectPtr<QuicSession> QuicSession::CreateClient(
 }
 
 bool QuicSession::InitClient(
-    const struct sockaddr* addr,
+    const SocketAddress& local_addr,
+    const struct sockaddr* remote_addr,
     Local<Value> early_transport_params,
     Local<Value> session_ticket,
     Local<Value> dcid_value,
     QlogMode qlog) {
   CHECK_NULL(connection_);
 
-  remote_address_ = addr;
-  max_pktlen_ = GetMaxPktLen(addr);
+  local_address_ = local_addr;
+  remote_address_ = remote_addr;
+  Debug(this, "Initializing connection from %s:%d to %s:%d",
+        local_address_.GetAddress().c_str(),
+        local_address_.GetPort(),
+        remote_address_.GetAddress().c_str(),
+        remote_address_.GetPort());
+  max_pktlen_ = GetMaxPktLen(remote_addr);
 
   QuicSessionConfig config(env());
   max_crypto_buffer_ = config.GetMaxCryptoBuffer();
@@ -2885,7 +2924,7 @@ bool QuicSession::InitClient(
     EntropySource(dcid.data, dcid.datalen);
   }
 
-  QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
+  QuicPath path(local_address_, remote_address_);
 
   if (qlog == QlogMode::kEnabled) config.SetQlog({ dcid, OnQlogWrite });
 
@@ -2901,6 +2940,8 @@ bool QuicSession::InitClient(
           config.data(),
           &alloc_info_,
           static_cast<QuicSession*>(this)), 0);
+
+  auto n = ngtcp2_conn_get_remote_addr(conn);
 
   connection_.reset(conn);
 

@@ -521,7 +521,7 @@ bool Http3Application::SendPendingData() {
 
     Debug(Session(), "Sending %" PRIu64 " bytes in serialized packet", nwrite);
     dest.Realloc(nwrite);
-    if (!Session()->SendPacket(std::move(dest), &path))
+    if (!Session()->SendPacket(std::move(dest), path))
       return false;
 
     if (fin)

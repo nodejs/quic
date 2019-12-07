@@ -581,7 +581,8 @@ class QuicSession : public AsyncWrap,
       QuicSocket* socket,
       QuicSessionConfig* config,
       const ngtcp2_cid* rcid,
-      const struct sockaddr* addr,
+      const SocketAddress& local_addr,
+      const struct sockaddr* remote_addr,
       const ngtcp2_cid* dcid,
       const ngtcp2_cid* ocid,
       uint32_t version,
@@ -638,7 +639,8 @@ class QuicSession : public AsyncWrap,
       QuicSessionConfig* config,
       v8::Local<v8::Object> wrap,
       const ngtcp2_cid* rcid,
-      const struct sockaddr* addr,
+      const SocketAddress& local_addr,
+      const struct sockaddr* remote_addr,
       const ngtcp2_cid* dcid,
       const ngtcp2_cid* ocid,
       uint32_t version,
@@ -651,7 +653,8 @@ class QuicSession : public AsyncWrap,
   QuicSession(
       QuicSocket* socket,
       v8::Local<v8::Object> wrap,
-      const struct sockaddr* addr,
+      const SocketAddress& local_addr,
+      const struct sockaddr* remote_addr,
       crypto::SecureContext* context,
       v8::Local<v8::Value> early_transport_params,
       v8::Local<v8::Value> session_ticket,
@@ -804,6 +807,7 @@ class QuicSession : public AsyncWrap,
   bool Receive(
       ssize_t nread,
       const uint8_t* data,
+      const SocketAddress& local_addr,
       const struct sockaddr* remote_addr,
       unsigned int flags);
 
@@ -824,7 +828,9 @@ class QuicSession : public AsyncWrap,
   // Causes pending QuicStream data to be serialized and sent
   bool SendStreamData(QuicStream* stream);
 
-  bool SendPacket(MallocedBuffer<uint8_t> buf, ngtcp2_path_storage* path);
+  bool SendPacket(
+      MallocedBuffer<uint8_t> buf,
+      const ngtcp2_path_storage& path);
 
   inline uint64_t GetMaxDataLeft();
 
@@ -986,7 +992,8 @@ class QuicSession : public AsyncWrap,
   // Initialize the QuicSession as a server
   void InitServer(
       QuicSessionConfig* config,
-      const struct sockaddr* addr,
+      const SocketAddress& local_addr,
+      const struct sockaddr* remote_addr,
       const ngtcp2_cid* dcid,
       const ngtcp2_cid* ocid,
       uint32_t version,
@@ -994,7 +1001,8 @@ class QuicSession : public AsyncWrap,
 
   // Initialize the QuicSession as a client
   bool InitClient(
-      const struct sockaddr* addr,
+      const SocketAddress& local_addr,
+      const struct sockaddr* remote_addr,
       v8::Local<v8::Value> early_transport_params,
       v8::Local<v8::Value> session_ticket,
       v8::Local<v8::Value> dcid,
@@ -1040,6 +1048,7 @@ class QuicSession : public AsyncWrap,
   bool WritePackets(const char* diagnostic_label = nullptr);
   void UpdateRecoveryStats();
   void UpdateDataStats();
+  void UpdateEndpoint(const ngtcp2_path& path);
 
   void VersionNegotiation(
       const ngtcp2_pkt_hd* hd,
@@ -1303,6 +1312,7 @@ class QuicSession : public AsyncWrap,
       uint64_t{NGTCP2_NO_ERROR}
   };
   ConnectionPointer connection_;
+  SocketAddress local_address_;
   SocketAddress remote_address_;
   uint32_t flags_ = 0;
   uint64_t initial_connection_close_ = NGTCP2_NO_ERROR;

@@ -207,7 +207,7 @@ bool DefaultApplication::SendStreamData(QuicStream* stream) {
 
     Debug(stream, "Sending %" PRIu64 " bytes in serialized packet", nwrite);
     dest.Realloc(nwrite);
-    if (!Session()->SendPacket(std::move(dest), &path))
+    if (!Session()->SendPacket(std::move(dest), path))
       return false;
 
     if (IsEmpty(v, c)) {

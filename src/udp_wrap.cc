@@ -702,10 +702,11 @@ void UDPWrap::OnRecv(uv_udp_t* handle,
                      const sockaddr* addr,
                      unsigned int flags) {
   UDPWrap* wrap = ContainerOf(&UDPWrap::handle_, handle);
-  wrap->listener()->OnRecv(nread, *buf, addr, flags);
+  wrap->listener()->OnRecv(handle, nread, *buf, addr, flags);
 }
 
-void UDPWrap::OnRecv(ssize_t nread,
+void UDPWrap::OnRecv(uv_udp_t* handle,
+                     ssize_t nread,
                      const uv_buf_t& buf_,
                      const sockaddr* addr,
                      unsigned int flags) {

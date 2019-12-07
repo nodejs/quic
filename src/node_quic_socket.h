@@ -137,7 +137,8 @@ class QuicSocket : public AsyncWrap,
   void ReportSendError(
       int error);
   int SendPacket(
-      const SocketAddress& dest,
+      const SocketAddress& local_addr,
+      const SocketAddress& remote_addr,
       QuicBuffer* buf,
       BaseObjectPtr<QuicSession> session,
       const char* diagnostic_label = nullptr);
@@ -163,7 +164,8 @@ class QuicSocket : public AsyncWrap,
 
   // Implementation for UDPWrapListener
   uv_buf_t OnAlloc(size_t suggested_size) override;
-  void OnRecv(ssize_t nread,
+  void OnRecv(uv_udp_t* handle,
+              ssize_t nread,
               const uv_buf_t& buf,
               const sockaddr* addr,
               unsigned int flags) override;
@@ -190,17 +192,18 @@ class QuicSocket : public AsyncWrap,
       size_t suggested_size,
       uv_buf_t* buf);
 
-  static void OnRecv(
-      uv_udp_t* handle,
-      ssize_t nread,
-      const uv_buf_t* buf,
-      const struct sockaddr* addr,
-      unsigned int flags);
+  // static void OnRecv(
+  //     uv_udp_t* handle,
+  //     ssize_t nread,
+  //     const uv_buf_t* buf,
+  //     const struct sockaddr* addr,
+  //     unsigned int flags);
 
   void Receive(
       ssize_t nread,
       AllocatedBuffer buf,
-      const struct sockaddr* addr,
+      const SocketAddress& local_addr,
+      const struct sockaddr* remote_addr,
       unsigned int flags);
 
   void SendInitialConnectionClose(
@@ -230,7 +233,8 @@ class QuicSocket : public AsyncWrap,
       const QuicCID& scid,
       ssize_t nread,
       const uint8_t* data,
-      const struct sockaddr* addr,
+      const SocketAddress& local_addr,
+      const struct sockaddr* remote_addr,
       unsigned int flags);
 
   void IncrementSocketAddressCounter(const SocketAddress& addr);

@@ -317,6 +317,7 @@ uv_buf_t QuicSocket::OnAlloc(size_t suggested_size) {
 }
 
 void QuicSocket::OnRecv(
+    uv_udp_t* handle,
     ssize_t nread,
     const uv_buf_t& buf_,
     const struct sockaddr* addr,
@@ -332,7 +333,11 @@ void QuicSocket::OnRecv(
     return;
   }
 
-  Receive(nread, std::move(buf), addr, flags);
+  SocketAddress local_address;
+  if (handle != nullptr)
+    SocketAddress::FromSockName(handle, &local_address);
+
+  Receive(nread, std::move(buf), local_address, addr, flags);
 }
 
 namespace {
@@ -349,7 +354,8 @@ bool IsShortHeader(
 void QuicSocket::Receive(
     ssize_t nread,
     AllocatedBuffer buf,
-    const struct sockaddr* addr,
+    const SocketAddress& local_addr,
+    const struct sockaddr* remote_addr,
     unsigned int flags) {
   Debug(this, "Receiving %d bytes from the UDP socket.", nread);
 
@@ -421,7 +427,8 @@ void QuicSocket::Receive(
           scid,
           nread,
           data,
-          addr,
+          local_addr,
+          remote_addr,
           flags);
 
       // There are many reasons why a server QuicSession could not be
@@ -443,7 +450,7 @@ void QuicSocket::Receive(
           // Attempt to send a stateless reset. If it fails, we just ignore
           // TODO(@jasnell): Need to verify that stateless reset is occurring
           // correctly. Also need to determine how to test.
-          if (!SendStatelessReset(dcid, addr)) {
+          if (!SendStatelessReset(dcid, remote_addr)) {
             IncrementSocketStat(
                 1, &socket_stats_,
                 &socket_stats::packets_ignored);
@@ -469,7 +476,7 @@ void QuicSocket::Receive(
 
   // If the packet could not successfully processed for any reason (possibly
   // due to being malformed or malicious in some way) we ignore it completely.
-  if (!session->Receive(nread, data, addr, flags)) {
+  if (!session->Receive(nread, data, local_addr, remote_addr, flags)) {
     IncrementSocketStat(1, &socket_stats_, &socket_stats::packets_ignored);
     return;
   }
@@ -682,7 +689,8 @@ BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
     const QuicCID& scid,
     ssize_t nread,
     const uint8_t* data,
-    const struct sockaddr* addr,
+    const SocketAddress& local_addr,
+    const struct sockaddr* remote_addr,
     unsigned int flags) {
   HandleScope handle_scope(env()->isolate());
   Context::Scope context_scope(env()->context());
@@ -700,11 +708,11 @@ BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
   // acceptable initial packet with the right QUIC version.
   switch (QuicSession::Accept(&hd, version, data, nread)) {
     case QuicSession::InitialPacketResult::PACKET_VERSION:
-      SendVersionNegotiation(version, dcid, scid, addr);
+      SendVersionNegotiation(version, dcid, scid, remote_addr);
       return {};
     case QuicSession::InitialPacketResult::PACKET_RETRY:
       Debug(this, "0RTT Packet. Sending retry.");
-      SendRetry(version, dcid, scid, addr);
+      SendRetry(version, dcid, scid, remote_addr);
       return {};
     case QuicSession::InitialPacketResult::PACKET_IGNORE:
       return {};
@@ -722,7 +730,8 @@ BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
   // Check to see if the number of connections for this peer has been exceeded.
   // If the count has been exceeded, shutdown the connection immediately
   // after the initial keys are installed.
-  if (GetCurrentSocketAddressCounter(addr) >= max_connections_per_host_) {
+  if (GetCurrentSocketAddressCounter(remote_addr) >=
+      max_connections_per_host_) {
     Debug(this, "Connection count for address exceeded");
     initial_connection_close = NGTCP2_SERVER_BUSY;
   }
@@ -743,21 +752,21 @@ BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
       // will check to see if the given address is in the validated_addrs_
       // LRU cache. If it is, we'll skip the validation step entirely.
       // The VALIDATE_ADDRESS_LRU option is disable by default.
-    if (!IsValidatedAddress(addr)) {
+    if (!IsValidatedAddress(remote_addr)) {
       Debug(this, "Performing explicit address validation.");
       if (InvalidRetryToken(
               env(),
               &ocid,
               &hd,
-              addr,
+              remote_addr,
               token_secret_,
               retry_token_expiration_)) {
         Debug(this, "A valid retry token was not found. Sending retry.");
-        SendRetry(version, dcid, scid, addr);
+        SendRetry(version, dcid, scid, remote_addr);
         return {};
       }
       Debug(this, "A valid retry token was found. Continuing.");
-      SetValidatedAddress(addr);
+      SetValidatedAddress(remote_addr);
       ocid_ptr = &ocid;
     } else {
       Debug(this, "Skipping validation for recently validated address.");
@@ -769,7 +778,8 @@ BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
           this,
           &server_session_config_,
           dcid.cid(),
-          addr,
+          local_addr,
+          remote_addr,
           scid.cid(),
           ocid_ptr,
           version,
@@ -837,7 +847,8 @@ ReqWrap<uv_udp_send_t>* QuicSocket::CreateSendWrap(size_t msg_size) {
 }
 
 int QuicSocket::SendPacket(
-    const SocketAddress& dest,
+    const SocketAddress& local_addr,
+    const SocketAddress& remote_addr,
     QuicBuffer* buffer,
     BaseObjectPtr<QuicSession> session,
     const char* diagnostic_label) {
@@ -849,8 +860,8 @@ int QuicSocket::SendPacket(
     return 0;
 
   Debug(this, "Sending to %s at port %d",
-        dest.GetAddress().c_str(),
-        dest.GetPort());
+        remote_addr.GetAddress().c_str(),
+        remote_addr.GetPort());
 
   // Remaining Length should never be zero at this point
   CHECK_GT(buffer->RemainingLength(), 0);
@@ -872,7 +883,7 @@ int QuicSocket::SendPacket(
   }
 
   last_created_send_wrap_ = nullptr;
-  int err = udp_->Send(vec.data(), vec.size(), dest.data());
+  int err = udp_->Send(vec.data(), vec.size(), remote_addr.data());
 
   Debug(this, "Advancing read head %" PRIu64 " status = %d",
         total_length, err);
