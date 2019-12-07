@@ -742,7 +742,7 @@ class QuicSession : public AsyncWrap,
   // value can change over the lifetime of the QuicSession.
   // The fact that the session is not tied intrinsically to
   // a single address is one of the benefits of QUIC.
-  const SocketAddress* GetRemoteAddress() const { return &remote_address_; }
+  const SocketAddress& GetRemoteAddress() const { return remote_address_; }
 
   const ngtcp2_cid* scid() const { return &scid_; }
 

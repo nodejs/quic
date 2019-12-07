@@ -2049,7 +2049,7 @@ void QuicSession::RemoveFromSocket() {
     socket_->DisassociateCID(QuicCID(&cid));
 
   Debug(this, "Removed from the QuicSocket.");
-  socket_->RemoveSession(QuicCID(scid_), GetRemoteAddress()->data());
+  socket_->RemoveSession(QuicCID(scid_), remote_address_);
   socket_.reset();
 }
 
@@ -2243,7 +2243,7 @@ bool QuicSession::SendPacket(const char* diagnostic_label) {
   session_stats_.session_sent_at = uv_hrtime();
   ScheduleRetransmit();
   int err = Socket()->SendPacket(
-      remote_address_.data(),
+      remote_address_,
       &txbuf_,
       BaseObjectPtr<QuicSession>(this),
       diagnostic_label);
@@ -3410,7 +3410,7 @@ void QuicSessionGetRemoteAddress(
   Environment* env = session->env();
   CHECK(args[0]->IsObject());
   args.GetReturnValue().Set(
-      session->GetRemoteAddress()->ToJS(env, args[0].As<Object>()));
+      session->GetRemoteAddress().ToJS(env, args[0].As<Object>()));
 }
 
 void QuicSessionGetCertificate(

@@ -247,7 +247,7 @@ void QuicSocket::AddSession(
     const QuicCID& cid,
     BaseObjectPtr<QuicSession> session) {
   sessions_[cid.ToStr()] = session;
-  IncrementSocketAddressCounter(session->GetRemoteAddress()->data());
+  IncrementSocketAddressCounter(session->GetRemoteAddress());
   IncrementSocketStat(
       1, &socket_stats_,
       session->IsServer() ?
@@ -485,7 +485,9 @@ int QuicSocket::ReceiveStop() {
   return udp_->RecvStop();
 }
 
-void QuicSocket::RemoveSession(const QuicCID& cid, const sockaddr* addr) {
+void QuicSocket::RemoveSession(
+    const QuicCID& cid,
+    const SocketAddress& addr) {
   sessions_.erase(cid.ToStr());
   DecrementSocketAddressCounter(addr);
 }
@@ -781,18 +783,18 @@ BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
   return session;
 }
 
-void QuicSocket::IncrementSocketAddressCounter(const sockaddr* addr) {
-  addr_counts_[addr]++;
+void QuicSocket::IncrementSocketAddressCounter(const SocketAddress& addr) {
+  addr_counts_[addr.data()]++;
 }
 
-void QuicSocket::DecrementSocketAddressCounter(const sockaddr* addr) {
-  auto it = addr_counts_.find(addr);
+void QuicSocket::DecrementSocketAddressCounter(const SocketAddress& addr) {
+  auto it = addr_counts_.find(addr.data());
   if (it == std::end(addr_counts_))
     return;
   it->second--;
   // Remove the address if the counter reaches zero again.
   if (it->second == 0)
-    addr_counts_.erase(addr);
+    addr_counts_.erase(addr.data());
 }
 
 size_t QuicSocket::GetCurrentSocketAddressCounter(const sockaddr* addr) {
@@ -835,7 +837,7 @@ ReqWrap<uv_udp_send_t>* QuicSocket::CreateSendWrap(size_t msg_size) {
 }
 
 int QuicSocket::SendPacket(
-    const sockaddr* dest,
+    const SocketAddress& dest,
     QuicBuffer* buffer,
     BaseObjectPtr<QuicSession> session,
     const char* diagnostic_label) {
@@ -847,8 +849,8 @@ int QuicSocket::SendPacket(
     return 0;
 
   Debug(this, "Sending to %s at port %d",
-        SocketAddress::GetAddress(dest).c_str(),
-        SocketAddress::GetPort(dest));
+        dest.GetAddress().c_str(),
+        dest.GetPort());
 
   // Remaining Length should never be zero at this point
   CHECK_GT(buffer->RemainingLength(), 0);
@@ -870,7 +872,7 @@ int QuicSocket::SendPacket(
   }
 
   last_created_send_wrap_ = nullptr;
-  int err = udp_->Send(vec.data(), vec.size(), dest);
+  int err = udp_->Send(vec.data(), vec.size(), dest.data());
 
   Debug(this, "Advancing read head %" PRIu64 " status = %d",
         total_length, err);

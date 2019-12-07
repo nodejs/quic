@@ -133,11 +133,11 @@ class QuicSocket : public AsyncWrap,
   int ReceiveStop();
   void RemoveSession(
       const QuicCID& cid,
-      const sockaddr* addr);
+      const SocketAddress& addr);
   void ReportSendError(
       int error);
   int SendPacket(
-      const sockaddr* dest,
+      const SocketAddress& dest,
       QuicBuffer* buf,
       BaseObjectPtr<QuicSession> session,
       const char* diagnostic_label = nullptr);
@@ -233,8 +233,8 @@ class QuicSocket : public AsyncWrap,
       const struct sockaddr* addr,
       unsigned int flags);
 
-  void IncrementSocketAddressCounter(const sockaddr* addr);
-  void DecrementSocketAddressCounter(const sockaddr* addr);
+  void IncrementSocketAddressCounter(const SocketAddress& addr);
+  void DecrementSocketAddressCounter(const SocketAddress& addr);
   size_t GetCurrentSocketAddressCounter(const sockaddr* addr);
 
   void IncrementPendingCallbacks() { pending_callbacks_++; }
