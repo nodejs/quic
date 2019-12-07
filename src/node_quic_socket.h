@@ -192,13 +192,6 @@ class QuicSocket : public AsyncWrap,
       size_t suggested_size,
       uv_buf_t* buf);
 
-  // static void OnRecv(
-  //     uv_udp_t* handle,
-  //     ssize_t nread,
-  //     const uv_buf_t* buf,
-  //     const struct sockaddr* addr,
-  //     unsigned int flags);
-
   void Receive(
       ssize_t nread,
       AllocatedBuffer buf,
