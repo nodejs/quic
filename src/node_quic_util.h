@@ -111,8 +111,16 @@ struct QuicPath : public ngtcp2_path {
   QuicPath(
       SocketAddress* local,
       SocketAddress* remote) {
-    ngtcp2_addr_init(&this->local, **local, local->GetLength(), nullptr);
-    ngtcp2_addr_init(&this->remote, **remote, remote->GetLength(), nullptr);
+    ngtcp2_addr_init(
+        &this->local,
+        local->data(),
+        local->GetLength(),
+        nullptr);
+    ngtcp2_addr_init(
+        &this->remote,
+        local->data(),
+        remote->GetLength(),
+        nullptr);
   }
 };
 

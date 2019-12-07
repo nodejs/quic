@@ -140,7 +140,15 @@ SocketAddress& SocketAddress::operator=(const SocketAddress& addr) {
   return *this;
 }
 
-const sockaddr* SocketAddress::operator*() const {
+const sockaddr& SocketAddress::operator*() const {
+  return *this->data();
+}
+
+const sockaddr* SocketAddress::operator->() const {
+  return this->data();
+}
+
+const sockaddr* SocketAddress::data() const {
   return reinterpret_cast<const sockaddr*>(&address_);
 }
 
@@ -228,7 +236,7 @@ SocketAddress* SocketAddress::New(
 v8::Local<v8::Object> SocketAddress::ToJS(
     Environment* env,
     v8::Local<v8::Object> info) const {
-  return AddressToJS(env, this->operator*(), info);
+  return AddressToJS(env, this->data(), info);
 }
 
 }  // namespace node

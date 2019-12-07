@@ -247,7 +247,7 @@ void QuicSocket::AddSession(
     const QuicCID& cid,
     BaseObjectPtr<QuicSession> session) {
   sessions_[cid.ToStr()] = session;
-  IncrementSocketAddressCounter(**session->GetRemoteAddress());
+  IncrementSocketAddressCounter(session->GetRemoteAddress()->data());
   IncrementSocketStat(
       1, &socket_stats_,
       session->IsServer() ?
@@ -1110,7 +1110,9 @@ void QuicSocketListen(const FunctionCallbackInfo<Value>& args) {
 
   SocketAddress* local = socket->GetLocalAddress();
   sockaddr_storage preferred_address_storage;
-  const sockaddr* preferred_address = local != nullptr ? **local : nullptr;
+  const sockaddr* preferred_address =
+      local != nullptr ?
+          local->data() : nullptr;
   if (args[1]->IsString()) {
     node::Utf8Value preferred_address_host(args.GetIsolate(), args[1]);
     int32_t preferred_address_family;

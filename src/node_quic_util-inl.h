@@ -33,7 +33,7 @@ std::string QuicCID::ToHex() const {
 ngtcp2_addr* ToNgtcp2Addr(SocketAddress* addr, ngtcp2_addr* dest) {
   if (dest == nullptr)
     dest = new ngtcp2_addr();
-  return ngtcp2_addr_init(dest, **addr, addr->GetLength(), nullptr);
+  return ngtcp2_addr_init(dest, addr->data(), addr->GetLength(), nullptr);
 }
 
 size_t GetMaxPktLen(const sockaddr* addr) {

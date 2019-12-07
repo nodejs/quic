@@ -1977,7 +1977,7 @@ bool QuicSession::ReceivePacket(
               GetNegotiatedVersion(),
               QuicCID(scid()),
               QuicCID(rcid()),
-              *remote_address_);
+              remote_address_.data());
           ImmediateClose();
           break;
         }
@@ -2049,7 +2049,7 @@ void QuicSession::RemoveFromSocket() {
     socket_->DisassociateCID(QuicCID(&cid));
 
   Debug(this, "Removed from the QuicSocket.");
-  socket_->RemoveSession(QuicCID(scid_), **GetRemoteAddress());
+  socket_->RemoveSession(QuicCID(scid_), GetRemoteAddress()->data());
   socket_.reset();
 }
 
@@ -2243,7 +2243,7 @@ bool QuicSession::SendPacket(const char* diagnostic_label) {
   session_stats_.session_sent_at = uv_hrtime();
   ScheduleRetransmit();
   int err = Socket()->SendPacket(
-      *remote_address_,
+      remote_address_.data(),
       &txbuf_,
       BaseObjectPtr<QuicSession>(this),
       diagnostic_label);

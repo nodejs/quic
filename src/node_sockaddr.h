@@ -54,7 +54,9 @@ class SocketAddress {
 
   inline SocketAddress& operator=(const SocketAddress& other);
 
-  inline const sockaddr* operator*() const;
+  inline const sockaddr& operator*() const;
+  inline const sockaddr* operator->() const;
+  inline const sockaddr* data() const;
 
   inline size_t GetLength() const;
 
