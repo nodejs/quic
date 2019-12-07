@@ -73,7 +73,23 @@ class SocketAddress {
       SocketAddress* addr = nullptr);
 
   inline static SocketAddress* FromSockName(
+      const uv_tcp_t* handle,
+      SocketAddress* addr = nullptr);
+
+  inline static SocketAddress* FromSockName(
+      const uv_tcp_t& handle,
+      SocketAddress* addr = nullptr);
+
+  inline static SocketAddress* FromSockName(
       uv_udp_t* handle,
+      SocketAddress* addr = nullptr);
+
+  inline static SocketAddress* FromSockName(
+      const uv_udp_t* handle,
+      SocketAddress* addr = nullptr);
+
+  inline static SocketAddress* FromSockName(
+      const uv_udp_t& handle,
       SocketAddress* addr = nullptr);
 
   inline static SocketAddress* FromPeerName(
@@ -81,7 +97,23 @@ class SocketAddress {
       SocketAddress* addr = nullptr);
 
   inline static SocketAddress* FromPeerName(
+      const uv_tcp_t* handle,
+      SocketAddress* addr = nullptr);
+
+  inline static SocketAddress* FromPeerName(
+      const uv_tcp_t& handle,
+      SocketAddress* addr = nullptr);
+
+  inline static SocketAddress* FromPeerName(
       uv_udp_t* handle,
+      SocketAddress* addr = nullptr);
+
+  inline static SocketAddress* FromPeerName(
+      const uv_udp_t* handle,
+      SocketAddress* addr = nullptr);
+
+  inline static SocketAddress* FromPeerName(
+      const uv_udp_t& handle,
       SocketAddress* addr = nullptr);
 
   inline static SocketAddress* New(
@@ -99,6 +131,12 @@ class SocketAddress {
   static SocketAddress* FromUVHandle(
       F fn,
       T* handle,
+      SocketAddress* addr = nullptr);
+
+  template <typename T, typename F>
+  static SocketAddress* FromUVHandle(
+      F fn,
+      const T* handle,
       SocketAddress* addr = nullptr);
 
   sockaddr_storage address_;

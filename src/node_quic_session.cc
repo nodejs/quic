@@ -1814,7 +1814,7 @@ bool QuicSession::ReceiveRetry() {
 bool QuicSession::Receive(
     ssize_t nread,
     const uint8_t* data,
-    const struct sockaddr* addr,
+    const struct sockaddr* remote_addr,
     unsigned int flags) {
   if (IsFlagSet(QUICSESSION_FLAG_DESTROYED)) {
     Debug(this, "Ignoring packet because session is destroyed");
@@ -1857,7 +1857,7 @@ bool QuicSession::Receive(
   // It's possible for the remote address to change from one
   // packet to the next so we have to look at the addr on
   // every packet.
-  remote_address_ = addr;
+  remote_address_ = remote_addr;
   QuicPath path(Socket()->GetLocalAddress(), &remote_address_);
 
   {

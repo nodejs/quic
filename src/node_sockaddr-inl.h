@@ -184,6 +184,18 @@ SocketAddress* SocketAddress::FromUVHandle(
   return addr;
 }
 
+template <typename T, typename F>
+SocketAddress* SocketAddress::FromUVHandle(
+    F fn,
+    const T* handle,
+    SocketAddress* addr) {
+  if (addr == nullptr)
+    addr = new SocketAddress();
+  int len = sizeof(sockaddr_storage);
+  fn(handle, reinterpret_cast<sockaddr*>(&addr->address_), &len);
+  return addr;
+}
+
 SocketAddress* SocketAddress::FromSockName(
     uv_tcp_t* handle,
     SocketAddress* addr) {
@@ -191,9 +203,33 @@ SocketAddress* SocketAddress::FromSockName(
 }
 
 SocketAddress* SocketAddress::FromSockName(
+    const uv_tcp_t* handle,
+    SocketAddress* addr) {
+  return FromUVHandle<uv_tcp_t>(uv_tcp_getsockname, handle, addr);
+}
+
+SocketAddress* SocketAddress::FromSockName(
+    const uv_tcp_t& handle,
+    SocketAddress* addr) {
+  return FromUVHandle<uv_tcp_t>(uv_tcp_getsockname, &handle, addr);
+}
+
+SocketAddress* SocketAddress::FromSockName(
     uv_udp_t* handle,
     SocketAddress* addr) {
   return FromUVHandle<uv_udp_t>(uv_udp_getsockname, handle, addr);
+}
+
+SocketAddress* SocketAddress::FromSockName(
+    const uv_udp_t* handle,
+    SocketAddress* addr) {
+  return FromUVHandle<uv_udp_t>(uv_udp_getsockname, handle, addr);
+}
+
+SocketAddress* SocketAddress::FromSockName(
+    const uv_udp_t& handle,
+    SocketAddress* addr) {
+  return FromUVHandle<uv_udp_t>(uv_udp_getsockname, &handle, addr);
 }
 
 SocketAddress* SocketAddress::FromPeerName(
@@ -203,9 +239,33 @@ SocketAddress* SocketAddress::FromPeerName(
 }
 
 SocketAddress* SocketAddress::FromPeerName(
+    const uv_tcp_t* handle,
+    SocketAddress* addr) {
+  return FromUVHandle<uv_tcp_t>(uv_tcp_getpeername, handle, addr);
+}
+
+SocketAddress* SocketAddress::FromPeerName(
+    const uv_tcp_t& handle,
+    SocketAddress* addr) {
+  return FromUVHandle<uv_tcp_t>(uv_tcp_getpeername, &handle, addr);
+}
+
+SocketAddress* SocketAddress::FromPeerName(
     uv_udp_t* handle,
     SocketAddress* addr) {
   return FromUVHandle<uv_udp_t>(uv_udp_getpeername, handle, addr);
+}
+
+SocketAddress* SocketAddress::FromPeerName(
+    const uv_udp_t* handle,
+    SocketAddress* addr) {
+  return FromUVHandle<uv_udp_t>(uv_udp_getpeername, handle, addr);
+}
+
+SocketAddress* SocketAddress::FromPeerName(
+    const uv_udp_t& handle,
+    SocketAddress* addr) {
+  return FromUVHandle<uv_udp_t>(uv_udp_getpeername, &handle, addr);
 }
 
 SocketAddress* SocketAddress::New(

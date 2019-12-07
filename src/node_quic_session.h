@@ -804,7 +804,7 @@ class QuicSession : public AsyncWrap,
   bool Receive(
       ssize_t nread,
       const uint8_t* data,
-      const struct sockaddr* addr,
+      const struct sockaddr* remote_addr,
       unsigned int flags);
 
   // Receive a chunk of QUIC stream data received from the peer
