@@ -23,7 +23,6 @@ using v8::Array;
 using v8::Context;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
-using v8::Integer;
 using v8::Isolate;
 using v8::Local;
 using v8::Object;
@@ -336,9 +335,9 @@ void QuicStream::ReceiveData(
       // Reading can be paused while we are processing. If that's
       // the case, we still want to acknowledge the current bytes
       // so that pausing does not throw off our flow control.
-      if (read_paused)
+      if (read_paused) {
         inbound_consumed_data_while_paused_ += avail;
-      else {
+      } else {
         IncrementStat(
             avail,
             &stream_stats_,

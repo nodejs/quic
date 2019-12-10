@@ -599,8 +599,7 @@ bool QuicSocket::SendStatelessReset(
         NGTCP2_MAX_PKTLEN_IPV4,
         token,
         random,
-        RANDLEN
-      );
+        RANDLEN);
     if (nwrite <= 0)
       return false;
     buf.Realloc(nwrite);

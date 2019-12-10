@@ -16,7 +16,6 @@ namespace node {
 
 using v8::Eternal;
 using v8::MaybeLocal;
-using v8::Number;
 using v8::String;
 using v8::Value;
 
@@ -510,7 +509,7 @@ bool Http3Application::SendPendingData() {
         //   }
         //   continue;
       }
-      //Session()->SetLastError(QUIC_ERROR_APPLICATION, nwrite);
+      //  Session()->SetLastError(QUIC_ERROR_APPLICATION, nwrite);
       return false;
     }
 
