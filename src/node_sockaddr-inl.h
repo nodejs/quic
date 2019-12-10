@@ -12,7 +12,6 @@
 
 namespace node {
 
-namespace {
 // Fun hash combine trick based on a variadic template that
 // I came across a while back but can't remember where. Will add an attribution
 // if I can find the source.
@@ -23,7 +22,6 @@ inline void hash_combine(size_t* seed, const T& value, Args... rest) {
     *seed ^= std::hash<T>{}(value) + 0x9e3779b9 + (*seed << 6) + (*seed >> 2);
     hash_combine(seed, rest...);
 }
-}  // namespace
 
 size_t SocketAddress::Hash::operator()(const sockaddr* addr) const {
   size_t hash = 0;

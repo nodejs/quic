@@ -28,10 +28,7 @@
 namespace node {
 
 using crypto::EntropySource;
-using v8::Array;
-using v8::Integer;
 using v8::Local;
-using v8::Object;
 using v8::String;
 using v8::Value;
 

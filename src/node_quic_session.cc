@@ -607,7 +607,6 @@ void JSQuicSessionListener::OnSessionTicket(int size, SSL_SESSION* session) {
   Session()->MakeCallback(
       env->quic_on_session_ticket_function(),
       arraysize(argv), argv);
-
 }
 
 void JSQuicSessionListener::OnSessionSilentClose(

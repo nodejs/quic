@@ -55,7 +55,7 @@ enum QuicStreamStatsIdx : int {
 // pair. QuicApplication implementations that support headers
 // per stream must create a specialization of the Header class.
 class QuicHeader {
-  public:
+ public:
   QuicHeader() {}
 
   virtual ~QuicHeader() {}
