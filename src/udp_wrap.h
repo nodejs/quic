@@ -46,8 +46,7 @@ class UDPListener {
   // Called right after data is received from the socket, and includes
   // information about the source address. If `nread` is negative, an error
   // has occurred, and it represents a libuv error code.
-  virtual void OnRecv(uv_udp_t* handle,
-                      ssize_t nread,
+  virtual void OnRecv(ssize_t nread,
                       const uv_buf_t& buf,
                       const sockaddr* addr,
                       unsigned int flags) = 0;
@@ -156,8 +155,7 @@ class UDPWrap final : public HandleWrap,
 
   // UDPListener implementation
   uv_buf_t OnAlloc(size_t suggested_size) override;
-  void OnRecv(uv_udp_t* handle,
-              ssize_t nread,
+  void OnRecv(ssize_t nread,
               const uv_buf_t& buf,
               const sockaddr* addr,
               unsigned int flags) override;

@@ -69,19 +69,11 @@ class SocketAddress {
   inline void Update(uint8_t* data, size_t len);
 
   inline static SocketAddress* FromSockName(
-      uv_tcp_t* handle,
-      SocketAddress* addr = nullptr);
-
-  inline static SocketAddress* FromSockName(
       const uv_tcp_t* handle,
       SocketAddress* addr = nullptr);
 
   inline static SocketAddress* FromSockName(
       const uv_tcp_t& handle,
-      SocketAddress* addr = nullptr);
-
-  inline static SocketAddress* FromSockName(
-      uv_udp_t* handle,
       SocketAddress* addr = nullptr);
 
   inline static SocketAddress* FromSockName(
@@ -93,19 +85,11 @@ class SocketAddress {
       SocketAddress* addr = nullptr);
 
   inline static SocketAddress* FromPeerName(
-      uv_tcp_t* handle,
-      SocketAddress* addr = nullptr);
-
-  inline static SocketAddress* FromPeerName(
       const uv_tcp_t* handle,
       SocketAddress* addr = nullptr);
 
   inline static SocketAddress* FromPeerName(
       const uv_tcp_t& handle,
-      SocketAddress* addr = nullptr);
-
-  inline static SocketAddress* FromPeerName(
-      uv_udp_t* handle,
       SocketAddress* addr = nullptr);
 
   inline static SocketAddress* FromPeerName(

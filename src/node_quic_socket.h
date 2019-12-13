@@ -164,8 +164,7 @@ class QuicSocket : public AsyncWrap,
 
   // Implementation for UDPWrapListener
   uv_buf_t OnAlloc(size_t suggested_size) override;
-  void OnRecv(uv_udp_t* handle,
-              ssize_t nread,
+  void OnRecv(ssize_t nread,
               const uv_buf_t& buf,
               const sockaddr* addr,
               unsigned int flags) override;

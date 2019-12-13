@@ -197,12 +197,6 @@ SocketAddress* SocketAddress::FromUVHandle(
 }
 
 SocketAddress* SocketAddress::FromSockName(
-    uv_tcp_t* handle,
-    SocketAddress* addr) {
-  return FromUVHandle<uv_tcp_t>(uv_tcp_getsockname, handle, addr);
-}
-
-SocketAddress* SocketAddress::FromSockName(
     const uv_tcp_t* handle,
     SocketAddress* addr) {
   return FromUVHandle<uv_tcp_t>(uv_tcp_getsockname, handle, addr);
@@ -212,12 +206,6 @@ SocketAddress* SocketAddress::FromSockName(
     const uv_tcp_t& handle,
     SocketAddress* addr) {
   return FromUVHandle<uv_tcp_t>(uv_tcp_getsockname, &handle, addr);
-}
-
-SocketAddress* SocketAddress::FromSockName(
-    uv_udp_t* handle,
-    SocketAddress* addr) {
-  return FromUVHandle<uv_udp_t>(uv_udp_getsockname, handle, addr);
 }
 
 SocketAddress* SocketAddress::FromSockName(
@@ -233,12 +221,6 @@ SocketAddress* SocketAddress::FromSockName(
 }
 
 SocketAddress* SocketAddress::FromPeerName(
-    uv_tcp_t* handle,
-    SocketAddress* addr) {
-  return FromUVHandle<uv_tcp_t>(uv_tcp_getpeername, handle, addr);
-}
-
-SocketAddress* SocketAddress::FromPeerName(
     const uv_tcp_t* handle,
     SocketAddress* addr) {
   return FromUVHandle<uv_tcp_t>(uv_tcp_getpeername, handle, addr);
@@ -248,12 +230,6 @@ SocketAddress* SocketAddress::FromPeerName(
     const uv_tcp_t& handle,
     SocketAddress* addr) {
   return FromUVHandle<uv_tcp_t>(uv_tcp_getpeername, &handle, addr);
-}
-
-SocketAddress* SocketAddress::FromPeerName(
-    uv_udp_t* handle,
-    SocketAddress* addr) {
-  return FromUVHandle<uv_udp_t>(uv_udp_getpeername, handle, addr);
 }
 
 SocketAddress* SocketAddress::FromPeerName(

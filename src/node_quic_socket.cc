@@ -317,7 +317,6 @@ uv_buf_t QuicSocket::OnAlloc(size_t suggested_size) {
 }
 
 void QuicSocket::OnRecv(
-    uv_udp_t* handle,
     ssize_t nread,
     const uv_buf_t& buf_,
     const struct sockaddr* addr,
@@ -334,8 +333,7 @@ void QuicSocket::OnRecv(
   }
 
   SocketAddress local_address;
-  if (handle != nullptr)
-    SocketAddress::FromSockName(handle, &local_address);
+  udp_->GetSockName(&local_address);
 
   Receive(nread, std::move(buf), local_address, addr, flags);
 }

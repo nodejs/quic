@@ -182,7 +182,7 @@ void JSUDPWrap::EmitReceived(const FunctionCallbackInfo<Value>& args) {
     data += avail;
     len -= avail;
     wrap->listener()->OnRecv(
-        nullptr, avail, buf, reinterpret_cast<sockaddr*>(&addr), flags);
+        avail, buf, reinterpret_cast<sockaddr*>(&addr), flags);
   }
 }
 
