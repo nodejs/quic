@@ -27,6 +27,7 @@
 #include "handle_wrap.h"
 #include "uv.h"
 #include "v8.h"
+#include "node_sockaddr.h"
 
 namespace node {
 
@@ -90,11 +91,8 @@ class UDPWrapBase {
                        size_t nbufs,
                        const sockaddr* addr) = 0;
 
-  // Stores the sockaddr for the peer in `name`.
-  virtual int GetPeerName(sockaddr* name, int* namelen) = 0;
-
-  // Stores the sockaddr for the local socket in `name`.
-  virtual int GetSockName(sockaddr* name, int* namelen) = 0;
+  virtual SocketAddress GetPeerName() = 0;
+  virtual SocketAddress GetSockName() = 0;
 
   // Returns an AsyncWrap object with the same lifetime as this object.
   virtual AsyncWrap* GetAsyncWrap() = 0;
@@ -163,8 +161,10 @@ class UDPWrap final : public HandleWrap,
   ssize_t Send(uv_buf_t* bufs,
                size_t nbufs,
                const sockaddr* addr) override;
-  int GetPeerName(sockaddr* name, int* namelen) override;
-  int GetSockName(sockaddr* name, int* namelen) override;
+
+  SocketAddress GetPeerName() override;
+  SocketAddress GetSockName() override;
+
   AsyncWrap* GetAsyncWrap() override;
 
   static v8::MaybeLocal<v8::Object> Instantiate(Environment* env,
@@ -209,6 +209,11 @@ class UDPWrap final : public HandleWrap,
   bool current_send_has_callback_;
   v8::Local<v8::Object> current_send_req_wrap_;
 };
+
+int sockaddr_for_family(int address_family,
+                        const char* address,
+                        const unsigned short port,
+                        sockaddr_storage* addr);
 
 }  // namespace node
 

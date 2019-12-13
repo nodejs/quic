@@ -3,6 +3,7 @@
 #include "memory_tracker-inl.h"
 #include "node.h"
 #include "node_buffer.h"
+#include "node_http_common-inl.h"
 #include "node_http2.h"
 #include "node_http2_state.h"
 #include "node_mem-inl.h"
@@ -538,8 +539,8 @@ Http2Session::Http2Session(Environment* env,
   uint32_t maxHeaderPairs = opts.GetMaxHeaderPairs();
   max_header_pairs_ =
       type == NGHTTP2_SESSION_SERVER
-          ? std::max(maxHeaderPairs, 4U)     // minimum # of request headers
-          : std::max(maxHeaderPairs, 1U);    // minimum # of response headers
+          ? GetServerMaxHeaderPairs(maxHeaderPairs)
+          : GetClientMaxHeaderPairs(maxHeaderPairs);
 
   max_outstanding_pings_ = opts.GetMaxOutstandingPings();
   max_outstanding_settings_ = opts.GetMaxOutstandingSettings();
@@ -1906,7 +1907,7 @@ Http2Stream::Http2Stream(Http2Session* session,
         nghttp2_session_get_local_settings(
           session->session(),
           NGHTTP2_SETTINGS_MAX_HEADER_LIST_SIZE),
-      MAX_MAX_HEADER_LIST_SIZE);
+      static_cast<uint32_t>(MAX_MAX_HEADER_LIST_SIZE));
 
   if (options & STREAM_OPTION_GET_TRAILERS)
     flags_ |= NGHTTP2_STREAM_FLAG_TRAILERS;
