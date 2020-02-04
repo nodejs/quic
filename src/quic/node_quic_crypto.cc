@@ -201,7 +201,7 @@ std::unique_ptr<QuicPacket> GenerateRetryPacket(
   if (nwrite <= 0)
     return {};
   packet->set_length(nwrite);
-  return std::move(packet);
+  return packet;
 }
 
 // True if the received retry token is invalid.
