@@ -204,7 +204,9 @@ void QuicSocket::AddSession(
           &QuicSocketStats::client_sessions);
 }
 
-void QuicSocket::AddEndpoint(QuicEndpoint* endpoint_, bool preferred) {
+void QuicSocket::AddEndpoint(
+    BaseObjectPtr<QuicEndpoint> endpoint_,
+    bool preferred) {
   Debug(this, "Adding %sendpoint", preferred ? "preferred " : "");
   if (preferred || endpoints_.empty())
     preferred_endpoint_ = endpoint_;

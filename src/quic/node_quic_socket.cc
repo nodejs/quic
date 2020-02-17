@@ -341,6 +341,8 @@ void QuicSocket::OnEndpointDone(QuicEndpoint* endpoint) {
 
 void QuicSocket::OnBind(QuicEndpoint* endpoint) {
   const SocketAddress& local_address = endpoint->local_address();
+  bound_endpoints_[local_address] =
+      BaseObjectWeakPtr<QuicEndpoint>(endpoint);
   Debug(this, "Endpoint %s bound", local_address);
   RecordTimestamp(&QuicSocketStats::bound_at);
 }
@@ -860,10 +862,9 @@ int QuicSocket::SendPacket(
   last_created_send_wrap_ = nullptr;
   uv_buf_t buf = packet->buf();
 
-  // TODO(@jasnell): This is still sending on preferred endpoint.
-  // Need to do lookup on local address and send using that.
-  CHECK_NOT_NULL(preferred_endpoint_);
-  int err = preferred_endpoint_->Send(&buf, 1, remote_addr.data());
+  auto endpoint = bound_endpoints_.find(local_addr);
+  CHECK_NE(endpoint, bound_endpoints_.end());
+  int err = endpoint->second->Send(&buf, 1, remote_addr.data());
 
   if (err != 0) {
     if (err > 0) err = 0;
@@ -1003,7 +1004,9 @@ void QuicSocketAddEndpoint(const FunctionCallbackInfo<Value>& args) {
   CHECK(args[0]->IsObject());
   QuicEndpoint* endpoint;
   ASSIGN_OR_RETURN_UNWRAP(&endpoint, args[0].As<Object>());
-  socket->AddEndpoint(endpoint, args[1]->IsTrue());
+  socket->AddEndpoint(
+      BaseObjectPtr<QuicEndpoint>(endpoint),
+      args[1]->IsTrue());
 }
 
 // Enabling diagnostic packet loss enables a mode where the QuicSocket

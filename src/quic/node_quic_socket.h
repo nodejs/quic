@@ -281,8 +281,11 @@ class QuicSocket : public AsyncWrap,
       bool disable_session_reset = false);
   ~QuicSocket() override;
 
+  // Returns the default/preferred local address. Additional
+  // QuicEndpoint instances may be associated with the
+  // QuicSocket bound to other local addresses.
   const SocketAddress& local_address() {
-    CHECK_NOT_NULL(preferred_endpoint_);
+    CHECK(preferred_endpoint_);
     return preferred_endpoint_->local_address();
   }
 
@@ -382,7 +385,9 @@ class QuicSocket : public AsyncWrap,
   void PushListener(QuicSocketListener* listener);
   void RemoveListener(QuicSocketListener* listener);
 
-  inline void AddEndpoint(QuicEndpoint* endpoint, bool preferred = false);
+  inline void AddEndpoint(
+      BaseObjectPtr<QuicEndpoint> endpoint,
+      bool preferred = false);
 
   void ImmediateConnectionClose(
       const QuicCID& scid,
@@ -473,8 +478,9 @@ class QuicSocket : public AsyncWrap,
 
   ngtcp2_mem alloc_info_;
 
-  std::vector<BaseObjectWeakPtr<QuicEndpoint>> endpoints_;
-  QuicEndpoint* preferred_endpoint_ = nullptr;
+  std::vector<BaseObjectPtr<QuicEndpoint>> endpoints_;
+  SocketAddress::Map<BaseObjectWeakPtr<QuicEndpoint>> bound_endpoints_;
+  BaseObjectWeakPtr<QuicEndpoint> preferred_endpoint_;
 
   uint32_t flags_ = QUICSOCKET_FLAGS_NONE;
   uint32_t options_;
