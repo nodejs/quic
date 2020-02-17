@@ -66,7 +66,12 @@ const { createSocket } = require('quic');
       code: 'ERR_OUT_OF_RANGE'
     });
 
-    ['a', 1n, [], {}, false, Number.MAX_SAFE_INTEGER + 1].forEach((val) => {
+    assert.throws(
+      () => server.listen({ [prop]: Number.MAX_SAFE_INTEGER + 1 }), {
+        code: 'ERR_OUT_OF_RANGE'
+      });
+
+    ['a', 1n, [], {}, false].forEach((val) => {
       assert.throws(() => server.listen({ [prop]: val }), {
         code: 'ERR_INVALID_ARG_TYPE'
       });
@@ -85,7 +90,7 @@ const { createSocket } = require('quic');
     });
   });
 
-  [1, 1n, 'test', null, false].forEach((preferredAddress) => {
+  [1, 1n, 'test', false].forEach((preferredAddress) => {
     assert.throws(() => server.listen({ preferredAddress }), {
       code: 'ERR_INVALID_ARG_TYPE'
     });
@@ -98,13 +103,13 @@ const { createSocket } = require('quic');
 
     [-1].forEach((port) => {
       assert.throws(() => server.listen({ preferredAddress: { port } }), {
-        code: 'ERR_INVALID_ARG_VALUE'
+        code: 'ERR_INVALID_ARG_TYPE'
       });
     });
 
     [1, 'test', false, null, {}, []].forEach((type) => {
       assert.throws(() => server.listen({ preferredAddress: { type } }), {
-        code: 'ERR_INVALID_ARG_VALUE'
+        code: 'ERR_INVALID_ARG_TYPE'
       });
     });
   });
