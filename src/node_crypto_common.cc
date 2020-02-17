@@ -52,8 +52,7 @@ void SetALPN(SSL* ssl, const std::string& alpn) {
 std::string GetSSLOCSPResponse(SSL* ssl) {
   const unsigned char* resp;
   int len = SSL_get_tlsext_status_ocsp_resp(ssl, &resp);
-  if (len < 0) len = 0;
-  return std::string(reinterpret_cast<const char*>(resp), len);
+  return len < 0 ? "" : std::string(reinterpret_cast<const char*>(resp), len);
 }
 
 bool SetTLSSession(SSL* ssl, const unsigned char* buf, size_t length) {
@@ -140,6 +139,9 @@ int VerifyPeerCertificate(SSL* ssl, int def) {
   } else {
     const SSL_CIPHER* curr_cipher = SSL_get_current_cipher(ssl);
     const SSL_SESSION* sess = SSL_get_session(ssl);
+    // Allow no-cert for PSK authentication in TLS1.2 and lower.
+    // In TLS1.3 check that session was reused because TLS1.3 PSK
+    // looks like session resumption.
     if (SSL_CIPHER_get_auth_nid(curr_cipher) == NID_auth_psk ||
         (SSL_SESSION_get_protocol_version(sess) == TLS1_3_VERSION &&
          SSL_session_reused(ssl))) {
@@ -156,32 +158,29 @@ int UseSNIContext(SSL* ssl, SecureContext* context) {
   STACK_OF(X509)* chain;
 
   int err = SSL_CTX_get0_chain_certs(ctx, &chain);
-  if (err)
-    err = SSL_use_certificate(ssl, x509);
-  if (err)
-    err = SSL_use_PrivateKey(ssl, pkey);
-  if (err && chain != nullptr)
-    err = SSL_set1_chain(ssl, chain);
+  if (err == 1) err = SSL_use_certificate(ssl, x509);
+  if (err == 1) err = SSL_use_PrivateKey(ssl, pkey);
+  if (err == 1 && chain != nullptr) err = SSL_set1_chain(ssl, chain);
   return err;
 }
 
 const char* GetClientHelloALPN(SSL* ssl) {
-    const unsigned char* buf;
-    size_t len;
-    size_t rem;
+  const unsigned char* buf;
+  size_t len;
+  size_t rem;
 
-    if (!SSL_client_hello_get0_ext(
-            ssl,
-            TLSEXT_TYPE_application_layer_protocol_negotiation,
-            &buf, &rem) || rem < 2) {
-      return nullptr;
-    }
+  if (!SSL_client_hello_get0_ext(
+          ssl,
+          TLSEXT_TYPE_application_layer_protocol_negotiation,
+          &buf,
+          &rem) ||
+      rem < 2) {
+    return nullptr;
+  }
 
-    len = (buf[0] << 8) | buf[1];
-    if (len + 2 != rem)
-      return nullptr;
-    buf += 3;
-    return reinterpret_cast<const char*>(buf);
+  len = (buf[0] << 8) | buf[1];
+  if (len + 2 != rem) return nullptr;
+  return reinterpret_cast<const char*>(buf + 3);
 }
 
 const char* GetClientHelloServerName(SSL* ssl) {
@@ -197,23 +196,19 @@ const char* GetClientHelloServerName(SSL* ssl) {
     return nullptr;
   }
 
-  len = *(buf++) << 8;
-  len += *(buf++);
+  len = (*buf << 8) | *(buf + 1);
   if (len + 2 != rem)
     return nullptr;
   rem = len;
 
-  if (rem == 0 || *buf++ != TLSEXT_NAMETYPE_host_name)
-    return nullptr;
+  if (rem == 0 || *(buf + 2) != TLSEXT_NAMETYPE_host_name) return nullptr;
   rem--;
   if (rem <= 2)
     return nullptr;
-  len = *(buf++) << 8;
-  len += *(buf++);
+  len = (*(buf + 3) << 8) | *(buf + 4);
   if (len + 2 > rem)
     return nullptr;
-  rem = len;
-  return reinterpret_cast<const char*>(buf);
+  return reinterpret_cast<const char*>(buf + 5);
 }
 
 const char* GetServerName(SSL* ssl) {

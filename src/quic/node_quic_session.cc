@@ -1047,7 +1047,7 @@ int QuicCryptoContext::Receive(
     session_->RecordTimestamp(&QuicSessionStats::handshake_start_at);
   session_->RecordTimestamp(&QuicSessionStats::handshake_continue_at);
 
-  Debug(session(), "Receiving %d bytes of crypto data.", datalen);
+  Debug(session(), "Receiving %d bytes of crypto data", datalen);
 
   // Internally, this passes the handshake data off to openssl
   // for processing. The handshake may or may not complete.
@@ -1250,7 +1250,7 @@ bool QuicApplication::SendPendingData() {
   if (pos - packet->data()) {
     // Some data was serialized into the packet. We need to send it.
     packet->set_length(pos - packet->data());
-    Debug(session(), "Congestion limited, but %" PRIu64 " bytes pending.",
+    Debug(session(), "Congestion limited, but %" PRIu64 " bytes pending",
           packet->length());
     if (!session()->SendPacket(std::move(packet), path))
       return false;
@@ -1264,7 +1264,7 @@ void QuicApplication::MaybeSetFin(const StreamData& stream_data) {
 }
 
 void QuicApplication::StreamOpen(int64_t stream_id) {
-  Debug(session(), "QUIC Stream %" PRId64 " is open.", stream_id);
+  Debug(session(), "QUIC Stream %" PRId64 " is open", stream_id);
 }
 
 void QuicApplication::StreamHeaders(
@@ -1540,7 +1540,7 @@ void QuicSession::AddToSocket(QuicSocket* socket) {
 // streams added must be removed before the QuicSession instance is freed.
 void QuicSession::AddStream(BaseObjectPtr<QuicStream> stream) {
   DCHECK(!is_flag_set(QUICSESSION_FLAG_GRACEFUL_CLOSING));
-  Debug(this, "Adding stream %" PRId64 " to session.", stream->id());
+  Debug(this, "Adding stream %" PRId64 " to session", stream->id());
   streams_.emplace(stream->id(), stream);
 
   // Update tracking statistics for the number of streams associated with
@@ -1768,7 +1768,7 @@ bool QuicSession::ReceiveRetry() {
   CHECK(!is_server());
   if (is_flag_set(QUICSESSION_FLAG_DESTROYED))
     return false;
-  Debug(this, "A retry packet was received. Restarting the handshake.");
+  Debug(this, "A retry packet was received. Restarting the handshake");
   IncrementStat(&QuicSessionStats::retry_count);
   return DeriveAndInstallInitialKey(*this, dcid());
 }
@@ -1786,7 +1786,7 @@ bool QuicSession::Receive(
     return false;
   }
 
-  Debug(this, "Receiving QUIC packet.");
+  Debug(this, "Receiving QUIC packet");
   IncrementStat(&QuicSessionStats::bytes_received, nread);
 
   // Closing period starts once ngtcp2 has detected that the session
@@ -1799,7 +1799,7 @@ bool QuicSession::Receive(
   // at this point is either ignore the packet or send another
   // CONNECTION_CLOSE.
   if (is_in_closing_period()) {
-    Debug(this, "QUIC packet received while in closing period.");
+    Debug(this, "QUIC packet received while in closing period");
     IncrementConnectionCloseAttempts();
     // For server QuicSession instances, we serialize the connection close
     // packet once but may sent it multiple times. If the client keeps
@@ -1822,7 +1822,7 @@ bool QuicSession::Receive(
   // the packet was correctly processed, even tho it is being
   // ignored.
   if (is_in_draining_period()) {
-    Debug(this, "QUIC packet received while in draining period.");
+    Debug(this, "QUIC packet received while in draining period");
     return true;
   }
 
@@ -1891,7 +1891,7 @@ bool QuicSession::Receive(
 bool QuicSession::ReceiveClientInitial(const QuicCID& dcid) {
   if (UNLIKELY(is_flag_set(QUICSESSION_FLAG_DESTROYED)))
     return false;
-  Debug(this, "Receiving client initial parameters.");
+  Debug(this, "Receiving client initial parameters");
   return DeriveAndInstallInitialKey(*this, dcid);
 }
 
@@ -2003,7 +2003,7 @@ void QuicSession::RemoveFromSocket() {
     }
   }
 
-  Debug(this, "Removed from the QuicSocket.");
+  Debug(this, "Removed from the QuicSocket");
   BaseObjectPtr<QuicSocket> socket = std::move(socket_);
   socket->RemoveSession(scid_, remote_address_);
 }
@@ -2819,20 +2819,20 @@ bool QuicSession::InitClient(
   // Remote Transport Params
   if (early_transport_params->IsArrayBufferView()) {
     if (set_early_transport_params(early_transport_params)) {
-      Debug(this, "Using provided early transport params.");
+      Debug(this, "Using provided early transport params");
       crypto_context_->set_option(QUICCLIENTSESSION_OPTION_RESUME);
     } else {
-      Debug(this, "Ignoring invalid early transport params.");
+      Debug(this, "Ignoring invalid early transport params");
     }
   }
 
   // Session Ticket
   if (session_ticket->IsArrayBufferView()) {
     if (set_session(session_ticket)) {
-      Debug(this, "Using provided session ticket.");
+      Debug(this, "Using provided session ticket");
       crypto_context_->set_option(QUICCLIENTSESSION_OPTION_RESUME);
     } else {
-      Debug(this, "Ignoring provided session ticket.");
+      Debug(this, "Ignoring provided session ticket");
     }
   }
 

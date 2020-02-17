@@ -91,7 +91,7 @@ void QuicSocket::DisassociateStatelessResetToken(
 // sessions are rejected.
 void QuicSocket::StopListening() {
   if (is_flag_set(QUICSOCKET_FLAGS_SERVER_LISTENING)) {
-    Debug(this, "Stop listening.");
+    Debug(this, "Stop listening");
     set_flag(QUICSOCKET_FLAGS_SERVER_LISTENING, false);
     // It is important to not call ReceiveStop here as there
     // is ongoing traffic being exchanged by the peers.
@@ -205,7 +205,7 @@ void QuicSocket::AddSession(
 }
 
 void QuicSocket::AddEndpoint(QuicEndpoint* endpoint_, bool preferred) {
-  Debug(this, "Adding %sendpoint.", preferred ? "preferred " : "");
+  Debug(this, "Adding %sendpoint", preferred ? "preferred " : "");
   if (preferred || endpoints_.empty())
     preferred_endpoint_ = endpoint_;
   endpoints_.emplace_back(endpoint_);

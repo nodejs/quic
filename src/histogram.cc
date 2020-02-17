@@ -81,7 +81,7 @@ void HistogramBase::HistogramReset(const FunctionCallbackInfo<Value>& args) {
 }
 
 void HistogramBase::Initialize(Environment* env) {
-  // Guard against multiple initializations
+  // Guard against multiple initializations.
   if (!env->histogram_ctor_template().IsEmpty())
     return;
 

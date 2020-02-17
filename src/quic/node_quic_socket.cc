@@ -253,7 +253,7 @@ QuicSocket::QuicSocket(
   MakeWeak();
   PushListener(&default_listener_);
 
-  Debug(this, "New QuicSocket created.");
+  Debug(this, "New QuicSocket created");
 
   EntropySource(token_secret_, kTokenSecretLen);
 
@@ -311,7 +311,7 @@ void QuicSocket::Listen(
   CHECK_NOT_NULL(sc);
   CHECK(!server_secure_context_);
   CHECK(!is_flag_set(QUICSOCKET_FLAGS_SERVER_LISTENING));
-  Debug(this, "Starting to listen.");
+  Debug(this, "Starting to listen");
   server_session_config_.Set(env(), preferred_address);
   server_secure_context_.reset(sc);
   server_alpn_ = alpn;
@@ -335,7 +335,7 @@ ReqWrap<uv_udp_send_t>* QuicSocket::OnCreateSendWrap(size_t msg_size) {
 }
 
 void QuicSocket::OnEndpointDone(QuicEndpoint* endpoint) {
-  Debug(this, "Endpoint has no pending callbacks.");
+  Debug(this, "Endpoint has no pending callbacks");
   listener_->OnEndpointDone(endpoint);
 }
 
@@ -407,12 +407,12 @@ void QuicSocket::OnReceive(
     const SocketAddress& local_addr,
     const SocketAddress& remote_addr,
     unsigned int flags) {
-  Debug(this, "Receiving %d bytes from the UDP socket.", nread);
+  Debug(this, "Receiving %d bytes from the UDP socket", nread);
 
   // When diagnostic packet loss is enabled, the packet will be randomly
   // dropped based on the rx_loss_ probability.
   if (UNLIKELY(is_diagnostic_packet_loss(rx_loss_))) {
-    Debug(this, "Simulating received packet loss.");
+    Debug(this, "Simulating received packet loss");
     return;
   }
 
@@ -515,7 +515,7 @@ void QuicSocket::OnReceive(
     // the AcceptInitialPacket sent a version negotiation packet,
     // or a CONNECTION_CLOSE packet.
     if (!session) {
-      Debug(this, "Unable to create a new server QuicSession.");
+      Debug(this, "Unable to create a new server QuicSession");
       // If the packet contained a short header, we might need to send
       // a stateless reset. The stateless reset contains a token derived
       // from the received destination connection ID.
@@ -772,7 +772,7 @@ BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
             hd.tokenlen > 0) {
           Debug(this, "Performing explicit address validation");
           if (hd.tokenlen == 0) {
-            Debug(this, "No retry token was detected. Generating one.");
+            Debug(this, "No retry token was detected. Generating one");
             SendRetry(dcid, scid, local_addr, remote_addr);
             // Sending a retry token terminates this connection attempt.
             return {};
@@ -783,7 +783,7 @@ BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
                   &ocid,
                   token_secret_,
                   retry_token_expiration_)) {
-            Debug(this, "Invalid retry token was detected. Failing.");
+            Debug(this, "Invalid retry token was detected. Failing");
             ImmediateConnectionClose(
                 QuicCID(hd.scid),
                 QuicCID(hd.dcid),
@@ -853,7 +853,7 @@ int QuicSocket::SendPacket(
 
   // If DiagnosticPacketLoss returns true, it will call Done() internally
   if (UNLIKELY(is_diagnostic_packet_loss(tx_loss_))) {
-    Debug(this, "Simulating transmitted packet loss.");
+    Debug(this, "Simulating transmitted packet loss");
     return 0;
   }
 
