@@ -41,7 +41,7 @@ server.on('ready', common.mustCall(() => {
     port: server.endpoints[0].address.port
   });
 
-  ['z', 1, {}, [], null, Infinity, 1n, new Date()].forEach((i) => {
+  ['z', 1, {}, [], null, Infinity, 1n].forEach((i) => {
     assert.throws(
       () => req.openStream({ halfOpen: i }),
       { code: 'ERR_INVALID_ARG_TYPE' }

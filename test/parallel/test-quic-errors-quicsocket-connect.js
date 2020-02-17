@@ -111,7 +111,12 @@ const client = createSocket();
     code: 'ERR_OUT_OF_RANGE'
   });
 
-  ['a', 1n, [], {}, false, Number.MAX_SAFE_INTEGER + 1].forEach((val) => {
+  assert.throws(
+    () => client.connect({ [prop]: Number.MAX_SAFE_INTEGER + 1 }), {
+      code: 'ERR_OUT_OF_RANGE'
+    });
+
+  ['a', 1n, [], {}, false].forEach((val) => {
     assert.throws(() => client.connect({ [prop]: val }), {
       code: 'ERR_INVALID_ARG_TYPE'
     });
@@ -166,7 +171,12 @@ const client = createSocket();
     code: 'ERR_OUT_OF_RANGE'
   });
 
-  ['a', 1n, [], {}, false, Number.MAX_SAFE_INTEGER + 1].forEach((val) => {
+  assert.throws(
+    () => client.connect({ h3: { [prop]: Number.MAX_SAFE_INTEGER + 1 } }), {
+      code: 'ERR_OUT_OF_RANGE'
+    });
+
+  ['a', 1n, [], {}, false].forEach((val) => {
     assert.throws(() => client.connect({ h3: { [prop]: val } }), {
       code: 'ERR_INVALID_ARG_TYPE'
     });

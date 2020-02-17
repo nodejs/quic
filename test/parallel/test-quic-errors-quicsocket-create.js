@@ -98,21 +98,21 @@ const { createSocket } = require('quic');
 
 
 // Test invalid QuicSocket retryTokenTimeout option
-[0, 61].forEach((retryTokenTimeout) => {
+[0, 61, NaN].forEach((retryTokenTimeout) => {
   assert.throws(() => createSocket({ retryTokenTimeout }), {
     code: 'ERR_OUT_OF_RANGE'
   });
 });
 
 // Test invalid QuicSocket retryTokenTimeout option
-['test', null, NaN, 1n, {}, [], false].forEach((retryTokenTimeout) => {
+['test', null, 1n, {}, [], false].forEach((retryTokenTimeout) => {
   assert.throws(() => createSocket({ retryTokenTimeout }), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
 });
 
 // Test invalid QuicSocket maxConnectionsPerHost option
-[0].forEach((maxConnectionsPerHost) => {
+[0, Number.MAX_SAFE_INTEGER + 1, NaN].forEach((maxConnectionsPerHost) => {
   assert.throws(() => createSocket({ maxConnectionsPerHost }), {
     code: 'ERR_OUT_OF_RANGE'
   });
@@ -120,10 +120,8 @@ const { createSocket } = require('quic');
 
 // Test invalid QuicSocket maxConnectionsPerHost option
 [
-  Number.MAX_SAFE_INTEGER + 1,
   'test',
   null,
-  NaN,
   1n,
   {},
   [],
@@ -135,7 +133,7 @@ const { createSocket } = require('quic');
 });
 
 // Test invalid QuicSocket maxConnections option
-[0].forEach((maxConnections) => {
+[0, Number.MAX_SAFE_INTEGER + 1, NaN].forEach((maxConnections) => {
   assert.throws(() => createSocket({ maxConnections }), {
     code: 'ERR_OUT_OF_RANGE'
   });
@@ -143,10 +141,8 @@ const { createSocket } = require('quic');
 
 // Test invalid QuicSocket maxConnectionsPerHost option
 [
-  Number.MAX_SAFE_INTEGER + 1,
   'test',
   null,
-  NaN,
   1n,
   {},
   [],
@@ -158,7 +154,7 @@ const { createSocket } = require('quic');
 });
 
 // Test invalid QuicSocket maxStatelessResetsPerHost option
-[0].forEach((maxStatelessResetsPerHost) => {
+[0, Number.MAX_SAFE_INTEGER + 1, NaN].forEach((maxStatelessResetsPerHost) => {
   assert.throws(() => createSocket({ maxStatelessResetsPerHost }), {
     code: 'ERR_OUT_OF_RANGE'
   });
@@ -166,10 +162,8 @@ const { createSocket } = require('quic');
 
 // Test invalid QuicSocket maxStatelessResetsPerHost option
 [
-  Number.MAX_SAFE_INTEGER + 1,
   'test',
   null,
-  NaN,
   1n,
   {},
   [],

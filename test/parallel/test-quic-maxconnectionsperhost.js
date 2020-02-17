@@ -15,15 +15,9 @@ const kALPN = 'zzz';
 // QuicSockets must throw errors when maxConnectionsPerHost is not a
 // safe integer or is out of range.
 {
-  [-1, 0].forEach((maxConnectionsPerHost) => {
+  [-1, 0, Number.MAX_SAFE_INTEGER + 1, 1.1].forEach((maxConnectionsPerHost) => {
     assert.throws(() => createSocket({ maxConnectionsPerHost }), {
       code: 'ERR_OUT_OF_RANGE'
-    });
-  });
-
-  [Number.MAX_SAFE_INTEGER + 1, 1.1].forEach((maxConnectionsPerHost) => {
-    assert.throws(() => createSocket({ maxConnectionsPerHost }), {
-      code: 'ERR_INVALID_ARG_TYPE'
     });
   });
 }
