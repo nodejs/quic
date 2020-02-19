@@ -30,6 +30,22 @@ server.on('session', common.mustCall((session) => {
   session.on('stream', common.mustCall((stream) => {
     assert(stream.submitInitialHeaders({ ':status': '200' }));
 
+    [-1, Number.MAX_SAFE_INTEGER + 1].forEach((highWaterMark) => {
+      assert.throws(() => stream.pushStream({}, { highWaterMark }), {
+        code: 'ERR_OUT_OF_RANGE'
+      });
+    });
+    ['', 1n, {}, [], false].forEach((highWaterMark) => {
+      assert.throws(() => stream.pushStream({}, { highWaterMark }), {
+        code: 'ERR_INVALID_ARG_TYPE'
+      });
+    });
+    ['', 1, 1n, true, [], {}, 'zebra'].forEach((defaultEncoding) => {
+      assert.throws(() => stream.pushStream({}, { defaultEncoding }), {
+        code: 'ERR_INVALID_ARG_VALUE'
+      });
+    });
+
     const push = stream.pushStream({
       ':method': 'GET',
       ':scheme': 'https',

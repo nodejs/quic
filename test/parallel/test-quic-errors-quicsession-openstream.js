@@ -48,15 +48,34 @@ server.on('ready', common.mustCall(() => {
     );
   });
 
+  ['', 1n, {}, [], false, 'zebra'].forEach((defaultEncoding) => {
+    assert.throws(() => req.openStream({ defaultEncoding }), {
+      code: 'ERR_INVALID_ARG_VALUE'
+    });
+  });
+
+  [-1, Number.MAX_SAFE_INTEGER + 1].forEach((highWaterMark) => {
+    assert.throws(() => req.openStream({ highWaterMark }), {
+      code: 'ERR_OUT_OF_RANGE'
+    });
+  });
+
+  ['a', 1n, [], {}, false].forEach((highWaterMark) => {
+    assert.throws(() => req.openStream({ highWaterMark }), {
+      code: 'ERR_INVALID_ARG_TYPE'
+    });
+  });
+
   // Unidirectional streams are not allowed. openStream will succeeed
   // but the stream will be destroyed immediately. The underlying
   // QuicStream C++ handle will not be created.
-  req.openStream({ halfOpen: true })
-    .on('error', common.expectsError({
-      code: 'ERR_QUICSTREAM_OPEN_FAILED'
-    }))
-    .on('error', common.mustCall(() => countdown.dec()));
-
+  req.openStream({
+    halfOpen: true,
+    highWaterMark: 10,
+    defaultEncoding: 'utf16le'
+  }).on('error', common.expectsError({
+    code: 'ERR_QUICSTREAM_OPEN_FAILED'
+  })).on('error', common.mustCall(() => countdown.dec()));
 }));
 
 server.on('close', common.mustCall());

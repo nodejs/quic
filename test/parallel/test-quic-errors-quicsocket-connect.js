@@ -106,6 +106,7 @@ const client = createSocket();
   'maxStreamDataUni',
   'maxStreamsBidi',
   'maxStreamsUni',
+  'highWaterMark',
 ].forEach((prop) => {
   assert.throws(() => client.connect({ [prop]: -1 }), {
     code: 'ERR_OUT_OF_RANGE'
@@ -182,6 +183,13 @@ const client = createSocket();
     });
   });
 });
+
+['', 1n, {}, [], false, 'zebra'].forEach((defaultEncoding) => {
+  assert.throws(() => client.connect({ defaultEncoding }), {
+    code: 'ERR_INVALID_ARG_VALUE'
+  });
+});
+
 
 // Test that connect cannot be called after QuicSocket is closed.
 client.close();

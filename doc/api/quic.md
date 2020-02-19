@@ -1001,7 +1001,12 @@ added: REPLACEME
 * `options` {Object}
   * `halfOpen` {boolean} Set to `true` to open a unidirectional stream, `false`
     to open a bidirectional stream. **Default**: `true`.
-  * `highWaterMark` {number}
+  * `highWaterMark` {number} Total number of bytes that the `QuicStream` may
+    buffer internally before the `quicstream.write()` function starts returning
+    `false`. Default: `16384`.
+  * `defaultEncoding` {string} The default encoding that is used when no
+    encoding is specified as an argument to `quicstream.write()`. Default:
+    `'utf8'`.
 * Returns: {QuicStream}
 
 Returns a new `QuicStream`.
@@ -1475,6 +1480,9 @@ added: REPLACEME
     client certificate.
   * `crl` {string|string[]|Buffer|Buffer[]} PEM formatted CRLs (Certificate
     Revocation Lists).
+  * `defaultEncoding` {string} The default encoding that is used when no
+    encoding is specified as an argument to `quicstream.write()`. Default:
+    `'utf8'`.
   * `dhparam` {string|Buffer} Diffie Hellman parameters, required for
     [Perfect Forward Secrecy][]. Use `openssl dhparam` to create the parameters.
     The key length must be greater than or equal to 1024 bits, otherwise an
@@ -1488,6 +1496,9 @@ added: REPLACEME
     available curve names. On recent releases, `openssl ecparam -list_curves`
     will also display the name and description of each available elliptic curve.
     **Default:** [`tls.DEFAULT_ECDH_CURVE`][].
+  * `highWaterMark` {number} Total number of bytes that the `QuicStream` may
+    buffer internally before the `quicstream.write()` function starts returning
+    `false`. Default: `16384`.
   * `honorCipherOrder` {boolean} Attempt to use the server's cipher suite
     preferences instead of the client's. When `true`, causes
     `SSL_OP_CIPHER_SERVER_PREFERENCE` to be set in `secureOptions`, see
@@ -1600,8 +1611,8 @@ An array of `QuicEndpoint` instances associated with the `QuicSocket`.
 added: REPLACEME
 -->
 
-* `options` {Object}
-  * `alpn` {string} An ALPN protocol identifier.
+* `options` {Objt}
+  * `alpn` {string} A required ALPN protocol identifier.
   * `ca` {string|string[]|Buffer|Buffer[]} Optionally override the trusted CA
     certificates. Default is to trust the well-known CAs curated by Mozilla.
     Mozilla's CAs are completely replaced when CAs are explicitly specified
@@ -1636,6 +1647,9 @@ added: REPLACEME
     client certificate.
   * `crl` {string|string[]|Buffer|Buffer[]} PEM formatted CRLs (Certificate
     Revocation Lists).
+  * `defaultEncoding` {string} The default encoding that is used when no
+    encoding is specified as an argument to `quicstream.write()`. Default:
+    `'utf8'`.
   * `dhparam` {string|Buffer} Diffie Hellman parameters, required for
     [Perfect Forward Secrecy][]. Use `openssl dhparam` to create the parameters.
     The key length must be greater than or equal to 1024 bits, otherwise an
@@ -1649,8 +1663,11 @@ added: REPLACEME
     available curve names. On recent releases, `openssl ecparam -list_curves`
     will also display the name and description of each available elliptic curve.
     **Default:** [`tls.DEFAULT_ECDH_CURVE`][].
+  * `highWaterMark` {number} Total number of bytes that `QuicStream` instances
+    may buffer internally before the `quicstream.write()` function starts
+    returning `false`. Default: `16384`.
   * `honorCipherOrder` {boolean} Attempt to use the server's cipher suite
-    preferences instead of the client's. When `true`, causes
+    references instead of the client's. When `true`, causes
     `SSL_OP_CIPHER_SERVER_PREFERENCE` to be set in `secureOptions`, see
     [OpenSSL Options][] for more information.
   * `idleTimeout` {number}
@@ -2103,6 +2120,32 @@ added: REPLACEME
 
 This property is `true` if the underlying session is not finished yet,
 i.e. before the `'ready'` event is emitted.
+
+#### quicstream.pushStream(headers\[, options\])
+<!-- YAML
+added: REPLACEME
+-->
+
+* `headers` {Object} An object representing a block of headers to be
+  transmitted with the push promise.
+* `options` {Object}
+  * `highWaterMark` {number} Total number of bytes that the `QuicStream` may
+    buffer internally before the `quicstream.write()` function starts returning
+    `false`. Default: `16384`.
+  * `defaultEncoding` {string} The default encoding that is used when no
+    encoding is specified as an argument to `quicstream.write()`. Default:
+    `'utf8'`.
+
+* Returns: {QuicStream}
+
+If the selected QUIC application protocol supports push streams, then the
+`pushStream()` method will initiate a new push promise and create a new
+unidirectional `QuicStream` object used to fulfill that push.
+
+Currently only HTTP/3 supports the use of `pushStream()`.
+
+If the selected QUIC application protocol does not support push streams, an
+error will be thrown.
 
 #### quicstream.serverInitiated
 <!-- YAML

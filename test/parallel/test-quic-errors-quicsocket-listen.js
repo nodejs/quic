@@ -61,6 +61,7 @@ const { createSocket } = require('quic');
     'maxStreamDataUni',
     'maxStreamsBidi',
     'maxStreamsUni',
+    'highWaterMark',
   ].forEach((prop) => {
     assert.throws(() => server.listen({ [prop]: -1 }), {
       code: 'ERR_OUT_OF_RANGE'
@@ -80,6 +81,12 @@ const { createSocket } = require('quic');
 
   [1, 1n, 'test', {}, []].forEach((rejectUnauthorized) => {
     assert.throws(() => server.listen({ rejectUnauthorized }), {
+      code: 'ERR_INVALID_ARG_TYPE'
+    });
+  });
+
+  [1, 1n, 'test', {}, []].forEach((requestCert) => {
+    assert.throws(() => server.listen({ requestCert }), {
       code: 'ERR_INVALID_ARG_TYPE'
     });
   });
@@ -126,6 +133,11 @@ const { createSocket } = require('quic');
     });
   });
 
+  ['', 1n, {}, [], false, 'zebra'].forEach((defaultEncoding) => {
+    assert.throws(() => server.listen({ defaultEncoding }), {
+      code: 'ERR_INVALID_ARG_VALUE'
+    });
+  });
 
   // Make sure that after all of the validation checks, the socket
   // is not actually marked as listening at all.
