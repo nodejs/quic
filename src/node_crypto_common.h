@@ -26,6 +26,10 @@ std::string GetSSLOCSPResponse(SSL* ssl);
 
 bool SetTLSSession(SSL* ssl, const unsigned char* buf, size_t length);
 
+bool SetTLSSession(SSL* ssl, SSLSessionPointer session);
+
+SSLSessionPointer GetTLSSession(const unsigned char* buf, size_t length);
+
 std::unordered_multimap<std::string, std::string>
 GetCertificateAltNames(X509* cert);
 

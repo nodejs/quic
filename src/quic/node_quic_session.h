@@ -368,6 +368,8 @@ class QuicCryptoContext : public MemoryRetainer {
   // Returns ngtcp2's understanding of the current outbound crypto level
   inline ngtcp2_crypto_level write_crypto_level() const;
 
+  inline bool early_data() const;
+
   bool is_option_set(uint32_t option) const { return options_ & option; }
 
   // Emits a single keylog line to the JavaScript layer
@@ -409,7 +411,7 @@ class QuicCryptoContext : public MemoryRetainer {
       options_ &= ~option;
   }
 
-  inline bool set_session(const unsigned char* data, size_t len);
+  inline bool set_session(crypto::SSLSessionPointer session);
 
   inline void set_tls_alert(int err);
 
@@ -433,6 +435,12 @@ class QuicCryptoContext : public MemoryRetainer {
 
   void MemoryInfo(MemoryTracker* tracker) const override;
 
+  void handshake_started() {
+    is_handshake_started_ = true;
+  }
+
+  bool is_handshake_started() const { return is_handshake_started_; }
+
   SET_MEMORY_INFO_NAME(QuicCryptoContext)
   SET_SELF_SIZE(QuicCryptoContext)
 
@@ -447,10 +455,12 @@ class QuicCryptoContext : public MemoryRetainer {
   ngtcp2_crypto_side side_;
   crypto::SSLPointer ssl_;
   QuicBuffer handshake_[3];
+  bool is_handshake_started_ = false;
   bool in_tls_callback_ = false;
   bool in_key_update_ = false;
   bool in_ocsp_request_ = false;
   bool in_client_hello_ = false;
+  bool early_data_ = false;
   uint32_t options_;
 
   v8::Global<v8::ArrayBufferView> ocsp_response_;
@@ -533,6 +543,23 @@ class QuicApplication : public MemoryRetainer {
   virtual void ExtendMaxStreamsRemoteBidi(uint64_t max_streams) {}
   virtual void ExtendMaxStreamData(int64_t stream_id, uint64_t max_data) {}
   virtual void ResumeStream(int64_t stream_id) {}
+  virtual void SetSessionTicketAppData(const SessionTicketAppData& app_data) {
+    // TODO(@jasnell): Different QUIC applications may wish to set some
+    // application data in the session ticket (e.g. http/3 would set
+    // server settings in the application data). For now, doing nothing
+    // as I'm just adding the basic mechanism.
+  }
+  virtual SessionTicketAppData::Status GetSessionTicketAppData(
+      const SessionTicketAppData& app_data,
+      SessionTicketAppData::Flag flag) {
+    // TODO(@jasnell): Different QUIC application may wish to set some
+    // application data in the session ticket (e.g. http/3 would set
+    // server settings in the application data). For now, doing nothing
+    // as I'm just adding the basic mechanism.
+    return flag == SessionTicketAppData::Flag::STATUS_RENEW ?
+      SessionTicketAppData::Status::TICKET_USE_RENEW :
+      SessionTicketAppData::Status::TICKET_USE;
+  }
   virtual void StreamHeaders(
       int64_t stream_id,
       int kind,
@@ -663,8 +690,8 @@ class QuicSession : public AsyncWrap,
       const SocketAddress& local_addr,
       const SocketAddress& remote_addr,
       crypto::SecureContext* context,
-      v8::Local<v8::Value> early_transport_params,
-      v8::Local<v8::Value> session_ticket,
+      ngtcp2_transport_params* early_transport_params,
+      crypto::SSLSessionPointer early_session_ticket,
       v8::Local<v8::Value> dcid,
       PreferredAddressStrategy preferred_address_strategy =
           IgnorePreferredAddressStrategy,
@@ -722,8 +749,8 @@ class QuicSession : public AsyncWrap,
       const SocketAddress& local_addr,
       const SocketAddress& remote_addr,
       crypto::SecureContext* context,
-      v8::Local<v8::Value> early_transport_params,
-      v8::Local<v8::Value> session_ticket,
+      ngtcp2_transport_params* early_transport_params,
+      crypto::SSLSessionPointer early_session_ticket,
       v8::Local<v8::Value> dcid,
       PreferredAddressStrategy preferred_address_strategy,
       const std::string& alpn,
@@ -736,6 +763,12 @@ class QuicSession : public AsyncWrap,
   std::string diagnostic_name() const override;
   inline QuicCID dcid() const;
 
+  // When a client QuicSession is created, if the autoStart
+  // option is true, the handshake will be immediately started.
+  // If autoStart is false, the start of the handshake will be
+  // deferred until the start handshake method is called;
+  inline void StartHandshake();
+
   QuicApplication* application() const { return application_.get(); }
 
   QuicCryptoContext* crypto_context() const { return crypto_context_.get(); }
@@ -745,6 +778,8 @@ class QuicSession : public AsyncWrap,
   BaseObjectPtr<QuicStream> CreateStream(int64_t id);
   BaseObjectPtr<QuicStream> FindStream(int64_t id) const;
   inline bool HasStream(int64_t id) const;
+
+  inline bool allow_early_data() const;
 
   // Returns true if StartGracefulClose() has been called and the
   // QuicSession is currently in the process of a graceful close.
@@ -889,10 +924,8 @@ class QuicSession : public AsyncWrap,
   inline void set_last_error(int32_t family, int error_code);
 
   inline void set_remote_transport_params();
-  bool set_early_transport_params(v8::Local<v8::Value> buffer);
   bool set_socket(QuicSocket* socket, bool nat_rebinding = false);
   int set_session(SSL_SESSION* session);
-  bool set_session(v8::Local<v8::Value> buffer);
 
   const StreamsMap& streams() const { return streams_; }
 
@@ -1013,6 +1046,12 @@ class QuicSession : public AsyncWrap,
   inline void set_preferred_address_strategy(
       PreferredAddressStrategy strategy);
 
+  inline void SetSessionTicketAppData(
+      const SessionTicketAppData& app_data);
+  inline SessionTicketAppData::Status GetSessionTicketAppData(
+      const SessionTicketAppData& app_data,
+      SessionTicketAppData::Flag flag);
+
   inline void SelectPreferredAddress(
       const QuicPreferredAddress& preferred_address);
 
@@ -1025,16 +1064,23 @@ class QuicSession : public AsyncWrap,
   // complete.
   class SendSessionScope {
    public:
-    explicit SendSessionScope(QuicSession* session) : session_(session) {
+    explicit SendSessionScope(
+        QuicSession* session,
+        bool wait_for_handshake = false)
+        : session_(session),
+          wait_for_handshake_(wait_for_handshake) {
       CHECK(session_);
     }
 
     ~SendSessionScope() {
-      if (!Ngtcp2CallbackScope::InNgtcp2CallbackScope(session_.get()))
+      if (!Ngtcp2CallbackScope::InNgtcp2CallbackScope(session_.get()) &&
+          (!wait_for_handshake_ ||
+           session_->crypto_context()->is_handshake_started()))
         session_->SendPendingData();
     }
 
    private:
+    bool wait_for_handshake_ = false;
     BaseObjectPtr<QuicSession> session_;
   };
 
@@ -1082,11 +1128,11 @@ class QuicSession : public AsyncWrap,
       QlogMode qlog);
 
   // Initialize the QuicSession as a client
-  bool InitClient(
+  void InitClient(
       const SocketAddress& local_addr,
       const SocketAddress& remote_addr,
-      v8::Local<v8::Value> early_transport_params,
-      v8::Local<v8::Value> session_ticket,
+      ngtcp2_transport_params* early_transport_params,
+      crypto::SSLSessionPointer early_session_ticket,
       v8::Local<v8::Value> dcid,
       QlogMode qlog);
 

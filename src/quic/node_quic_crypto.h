@@ -11,6 +11,8 @@
 #include <ngtcp2/ngtcp2_crypto.h>
 #include <openssl/ssl.h>
 
+#include <vector>
+
 namespace node {
 
 namespace quic {
@@ -47,6 +49,7 @@ bool SetCryptoSecrets(
 // QUIC side (client or server).
 void InitializeSecureContext(
     crypto::SecureContext* sc,
+    bool early_data,
     ngtcp2_crypto_side side);
 
 // Called in the QuicSession::InitServer and
@@ -129,6 +132,37 @@ v8::Local<v8::Value> GetALPNProtocol(const QuicSession& session);
 
 ngtcp2_crypto_level from_ossl_level(OSSL_ENCRYPTION_LEVEL ossl_level);
 const char* crypto_level_name(ngtcp2_crypto_level level);
+
+// SessionTicketAppData is a utility class that is used only during
+// the generation or access of TLS stateless sesson tickets. It
+// exists solely to provide a easier way for QuicApplication instances
+// to set relevant metadata in the session ticket when it is created,
+// and the exract and subsequently verify that data when a ticket is
+// received and is being validated. The app data is completely opaque
+// to anything other than the server-side of the QuicApplication that
+// sets it.
+class SessionTicketAppData {
+ public:
+  enum class Status {
+    TICKET_USE,
+    TICKET_USE_RENEW,
+    TICKET_IGNORE,
+    TICKET_IGNORE_RENEW
+  };
+
+  enum class Flag {
+    STATUS_NONE,
+    STATUS_RENEW
+  };
+
+  explicit SessionTicketAppData(SSL_SESSION* session) : session_(session) {}
+  bool Set(const uint8_t* data, size_t len);
+  bool Get(uint8_t** data, size_t* len) const;
+
+ private:
+  bool set_ = false;
+  SSL_SESSION* session_;
+};
 
 }  // namespace quic
 }  // namespace node

@@ -70,7 +70,10 @@ void Ngtcp2DebugLog(void* user_data, const char* fmt, ...) {
   va_start(ap, fmt);
   std::string format(fmt, strlen(fmt) + 1);
   format[strlen(fmt)] = '\n';
-  Debug(session->env(), DebugCategory::NGTCP2_DEBUG, format, ap);
+  // Debug() does not work with the va_list here. So we use vfprintf
+  // directly instead. Ngtcp2DebugLog is only enabled when the debug
+  // category is enabled.
+  vfprintf(stderr, format.c_str(), ap);
   va_end(ap);
 }
 
@@ -587,7 +590,10 @@ void JSQuicSessionListener::OnHandshakeCompleted() {
         v8::Undefined(env->isolate()).As<Value>(),
     err != 0 ?
         crypto::GetValidationErrorCode(env, err) :
-        v8::Undefined(env->isolate()).As<Value>()
+        v8::Undefined(env->isolate()).As<Value>(),
+    session()->crypto_context()->early_data() ?
+        v8::True(env->isolate()) :
+        v8::False(env->isolate())
   };
 
   // Grab a shared pointer to this to prevent the QuicSession
@@ -629,15 +635,7 @@ void JSQuicSessionListener::OnSessionTicket(int size, SSL_SESSION* sess) {
   HandleScope scope(env->isolate());
   Context::Scope context_scope(env->context());
 
-  unsigned int session_id_length;
-  const unsigned char* session_id_data =
-      SSL_SESSION_get_id(sess, &session_id_length);
-
   Local<Value> argv[] = {
-    Buffer::Copy(
-        env,
-        reinterpret_cast<const char*>(session_id_data),
-        session_id_length).ToLocalChecked(),
     v8::Undefined(env->isolate()),
     v8::Undefined(env->isolate())
   };
@@ -648,11 +646,11 @@ void JSQuicSessionListener::OnSessionTicket(int size, SSL_SESSION* sess) {
   memset(session_data, 0, size);
   i2d_SSL_SESSION(sess, &session_data);
   if (!session_ticket.empty())
-    argv[1] = session_ticket.ToBuffer().ToLocalChecked();
+    argv[0] = session_ticket.ToBuffer().ToLocalChecked();
 
   if (session()->is_flag_set(
           QuicSession::QUICSESSION_FLAG_HAS_TRANSPORT_PARAMS)) {
-    argv[2] = Buffer::Copy(
+    argv[1] = Buffer::Copy(
         env,
         reinterpret_cast<const char*>(&session()->transport_params_),
         sizeof(session()->transport_params_)).ToLocalChecked();
@@ -1341,8 +1339,8 @@ QuicSession::QuicSession(
     const SocketAddress& local_addr,
     const SocketAddress& remote_addr,
     SecureContext* context,
-    Local<Value> early_transport_params,
-    Local<Value> session_ticket,
+    ngtcp2_transport_params* early_transport_params,
+    crypto::SSLSessionPointer early_session_ticket,
     Local<Value> dcid,
     PreferredAddressStrategy preferred_address_strategy,
     const std::string& alpn,
@@ -1360,13 +1358,13 @@ QuicSession::QuicSession(
         QuicCID(),
         options,
         preferred_address_strategy) {
-  CHECK(InitClient(
+  InitClient(
       local_addr,
       remote_addr,
       early_transport_params,
-      session_ticket,
+      std::move(early_session_ticket),
       dcid,
-      qlog));
+      qlog);
 }
 
 // QuicSession is an abstract base class that defines the code used by both
@@ -1892,6 +1890,7 @@ bool QuicSession::ReceiveClientInitial(const QuicCID& dcid) {
   if (UNLIKELY(is_flag_set(QUICSESSION_FLAG_DESTROYED)))
     return false;
   Debug(this, "Receiving client initial parameters");
+  crypto_context_->handshake_started();
   return DeriveAndInstallInitialKey(*this, dcid);
 }
 
@@ -2202,20 +2201,6 @@ void QuicSession::SendPendingData() {
   }
 }
 
-// When resuming a client session, the serialized transport parameters from
-// the prior session must be provided. This is set during construction
-// of the client QuicSession object.
-bool QuicSession::set_early_transport_params(Local<Value> buffer) {
-  CHECK(!is_server());
-  ArrayBufferViewContents<uint8_t> sbuf(buffer.As<ArrayBufferView>());
-  ngtcp2_transport_params params;
-  if (sbuf.length() != sizeof(ngtcp2_transport_params))
-    return false;
-  memcpy(&params, sbuf.data(), sizeof(ngtcp2_transport_params));
-  ngtcp2_conn_set_early_remote_transport_params(connection(), &params);
-  return true;
-}
-
 // When completing the TLS handshake, the TLS session information
 // is provided to the QuicSession so that the session ticket and
 // the remote transport parameters can be captured to support 0RTT
@@ -2223,21 +2208,11 @@ bool QuicSession::set_early_transport_params(Local<Value> buffer) {
 int QuicSession::set_session(SSL_SESSION* session) {
   CHECK(!is_server());
   CHECK(!is_flag_set(QUICSESSION_FLAG_DESTROYED));
-
   int size = i2d_SSL_SESSION(session, nullptr);
   if (size > SecureContext::kMaxSessionSize)
     return 0;
   listener_->OnSessionTicket(size, session);
   return 1;
-}
-
-// When resuming a client session, the serialized session ticket from
-// the prior session must be provided. This is set during construction
-// of the client QuicSession object.
-bool QuicSession::set_session(Local<Value> buffer) {
-  CHECK(!is_server());
-  ArrayBufferViewContents<unsigned char> sbuf(buffer.As<ArrayBufferView>());
-  return crypto_context_->set_session(sbuf.data(), sbuf.length());
 }
 
 // A client QuicSession can be migrated to a different QuicSocket instance.
@@ -2712,8 +2687,8 @@ BaseObjectPtr<QuicSession> QuicSession::CreateClient(
     const SocketAddress& local_addr,
     const SocketAddress& remote_addr,
     SecureContext* context,
-    Local<Value> early_transport_params,
-    Local<Value> session_ticket,
+    ngtcp2_transport_params* early_transport_params,
+    crypto::SSLSessionPointer early_session_ticket,
     Local<Value> dcid,
     PreferredAddressStrategy preferred_address_strategy,
     const std::string& alpn,
@@ -2735,7 +2710,7 @@ BaseObjectPtr<QuicSession> QuicSession::CreateClient(
           remote_addr,
           context,
           early_transport_params,
-          session_ticket,
+          std::move(early_session_ticket),
           dcid,
           preferred_address_strategy,
           alpn,
@@ -2753,11 +2728,11 @@ BaseObjectPtr<QuicSession> QuicSession::CreateClient(
 // perform a 0RTT resumption of a prior session.
 // The dcid_value parameter is optional to allow user code the
 // ability to provide an explicit dcid (this should be rare)
-bool QuicSession::InitClient(
+void QuicSession::InitClient(
     const SocketAddress& local_addr,
     const SocketAddress& remote_addr,
-    Local<Value> early_transport_params,
-    Local<Value> session_ticket,
+    ngtcp2_transport_params* early_transport_params,
+    crypto::SSLSessionPointer early_session_ticket,
     Local<Value> dcid_value,
     QlogMode qlog) {
   CHECK_NULL(connection_);
@@ -2816,29 +2791,12 @@ bool QuicSession::InitClient(
 
   CHECK(DeriveAndInstallInitialKey(*this, this->dcid()));
 
-  // Remote Transport Params
-  if (early_transport_params->IsArrayBufferView()) {
-    if (set_early_transport_params(early_transport_params)) {
-      Debug(this, "Using provided early transport params");
-      crypto_context_->set_option(QUICCLIENTSESSION_OPTION_RESUME);
-    } else {
-      Debug(this, "Ignoring invalid early transport params");
-    }
-  }
-
-  // Session Ticket
-  if (session_ticket->IsArrayBufferView()) {
-    if (set_session(session_ticket)) {
-      Debug(this, "Using provided session ticket");
-      crypto_context_->set_option(QUICCLIENTSESSION_OPTION_RESUME);
-    } else {
-      Debug(this, "Ignoring provided session ticket");
-    }
-  }
+  if (early_transport_params != nullptr)
+    ngtcp2_conn_set_early_remote_transport_params(conn, early_transport_params);
+  crypto_context_->set_session(std::move(early_session_ticket));
 
   UpdateIdleTimer();
   UpdateDataStats();
-  return true;
 }
 
 // Static ngtcp2 callbacks are registered when ngtcp2 when a new ngtcp2_conn is
@@ -3534,31 +3492,85 @@ void QuicSessionUpdateKey(const FunctionCallbackInfo<Value>& args) {
   args.GetReturnValue().Set(session->crypto_context()->InitiateKeyUpdate());
 }
 
+// When a client wishes to resume a prior TLS session, it must specify both
+// the remember transport parameters and remembered TLS session ticket. Those
+// will each be provided as a TypedArray. The DecodeTransportParams and
+// DecodeSessionTicket functions handle those. If the argument is undefined,
+// then resumption is not used.
+
+bool DecodeTransportParams(
+    Local<Value> value,
+    ngtcp2_transport_params* params) {
+  if (value->IsUndefined())
+    return false;
+  CHECK(value->IsArrayBufferView());
+  ArrayBufferViewContents<uint8_t> sbuf(value.As<ArrayBufferView>());
+  if (sbuf.length() != sizeof(ngtcp2_transport_params))
+    return false;
+  memcpy(&params, sbuf.data(), sizeof(ngtcp2_transport_params));
+  return true;
+}
+
+crypto::SSLSessionPointer DecodeSessionTicket(Local<Value> value) {
+  if (value->IsUndefined())
+    return {};
+  CHECK(value->IsArrayBufferView());
+  ArrayBufferViewContents<unsigned char> sbuf(value.As<ArrayBufferView>());
+  return crypto::GetTLSSession(sbuf.data(), sbuf.length());
+}
+
+void QuicSessionStartHandshake(const FunctionCallbackInfo<Value>& args) {
+  QuicSession* session;
+  ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
+  session->StartHandshake();
+}
+
 void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
 
   QuicSocket* socket;
   int32_t family;
   uint32_t port;
-  uint32_t flags;
   SecureContext* sc;
   SocketAddress remote_addr;
-
+  int32_t preferred_address_policy;
+  PreferredAddressStrategy preferred_address_strategy;
   uint32_t options = QUICCLIENTSESSION_OPTION_VERIFY_HOSTNAME_IDENTITY;
   std::string alpn(NGTCP2_ALPN_H3);
 
-  CHECK(args[0]->IsObject());
-  CHECK(args[1]->Int32Value(env->context()).To(&family));
-  CHECK(args[3]->Uint32Value(env->context()).To(&port));
-  CHECK(args[4]->Uint32Value(env->context()).To(&flags));
-  CHECK(args[5]->IsObject());
-  CHECK(args[12]->Uint32Value(env->context()).To(&options));
-  ASSIGN_OR_RETURN_UNWRAP(&socket, args[0].As<Object>());
-  ASSIGN_OR_RETURN_UNWRAP(&sc, args[5].As<Object>());
+  enum ARG_IDX : int {
+    SOCKET,
+    TYPE,
+    IP,
+    PORT,
+    SECURE_CONTEXT,
+    SNI,
+    REMOTE_TRANSPORT_PARAMS,
+    SESSION_TICKET,
+    DCID,
+    PREFERRED_ADDRESS_POLICY,
+    ALPN,
+    OPTIONS,
+    QLOG,
+    AUTO_START
+  };
 
-  PreferredAddressStrategy preferred_address_strategy;
-  int32_t preferred_address_policy;
-  CHECK(args[10]->Int32Value(env->context()).To(&preferred_address_policy));
+  CHECK(args[ARG_IDX::SOCKET]->IsObject());
+  CHECK(args[ARG_IDX::SECURE_CONTEXT]->IsObject());
+  CHECK(args[ARG_IDX::IP]->IsString());
+  CHECK(args[ARG_IDX::ALPN]->IsString());
+  CHECK(args[ARG_IDX::TYPE]->Int32Value(env->context()).To(&family));
+  CHECK(args[ARG_IDX::PORT]->Uint32Value(env->context()).To(&port));
+  CHECK(args[ARG_IDX::OPTIONS]->Uint32Value(env->context()).To(&options));
+  CHECK(args[ARG_IDX::AUTO_START]->IsBoolean());
+  if (!args[ARG_IDX::SNI]->IsUndefined())
+    CHECK(args[ARG_IDX::SNI]->IsString());
+
+  ASSIGN_OR_RETURN_UNWRAP(&socket, args[ARG_IDX::SOCKET].As<Object>());
+  ASSIGN_OR_RETURN_UNWRAP(&sc, args[ARG_IDX::SECURE_CONTEXT].As<Object>());
+
+  CHECK(args[ARG_IDX::PREFERRED_ADDRESS_POLICY]->Int32Value(
+      env->context()).To(&preferred_address_policy));
   switch (preferred_address_policy) {
     case QUIC_PREFERRED_ADDRESS_ACCEPT:
       preferred_address_strategy = QuicSession::UsePreferredAddressStrategy;
@@ -3567,19 +3579,24 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
       preferred_address_strategy = QuicSession::IgnorePreferredAddressStrategy;
   }
 
-  node::Utf8Value address(env->isolate(), args[2]);
-  node::Utf8Value servername(env->isolate(), args[6]);
-  std::string hostname(*servername);
+  node::Utf8Value address(env->isolate(), args[ARG_IDX::IP]);
+  node::Utf8Value servername(env->isolate(), args[ARG_IDX::SNI]);
 
   if (!SocketAddress::New(family, *address, port, &remote_addr))
     return args.GetReturnValue().Set(ERR_FAILED_TO_CREATE_SESSION);
 
-  if (args[11]->IsString()) {
-    Utf8Value val(env->isolate(), args[11]);
-    // ALPN is a string prefixex by the length, followed by values
-    alpn = val.length();
-    alpn += *val;
-  }
+  // ALPN is a string prefixed by the length, followed by values
+  Utf8Value val(env->isolate(), args[ARG_IDX::ALPN]);
+  alpn = val.length();
+  alpn += *val;
+
+  crypto::SSLSessionPointer early_session_ticket =
+      DecodeSessionTicket(args[ARG_IDX::SESSION_TICKET]);
+  ngtcp2_transport_params early_transport_params;
+  bool has_early_transport_params =
+      DecodeTransportParams(
+          args[ARG_IDX::REMOTE_TRANSPORT_PARAMS],
+          &early_transport_params);
 
   socket->ReceiveStart();
 
@@ -3589,20 +3606,26 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
           socket->local_address(),
           remote_addr,
           sc,
-          args[7],
-          args[8],
-          args[9],
+          has_early_transport_params ? &early_transport_params : nullptr,
+          std::move(early_session_ticket),
+          args[ARG_IDX::DCID],
           preferred_address_strategy,
           alpn,
-          hostname,
+          std::string(*servername),
           options,
-          args[13]->IsTrue() ? QlogMode::kEnabled : QlogMode::kDisabled);
+          args[ARG_IDX::QLOG]->IsTrue() ?
+              QlogMode::kEnabled :
+              QlogMode::kDisabled);
 
-  session->SendPendingData();
-
-  // Session was created but was unable to bootstrap properly
-  if (session->is_destroyed())
-    return args.GetReturnValue().Set(ERR_FAILED_TO_CREATE_SESSION);
+  // Start the TLS handshake if the autoStart option is true
+  // (which it is by default).
+  if (args[ARG_IDX::AUTO_START]->BooleanValue(env->isolate())) {
+    session->StartHandshake();
+    // Session was created but was unable to bootstrap properly during
+    // the start of the TLS handshake.
+    if (session->is_destroyed())
+      return args.GetReturnValue().Set(ERR_FAILED_TO_CREATE_SESSION);
+  }
 
   args.GetReturnValue().Set(session->object());
 }
@@ -3658,6 +3681,7 @@ void QuicSession::Initialize(
     env->SetProtoMethod(session,
                         "setSocket",
                         QuicSessionSetSocket);
+    env->SetProtoMethod(session, "startHandshake", QuicSessionStartHandshake);
     env->set_quicclientsession_constructor_template(sessiont);
 
     env->SetMethod(target, "createClientSession", NewQuicClientSession);

@@ -320,6 +320,7 @@ class QuicSocket : public AsyncWrap,
       const SocketAddress& remote_addr,
       std::unique_ptr<QuicPacket> packet,
       BaseObjectPtr<QuicSession> session = BaseObjectPtr<QuicSession>());
+  inline void SessionReady(BaseObjectPtr<QuicSession> session);
   inline void set_server_busy(bool on);
   inline void set_diagnostic_packet_loss(double rx = 0.0, double tx = 0.0);
   inline void StopListening();

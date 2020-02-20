@@ -19,40 +19,34 @@ const options = { key, cert, ca, alpn: 'meow' };
   server.listen();
 
   server.on('session', common.mustCall((session) => {
-    session.on('stream', common.mustCall(async (stream) => {
-      let data = '';
-      stream.setEncoding('utf8');
-      stream.on('data', (chunk) => data += chunk);
-      await once(stream, 'end');
-      assert.strictEqual(data, 'Hello!');
-    }));
+    // The server can create a stream immediately without waiting
+    // for the secure event... however, the data will not actually
+    // be transmitted until the handshake is completed.
+    const stream = session.openStream({ halfOpen: true });
+    stream.on('close', common.mustCall());
+    stream.on('error', console.log);
+    stream.end('hello');
+
+    session.on('stream', common.mustNotCall());
   }));
 
   await once(server, 'ready');
 
   const req = client.connect({
     address: common.localhostIPv4,
-    port: server.endpoints[0].address.port
+    port: server.endpoints[0].address.port,
   });
 
-  // In this case, the QuicStream is usable but corked
-  // until the underlying internal QuicStream handle
-  // has been created, which will not happen until
-  // after the TLS handshake has been completed.
-  const stream = req.openStream({ halfOpen: true });
-  stream.end('Hello!');
-  stream.on('error', common.mustNotCall());
-  stream.resume();
-  assert(!req.allowEarlyData);
-  assert(!req.handshakeComplete);
-  assert(stream.pending);
+  const [ stream ] = await once(req, 'stream');
 
-  await once(stream, 'ready');
-
-  assert(req.handshakeComplete);
-  assert(!stream.pending);
+  let data = '';
+  stream.setEncoding('utf8');
+  stream.on('data', (chunk) => data += chunk);
+  stream.on('end', common.mustCall());
 
   await once(stream, 'close');
+
+  assert.strictEqual(data, 'hello');
 
   server.close();
   client.close();
@@ -61,4 +55,5 @@ const options = { key, cert, ca, alpn: 'meow' };
     once(server, 'close'),
     once(client, 'close')
   ]);
+
 })().then(common.mustCall());

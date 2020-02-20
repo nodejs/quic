@@ -215,6 +215,10 @@ void QuicSocket::AddEndpoint(
     endpoint_->ReceiveStart();
 }
 
+void QuicSocket::SessionReady(BaseObjectPtr<QuicSession> session) {
+  listener_->OnSessionReady(session);
+}
+
 }  // namespace quic
 }  // namespace node
 

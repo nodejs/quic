@@ -147,7 +147,7 @@ int QuicStream::DoShutdown(ShutdownWrap* req_wrap) {
   if (is_destroyed())
     return UV_EPIPE;
 
-  QuicSession::SendSessionScope send_scope(session());
+  QuicSession::SendSessionScope send_scope(session(), true);
 
   if (is_writable()) {
     Debug(this, "Shutdown writable side");
@@ -180,7 +180,7 @@ int QuicStream::DoWrite(
     return 0;
   }
 
-  QuicSession::SendSessionScope send_scope(session());
+  QuicSession::SendSessionScope send_scope(session(), true);
 
   Debug(this, "Queuing %" PRIu64 " bytes of data from %d buffers",
         length, nbufs);

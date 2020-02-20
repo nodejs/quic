@@ -116,8 +116,19 @@ void QuicCryptoContext::ResumeHandshake() {
 }
 
 // For 0RTT, this sets the TLS session data from the given buffer.
-bool QuicCryptoContext::set_session(const unsigned char* data, size_t length) {
-  return crypto::SetTLSSession(ssl(), data, length);
+bool QuicCryptoContext::set_session(crypto::SSLSessionPointer session) {
+  if (side_ == NGTCP2_CRYPTO_SIDE_CLIENT && session != nullptr) {
+    early_data_ =
+        SSL_SESSION_get_max_early_data(session.get()) == 0xffffffffUL;
+  }
+  return crypto::SetTLSSession(ssl(), std::move(session));
+}
+
+bool QuicCryptoContext::early_data() const {
+  return
+      (early_data_ &&
+       SSL_get_early_data_status(ssl()) == SSL_EARLY_DATA_ACCEPTED) ||
+      SSL_get_max_early_data(ssl()) == 0xffffffffUL;
 }
 
 void QuicCryptoContext::set_tls_alert(int err) {
@@ -180,6 +191,13 @@ void QuicSession::AssociateCID(const QuicCID& cid) {
 void QuicSession::DisassociateCID(const QuicCID& cid) {
   if (is_server())
     socket()->DisassociateCID(cid);
+}
+
+void QuicSession::StartHandshake() {
+  if (crypto_context_->is_handshake_started() || is_server())
+    return;
+  crypto_context_->handshake_started();
+  SendPendingData();
 }
 
 void QuicSession::ExtendMaxStreamData(int64_t stream_id, uint64_t max_data) {
@@ -352,6 +370,24 @@ bool QuicSession::is_in_draining_period() const {
 
 bool QuicSession::HasStream(int64_t id) const {
   return streams_.find(id) != std::end(streams_);
+}
+
+bool QuicSession::allow_early_data() const {
+  // TODO(@jasnell): For now, we always allow early data.
+  // Later there will be reasons we do not want to allow
+  // it, such as lack of available system resources.
+  return true;
+}
+
+void QuicSession::SetSessionTicketAppData(
+    const SessionTicketAppData& app_data) {
+  application_->SetSessionTicketAppData(app_data);
+}
+
+SessionTicketAppData::Status QuicSession::GetSessionTicketAppData(
+    const SessionTicketAppData& app_data,
+    SessionTicketAppData::Flag flag) {
+  return application_->GetSessionTicketAppData(app_data, flag);
 }
 
 bool QuicSession::is_gracefully_closing() const {

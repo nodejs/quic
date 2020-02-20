@@ -35,6 +35,21 @@ using v8::Value;
 
 namespace quic {
 
+bool SessionTicketAppData::Set(const uint8_t* data, size_t len) {
+  if (set_)
+    return false;
+  set_ = true;
+  SSL_SESSION_set1_ticket_appdata(session_, data, len);
+  return set_;
+}
+
+bool SessionTicketAppData::Get(uint8_t** data, size_t* len) const {
+  return SSL_SESSION_get0_ticket_appdata(
+      session_,
+      reinterpret_cast<void**>(data),
+      len) == 1;
+}
+
 namespace {
 constexpr int kCryptoTokenKeylen = 32;
 constexpr int kCryptoTokenIvlen = 32;
@@ -611,6 +626,11 @@ int AlpnSelection(
   return SSL_TLSEXT_ERR_OK;
 }
 
+int AllowEarlyDataCB(SSL* ssl, void* arg) {
+  QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
+  return session->allow_early_data() ? 1 : 0;
+}
+
 int TLS_Status_Callback(SSL* ssl, void* arg) {
   QuicSession* session = static_cast<QuicSession*>(SSL_get_app_data(ssl));
   return session->crypto_context()->OnTLSStatus();
@@ -619,6 +639,49 @@ int TLS_Status_Callback(SSL* ssl, void* arg) {
 int New_Session_Callback(SSL* ssl, SSL_SESSION* session) {
   QuicSession* s = static_cast<QuicSession*>(SSL_get_app_data(ssl));
   return s->set_session(session);
+}
+
+int GenerateSessionTicket(SSL* ssl, void* arg) {
+  QuicSession* s = static_cast<QuicSession*>(SSL_get_app_data(ssl));
+  SessionTicketAppData app_data(SSL_get_session(ssl));
+  s->SetSessionTicketAppData(app_data);
+  return 1;
+}
+
+SSL_TICKET_RETURN DecryptSessionTicket(
+    SSL* ssl,
+    SSL_SESSION* session,
+    const unsigned char* keyname,
+    size_t keyname_len,
+    SSL_TICKET_STATUS status,
+    void* arg) {
+  QuicSession* s = static_cast<QuicSession*>(SSL_get_app_data(ssl));
+  SessionTicketAppData::Flag flag = SessionTicketAppData::Flag::STATUS_NONE;
+  switch (status) {
+    default:
+      return SSL_TICKET_RETURN_IGNORE;
+    case SSL_TICKET_EMPTY:
+      // Fall through
+    case SSL_TICKET_NO_DECRYPT:
+      return SSL_TICKET_RETURN_IGNORE_RENEW;
+    case SSL_TICKET_SUCCESS_RENEW:
+      flag = SessionTicketAppData::Flag::STATUS_RENEW;
+      // Fall through
+    case SSL_TICKET_SUCCESS:
+      SessionTicketAppData app_data(session);
+      switch (s->GetSessionTicketAppData(app_data, flag)) {
+        default:
+          return SSL_TICKET_RETURN_IGNORE;
+        case SessionTicketAppData::Status::TICKET_IGNORE:
+          return SSL_TICKET_RETURN_IGNORE;
+        case SessionTicketAppData::Status::TICKET_IGNORE_RENEW:
+          return SSL_TICKET_RETURN_IGNORE_RENEW;
+        case SessionTicketAppData::Status::TICKET_USE:
+          return SSL_TICKET_RETURN_USE;
+        case SessionTicketAppData::Status::TICKET_USE_RENEW:
+          return SSL_TICKET_RETURN_USE_RENEW;
+      }
+  }
 }
 
 int SetEncryptionSecrets(
@@ -739,19 +802,40 @@ void InitializeTLS(const QuicSession& session) {
 
 void InitializeSecureContext(
     crypto::SecureContext* sc,
+    bool early_data,
     ngtcp2_crypto_side side) {
-  constexpr auto ssl_server_opts =
-      (SSL_OP_ALL & ~SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS) |
-      SSL_OP_SINGLE_ECDH_USE |
-      SSL_OP_CIPHER_SERVER_PREFERENCE |
-      SSL_OP_NO_ANTI_REPLAY;
+  // TODO(@jasnell): Using a static value for this at the moment but
+  // we need to determine if a non-static or per-session value is better.
+  constexpr static unsigned char session_id_ctx[] = "node.js quic server";
   switch (side) {
     case NGTCP2_CRYPTO_SIDE_SERVER:
-      SSL_CTX_set_options(**sc, ssl_server_opts);
+      SSL_CTX_set_options(
+          **sc,
+          (SSL_OP_ALL & ~SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS) |
+          SSL_OP_SINGLE_ECDH_USE |
+          SSL_OP_CIPHER_SERVER_PREFERENCE |
+          SSL_OP_NO_ANTI_REPLAY);
+
       SSL_CTX_set_mode(**sc, SSL_MODE_RELEASE_BUFFERS);
-      SSL_CTX_set_max_early_data(**sc, std::numeric_limits<uint32_t>::max());
+
       SSL_CTX_set_alpn_select_cb(**sc, AlpnSelection, nullptr);
       SSL_CTX_set_client_hello_cb(**sc, Client_Hello_CB, nullptr);
+
+      SSL_CTX_set_session_ticket_cb(
+          **sc,
+          GenerateSessionTicket,
+          DecryptSessionTicket,
+          nullptr);
+
+      if (early_data) {
+        SSL_CTX_set_max_early_data(**sc, 0xffffffff);
+        SSL_CTX_set_allow_early_data_cb(**sc, AllowEarlyDataCB, nullptr);
+      }
+
+      SSL_CTX_set_session_id_context(
+          **sc,
+          session_id_ctx,
+          sizeof(session_id_ctx) - 1);
       break;
     case NGTCP2_CRYPTO_SIDE_CLIENT:
       SSL_CTX_set_session_cache_mode(

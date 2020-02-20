@@ -83,12 +83,16 @@ void QuicInitSecureContext(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   CHECK(args[0]->IsObject());  // Secure Context
   CHECK(args[1]->IsString());  // groups
+  CHECK(args[2]->IsBoolean()); // early data
+
   SecureContext* sc;
   ASSIGN_OR_RETURN_UNWRAP(&sc, args[0].As<Object>(),
                           args.GetReturnValue().Set(UV_EBADF));
   const node::Utf8Value groups(env->isolate(), args[1]);
 
-  InitializeSecureContext(sc, side);
+  bool early_data = args[2]->BooleanValue(env->isolate());
+
+  InitializeSecureContext(sc, early_data, side);
 
   if (!crypto::SetGroups(sc, *groups))
     THROW_ERR_QUIC_CANNOT_SET_GROUPS(env);

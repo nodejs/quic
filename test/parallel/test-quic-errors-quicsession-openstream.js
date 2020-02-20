@@ -66,6 +66,9 @@ server.on('ready', common.mustCall(() => {
     });
   });
 
+  req.on('ready', common.mustCall());
+  req.on('secure', common.mustCall());
+
   // Unidirectional streams are not allowed. openStream will succeeed
   // but the stream will be destroyed immediately. The underlying
   // QuicStream C++ handle will not be created.

@@ -23,16 +23,12 @@ async function Test1(options, address) {
   server.listen({ key, cert, ca, alpn: 'zzz' });
 
   await once(server, 'ready');
-
   assert.strictEqual(server.endpoints.length, 1);
-
   const endpoint = server.endpoints[0];
   assert.strictEqual(endpoint.bound, true);
-  assert.strictEqual(endpoint.closing, false);
   assert.strictEqual(endpoint.destroyed, false);
   assert.strictEqual(typeof endpoint.address.port, 'number');
   assert.strictEqual(endpoint.address.address, address);
-
   server.close();
   assert.strictEqual(endpoint.destroyed, true);
 }
@@ -54,7 +50,6 @@ async function Test2() {
   {
     const endpoint = server.endpoints[0];
     assert.strictEqual(endpoint.bound, true);
-    assert.strictEqual(endpoint.closing, false);
     assert.strictEqual(endpoint.destroyed, false);
     assert.strictEqual(endpoint.address.family, 'IPv6');
     assert.strictEqual(typeof endpoint.address.port, 'number');
@@ -64,7 +59,6 @@ async function Test2() {
   {
     const endpoint = server.endpoints[1];
     assert.strictEqual(endpoint.bound, true);
-    assert.strictEqual(endpoint.closing, false);
     assert.strictEqual(endpoint.destroyed, false);
     assert.strictEqual(endpoint.address.family, 'IPv4');
     assert.strictEqual(typeof endpoint.address.port, 'number');
@@ -90,4 +84,4 @@ if (common.hasIPv6) {
     Test2());
 }
 
-Promise.allSettled(tests);
+Promise.all(tests);

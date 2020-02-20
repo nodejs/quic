@@ -1119,6 +1119,18 @@ Initiates QuicSession key update.
 An error will be thrown if called before `quicsession.handshakeConfirmed`
 is equal to `true`.
 
+#### quicsession.usingEarlyData
+<!-- YAML
+added: REPLACEME
+-->
+
+* Type: {boolean}
+
+On server `QuicSession` instances, set to `true` on completion of the TLS
+handshake if early data is enabled. On client `QuicSession` instances,
+set to true on handshake completion if early data is enabled *and* was
+accepted by the server.
+
 ### Class: QuicClientSession extends QuicSession
 <!-- YAML
 added: REPLACEME
@@ -1153,9 +1165,8 @@ added: REPLACEME
 
 The `'sessionTicket'` event is emitted when a new TLS session ticket has been
 generated for the current `QuicClientSession`. The callback is invoked with
-three arguments:
+two arguments:
 
-* `sessionID` {Buffer} The serialized session ticket identifier.
 * `sessionTicket` {Buffer} The serialized session ticket.
 * `remoteTransportParams` {Buffer} The serialized remote transport parameters
   provided by the QUIC server.
@@ -1656,6 +1667,8 @@ added: REPLACEME
     error will be thrown. It is strongly recommended to use 2048 bits or larger
     for stronger security. If omitted or invalid, the parameters are silently
     discarded and DHE ciphers will not be available.
+  * `earlyData` {boolean} Set to `false` to disable 0RTT early data.
+    Default: `true`.
   * `ecdhCurve` {string} A string describing a named curve or a colon separated
     list of curve NIDs or names, for example `P-521:P-384:P-256`, to use for
     ECDH key agreement. Set to `auto` to select the
