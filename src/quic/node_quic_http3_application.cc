@@ -105,10 +105,10 @@ void Http3Header::MemoryInfo(MemoryTracker* tracker) const {
   tracker->TrackField("value", value_);
 }
 
-template <typename T>
+template <typename M, typename T>
 void Http3Application::SetConfig(
     int idx,
-    uint64_t T::*member) {
+    M T::*member) {
   AliasedFloat64Array& buffer = env()->quic_state()->http3config_buffer;
   uint64_t flags = static_cast<uint64_t>(buffer[IDX_HTTP3_CONFIG_COUNT]);
   if (flags & (1ULL << idx))
@@ -120,9 +120,9 @@ Http3Application::Http3Application(
   : QuicApplication(session),
     alloc_info_(MakeAllocator()) {
   // Collect Configuration Details.
-  SetConfig(IDX_HTTP3_QPACK_MAX_TABLE_CAPACITY,
+  SetConfig<size_t>(IDX_HTTP3_QPACK_MAX_TABLE_CAPACITY,
             &Http3ApplicationConfig::qpack_max_table_capacity);
-  SetConfig(IDX_HTTP3_QPACK_BLOCKED_STREAMS,
+  SetConfig<size_t>(IDX_HTTP3_QPACK_BLOCKED_STREAMS,
             &Http3ApplicationConfig::qpack_blocked_streams);
   SetConfig(IDX_HTTP3_MAX_HEADER_LIST_SIZE,
             &Http3ApplicationConfig::max_header_list_size);

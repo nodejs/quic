@@ -173,8 +173,8 @@ class Http3Application final :
   void MemoryInfo(MemoryTracker* tracker) const override;
 
  private:
-  template <typename T>
-  void SetConfig(int idx, uint64_t T::*member);
+  template <typename M = uint64_t, typename T>
+  void SetConfig(int idx, M T::*member);
 
   nghttp3_conn* connection() const { return connection_.get(); }
   BaseObjectPtr<QuicStream> FindOrCreateStream(int64_t stream_id);
