@@ -83,7 +83,7 @@ void QuicInitSecureContext(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   CHECK(args[0]->IsObject());  // Secure Context
   CHECK(args[1]->IsString());  // groups
-  CHECK(args[2]->IsBoolean()); // early data
+  CHECK(args[2]->IsBoolean());  // early data
 
   SecureContext* sc;
   ASSIGN_OR_RETURN_UNWRAP(&sc, args[0].As<Object>(),
