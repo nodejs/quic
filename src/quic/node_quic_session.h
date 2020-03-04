@@ -1080,8 +1080,8 @@ class QuicSession : public AsyncWrap,
     }
 
    private:
-    bool wait_for_handshake_ = false;
     BaseObjectPtr<QuicSession> session_;
+    bool wait_for_handshake_ = false;
   };
 
   // Tracks whether or not we are currently within an ngtcp2 callback

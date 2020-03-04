@@ -65,7 +65,6 @@ void SetConfig(Environment* env, int idx, uint64_t* val) {
 // Forwards detailed(verbose) debugging information from ngtcp2. Enabled using
 // the NODE_DEBUG_NATIVE=NGTCP2_DEBUG category.
 void Ngtcp2DebugLog(void* user_data, const char* fmt, ...) {
-  QuicSession* session = static_cast<QuicSession*>(user_data);
   va_list ap;
   va_start(ap, fmt);
   std::string format(fmt, strlen(fmt) + 1);
