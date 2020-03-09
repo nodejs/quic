@@ -621,6 +621,17 @@ void SecureContext::Init(const FunctionCallbackInfo<Value>& args) {
       min_version = TLS1_2_VERSION;
       max_version = TLS1_2_VERSION;
       method = TLS_client_method();
+    } else if (strcmp(*sslmethod, "TLSv1_3_method") == 0) {
+      min_version = TLS1_3_VERSION;
+      max_version = TLS1_3_VERSION;
+    } else if (strcmp(*sslmethod, "TLSv1_3_server_method") == 0) {
+      min_version = TLS1_3_VERSION;
+      max_version = TLS1_3_VERSION;
+      method = TLS_server_method();
+    } else if (strcmp(*sslmethod, "TLSv1_3_client_method") == 0) {
+      min_version = TLS1_3_VERSION;
+      max_version = TLS1_3_VERSION;
+      method = TLS_client_method();
     } else {
       const std::string msg("Unknown method: ");
       THROW_ERR_TLS_INVALID_PROTOCOL_METHOD(env, (msg + * sslmethod).c_str());
