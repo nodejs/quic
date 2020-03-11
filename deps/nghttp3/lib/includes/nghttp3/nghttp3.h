@@ -84,9 +84,11 @@ typedef enum {
   NGHTTP3_ERR_QPACK_FATAL = -111,
   NGHTTP3_ERR_QPACK_HEADER_TOO_LARGE = -112,
   NGHTTP3_ERR_IGNORE_STREAM = -113,
-  NGHTTP3_ERR_HTTP_QPACK_DECOMPRESSION_FAILED = -402,
-  NGHTTP3_ERR_HTTP_QPACK_ENCODER_STREAM_ERROR = -403,
-  NGHTTP3_ERR_HTTP_QPACK_DECODER_STREAM_ERROR = -404,
+  NGHTTP3_ERR_STREAM_NOT_FOUND = -114,
+  NGHTTP3_ERR_IGNORE_PUSH_PROMISE = -115,
+  NGHTTP3_ERR_QPACK_DECOMPRESSION_FAILED = -402,
+  NGHTTP3_ERR_QPACK_ENCODER_STREAM_ERROR = -403,
+  NGHTTP3_ERR_QPACK_DECODER_STREAM_ERROR = -404,
   NGHTTP3_ERR_H3_FRAME_UNEXPECTED = -408,
   NGHTTP3_ERR_H3_FRAME_ERROR = -409,
   NGHTTP3_ERR_H3_MISSING_SETTINGS = -665,
@@ -115,12 +117,11 @@ typedef enum {
 #define NGHTTP3_H3_REQUEST_REJECTED 0x010b
 #define NGHTTP3_H3_REQUEST_CANCELLED 0x010c
 #define NGHTTP3_H3_REQUEST_INCOMPLETE 0x010d
-#define NGHTTP3_H3_EARLY_RESPONSE 0x010e
 #define NGHTTP3_H3_CONNECT_ERROR 0x010f
 #define NGHTTP3_H3_VERSION_FALLBACK 0x0110
-#define NGHTTP3_HTTP_QPACK_DECOMPRESSION_FAILED 0x0200
-#define NGHTTP3_HTTP_QPACK_ENCODER_STREAM_ERROR 0x0201
-#define NGHTTP3_HTTP_QPACK_DECODER_STREAM_ERROR 0x0202
+#define NGHTTP3_QPACK_DECOMPRESSION_FAILED 0x0200
+#define NGHTTP3_QPACK_ENCODER_STREAM_ERROR 0x0201
+#define NGHTTP3_QPACK_DECODER_STREAM_ERROR 0x0202
 
 /**
  * @functypedef
@@ -1266,7 +1267,6 @@ typedef enum {
   NGHTTP3_FRAME_PUSH_PROMISE = 0x05,
   NGHTTP3_FRAME_GOAWAY = 0x07,
   NGHTTP3_FRAME_MAX_PUSH_ID = 0x0d,
-  NGHTTP3_FRAME_DUPLICATE_PUSH = 0x0e,
 } nghttp3_frame_type;
 
 typedef struct {
@@ -1321,11 +1321,6 @@ typedef struct {
   int64_t push_id;
 } nghttp3_frame_max_push_id;
 
-typedef struct {
-  nghttp3_frame_hd hd;
-  int64_t push_id;
-} nghttp3_frame_duplicate_push;
-
 typedef union {
   nghttp3_frame_hd hd;
   nghttp3_frame_data data;
@@ -1335,7 +1330,6 @@ typedef union {
   nghttp3_frame_push_promise push_promise;
   nghttp3_frame_goaway goaway;
   nghttp3_frame_max_push_id max_push_id;
-  nghttp3_frame_duplicate_push duplicate_push;
 } nghttp3_frame;
 
 /**
@@ -1653,7 +1647,7 @@ NGHTTP3_EXTERN int nghttp3_conn_set_stream_user_data(nghttp3_conn *conn,
  * `nghttp3_conn_get_frame_payload_left` returns the number of bytes
  * left to read current frame payload for a stream denoted by
  * |stream_id|.  If no such stream is found, it returns
- * :enum:`NGHTTP3_ERR_INVALID_ARGUMENT`.
+ * :enum:`NGHTTP3_ERR_STREAM_NOT_FOUND`.
  */
 NGHTTP3_EXTERN int64_t nghttp3_conn_get_frame_payload_left(nghttp3_conn *conn,
                                                            int64_t stream_id);

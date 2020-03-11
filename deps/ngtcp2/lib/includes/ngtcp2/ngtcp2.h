@@ -159,7 +159,7 @@ typedef struct ngtcp2_mem {
 } ngtcp2_mem;
 
 /* NGTCP2_PROTO_VER is the supported QUIC protocol version. */
-#define NGTCP2_PROTO_VER 0xff000019u
+#define NGTCP2_PROTO_VER 0xff00001bu
 /* NGTCP2_PROTO_VER_MAX is the highest QUIC version the library
    supports. */
 #define NGTCP2_PROTO_VER_MAX NGTCP2_PROTO_VER
@@ -167,7 +167,7 @@ typedef struct ngtcp2_mem {
 /* NGTCP2_ALPN_H3 is a serialized form of HTTP/3 ALPN protocol
    identifier this library supports.  Notice that the first byte is
    the length of the following protocol identifier. */
-#define NGTCP2_ALPN_H3 "\x5h3-25"
+#define NGTCP2_ALPN_H3 "\x5h3-27"
 
 #define NGTCP2_MAX_PKTLEN_IPV4 1252
 #define NGTCP2_MAX_PKTLEN_IPV6 1232
@@ -1079,12 +1079,10 @@ typedef int (*ngtcp2_recv_retry)(ngtcp2_conn *conn, const ngtcp2_pkt_hd *hd,
  * :enum:`NGTCP2_ERR_CALLBACK_FAILURE` which makes the library call
  * return immediately.
  */
-typedef int (*ngtcp2_encrypt)(ngtcp2_conn *conn, uint8_t *dest,
-                              const ngtcp2_crypto_aead *aead,
+typedef int (*ngtcp2_encrypt)(uint8_t *dest, const ngtcp2_crypto_aead *aead,
                               const uint8_t *plaintext, size_t plaintextlen,
                               const uint8_t *key, const uint8_t *nonce,
-                              size_t noncelen, const uint8_t *ad, size_t adlen,
-                              void *user_data);
+                              size_t noncelen, const uint8_t *ad, size_t adlen);
 
 /**
  * @functypedef
@@ -1108,12 +1106,10 @@ typedef int (*ngtcp2_encrypt)(ngtcp2_conn *conn, uint8_t *dest,
  * any other errors, return :enum:`NGTCP2_ERR_CALLBACK_FAILURE` which
  * makes the library call return immediately.
  */
-typedef int (*ngtcp2_decrypt)(ngtcp2_conn *conn, uint8_t *dest,
-                              const ngtcp2_crypto_aead *aead,
+typedef int (*ngtcp2_decrypt)(uint8_t *dest, const ngtcp2_crypto_aead *aead,
                               const uint8_t *ciphertext, size_t ciphertextlen,
                               const uint8_t *key, const uint8_t *nonce,
-                              size_t noncelen, const uint8_t *ad, size_t adlen,
-                              void *user_data);
+                              size_t noncelen, const uint8_t *ad, size_t adlen);
 
 /**
  * @functypedef
@@ -1132,10 +1128,8 @@ typedef int (*ngtcp2_decrypt)(ngtcp2_conn *conn, uint8_t *dest,
  *  :enum:`NGTCP2_ERR_CALLBACK_FAILURE` which makes the library call
  *  return immediately.
  */
-typedef int (*ngtcp2_hp_mask)(ngtcp2_conn *conn, uint8_t *dest,
-                              const ngtcp2_crypto_cipher *hp,
-                              const uint8_t *hp_key, const uint8_t *sample,
-                              void *user_data);
+typedef int (*ngtcp2_hp_mask)(uint8_t *dest, const ngtcp2_crypto_cipher *hp,
+                              const uint8_t *hp_key, const uint8_t *sample);
 
 /**
  * @functypedef
@@ -2439,6 +2433,35 @@ NGTCP2_EXTERN void ngtcp2_conn_extend_max_offset(ngtcp2_conn *conn,
 /**
  * @function
  *
+ * `ngtcp2_conn_extend_max_streams_bidi` extends the number of maximum
+ * local bidirectional streams that a remote endpoint can open by |n|.
+ *
+ * The library does not increase maximum stream limit automatically.
+ * The exception is when a stream is closed without
+ * :type:`ngtcp2_stream_open` callback being called.  In this case,
+ * stream limit is increased automatically.
+ */
+NGTCP2_EXTERN void ngtcp2_conn_extend_max_streams_bidi(ngtcp2_conn *conn,
+                                                       size_t n);
+
+/**
+ * @function
+ *
+ * `ngtcp2_conn_extend_max_streams_uni` extends the number of maximum
+ * local unidirectional streams that a remote endpoint can open by
+ * |n|.
+ *
+ * The library does not increase maximum stream limit automatically.
+ * The exception is when a stream is closed without
+ * :type:`ngtcp2_stream_open` callback being called.  In this case,
+ * stream limit is increased automatically.
+ */
+NGTCP2_EXTERN void ngtcp2_conn_extend_max_streams_uni(ngtcp2_conn *conn,
+                                                      size_t n);
+
+/**
+ * @function
+ *
  * `ngtcp2_conn_get_bytes_in_flight` returns the number of bytes which
  * is the sum of outgoing QUIC packet length in flight.  This does not
  * include a packet which only includes ACK frames.
@@ -2731,6 +2754,15 @@ NGTCP2_EXTERN void ngtcp2_conn_get_connection_close_error_code(
 /**
  * @function
  *
+ * `ngtcp2_conn_is_local_stream` returns nonzero if |stream_id| denotes the
+ * stream which a local endpoint issues.
+ */
+NGTCP2_EXTERN int ngtcp2_conn_is_local_stream(ngtcp2_conn *conn,
+                                              int64_t stream_id);
+
+/**
+ * @function
+ *
  * `ngtcp2_strerror` returns the text representation of |liberr|.
  */
 NGTCP2_EXTERN const char *ngtcp2_strerror(int liberr);
@@ -2841,6 +2873,14 @@ typedef struct ngtcp2_info {
  * return a ``NULL``.  Pass in 0 to skip the version checking.
  */
 NGTCP2_EXTERN ngtcp2_info *ngtcp2_version(int least_version);
+
+/**
+ * @function
+ *
+ * `ngtcp2_is_bidi_stream` returns nonzero if |stream_id| denotes
+ * bidirectional stream.
+ */
+NGTCP2_EXTERN int ngtcp2_is_bidi_stream(int64_t stream_id);
 
 #ifdef __cplusplus
 }
