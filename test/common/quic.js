@@ -5,7 +5,7 @@
 const { debuglog } = require('util');
 const { readKeys } = require('./fixtures');
 const { createWriteStream } = require('fs');
-const kHttp3Alpn = 'h3-25';
+const kHttp3Alpn = 'h3-27';
 
 const [ key, cert, ca ] =
   readKeys(

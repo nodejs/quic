@@ -1224,37 +1224,6 @@ class QuicSession : public AsyncWrap,
   static int OnHandshakeConfirmed(
       ngtcp2_conn* conn,
       void* user_data);
-  static int OnEncrypt(
-      ngtcp2_conn* conn,
-      uint8_t* dest,
-      const ngtcp2_crypto_aead* aead,
-      const uint8_t* plaintext,
-      size_t plaintextlen,
-      const uint8_t* key,
-      const uint8_t* nonce,
-      size_t noncelen,
-      const uint8_t* ad,
-      size_t adlen,
-      void* user_data);
-  static int OnDecrypt(
-      ngtcp2_conn* conn,
-      uint8_t* dest,
-      const ngtcp2_crypto_aead* aead,
-      const uint8_t* ciphertext,
-      size_t ciphertextlen,
-      const uint8_t* key,
-      const uint8_t* nonce,
-      size_t noncelen,
-      const uint8_t* ad,
-      size_t adlen,
-      void* user_data);
-  static int OnHPMask(
-      ngtcp2_conn* conn,
-      uint8_t* dest,
-      const ngtcp2_crypto_cipher* hp,
-      const uint8_t* hp_key,
-      const uint8_t* sample,
-      void* user_data);
   static int OnReceiveStreamData(
       ngtcp2_conn* conn,
       int64_t stream_id,

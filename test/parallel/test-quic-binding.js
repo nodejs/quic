@@ -17,8 +17,8 @@ assert(quic.constants);
 
 // Version numbers used to identify IETF drafts are created by
 // adding the draft number to 0xff0000, in this case 19 (25).
-assert.strictEqual(quic.constants.NGTCP2_PROTO_VER.toString(16), 'ff000019');
-assert.strictEqual(quic.constants.NGTCP2_ALPN_H3, '\u0005h3-25');
+assert.strictEqual(quic.constants.NGTCP2_PROTO_VER.toString(16), 'ff00001b');
+assert.strictEqual(quic.constants.NGTCP2_ALPN_H3, '\u0005h3-27');
 
 // The following just tests for the presence of things we absolutely need.
 // They don't test the functionality of those things.

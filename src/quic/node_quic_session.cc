@@ -2085,6 +2085,17 @@ void QuicSession::RemoveFromSocket() {
 void QuicSession::RemoveStream(int64_t stream_id) {
   Debug(this, "Removing stream %" PRId64, stream_id);
 
+  // ngtcp2 does no extend the max streams count automatically
+  // except in very specific conditions, none of which apply
+  // once we've gotten this far. We need to manually extend when
+  // a remote peer initiated stream is removed.
+  if (!ngtcp2_conn_is_local_stream(connection_.get(), stream_id)) {
+    if (ngtcp2_is_bidi_stream(stream_id))
+      ngtcp2_conn_extend_max_streams_bidi(connection_.get(), 1);
+    else
+      ngtcp2_conn_extend_max_streams_uni(connection_.get(), 1);
+  }
+
   // This will have the side effect of destroying the QuicStream
   // instance.
   streams_.erase(stream_id);
@@ -3091,22 +3102,6 @@ int QuicSession::OnHandshakeConfirmed(
   return 0;
 }
 
-// HP here is short for "Header Protection" ... ngtcp2 calls this
-// when it needs to generate the masking material necessary for
-// header protection. ngtcp2_crypto largely takes care of this
-// for us.
-// See https://tools.ietf.org/html/draft-ietf-quic-tls-24#section-5.4.1
-int QuicSession::OnHPMask(
-    ngtcp2_conn* conn,
-    uint8_t* dest,
-    const ngtcp2_crypto_cipher* hp,
-    const uint8_t* key,
-    const uint8_t* sample,
-    void* user_data) {
-  return ngtcp2_crypto_hp_mask(dest, hp, key, sample) == 0 ?
-      0 : NGTCP2_ERR_CALLBACK_FAILURE;
-}
-
 // Called by ngtcp2 when a chunk of stream data has been received.
 // Currently, ngtcp2 ensures that this callback is always called
 // with an offset parameter strictly larger than the previous call's
@@ -3384,7 +3379,7 @@ const ngtcp2_conn_callbacks QuicSession::callbacks[2] = {
     OnVersionNegotiation,
     ngtcp2_crypto_encrypt_cb,
     ngtcp2_crypto_decrypt_cb,
-    OnHPMask,
+    ngtcp2_crypto_hp_mask_cb,
     OnReceiveStreamData,
     OnAckedCryptoOffset,
     OnAckedStreamDataOffset,
@@ -3416,7 +3411,7 @@ const ngtcp2_conn_callbacks QuicSession::callbacks[2] = {
     nullptr,  // recv_version_negotiation
     ngtcp2_crypto_encrypt_cb,
     ngtcp2_crypto_decrypt_cb,
-    OnHPMask,
+    ngtcp2_crypto_hp_mask_cb,
     OnReceiveStreamData,
     OnAckedCryptoOffset,
     OnAckedStreamDataOffset,
