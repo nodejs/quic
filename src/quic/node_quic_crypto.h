@@ -36,7 +36,7 @@ class QuicPacket;
 // given SecureContext with the defaults for the given
 // QUIC side (client or server).
 void InitializeSecureContext(
-    crypto::SecureContext* sc,
+    BaseObjectPtr<crypto::SecureContext> sc,
     bool early_data,
     ngtcp2_crypto_side side);
 

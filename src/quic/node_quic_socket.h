@@ -305,7 +305,7 @@ class QuicSocket : public AsyncWrap,
   inline void DisassociateStatelessResetToken(
       const StatelessResetToken& token);
   void Listen(
-      crypto::SecureContext* context,
+      BaseObjectPtr<crypto::SecureContext> context,
       const sockaddr* preferred_address = nullptr,
       const std::string& alpn = NGTCP2_ALPN_H3,
       uint32_t options = 0);
@@ -330,8 +330,8 @@ class QuicSocket : public AsyncWrap,
   // is not.
   inline bool ToggleStatelessReset();
 
-  crypto::SecureContext* server_secure_context() const {
-    return server_secure_context_.get();
+  BaseObjectPtr<crypto::SecureContext> server_secure_context() const {
+    return server_secure_context_;
   }
 
   void MemoryInfo(MemoryTracker* tracker) const override;

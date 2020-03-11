@@ -997,11 +997,11 @@ int QuicCryptoContext::OnOCSP() {
 // The OnCertDone function is called by the QuicSessionOnCertDone
 // function when usercode is done handling the OCSPRequest event.
 void QuicCryptoContext::OnOCSPDone(
-    crypto::SecureContext* context,
+    BaseObjectPtr<crypto::SecureContext> context,
     Local<Value> ocsp_response) {
   Debug(session(),
         "OCSPRequest completed. Context Provided? %s, OCSP Provided? %s",
-        context != nullptr ? "Yes" : "No",
+        context ? "Yes" : "No",
         ocsp_response->IsArrayBufferView() ? "Yes" : "No");
   // Continue the TLS handshake when this function exits
   // otherwise it will stall and fail.
@@ -1010,7 +1010,7 @@ void QuicCryptoContext::OnOCSPDone(
   // Disable the callback at this point so we don't loop continuously
   session_->state_[IDX_QUIC_SESSION_STATE_CERT_ENABLED] = 0;
 
-  if (context != nullptr) {
+  if (context) {
     int err = crypto::UseSNIContext(ssl_, context);
     if (!err) {
       unsigned long err = ERR_get_error();  // NOLINT(runtime/int)
@@ -1411,7 +1411,7 @@ QuicSession::QuicSession(
     v8::Local<v8::Object> wrap,
     const SocketAddress& local_addr,
     const SocketAddress& remote_addr,
-    SecureContext* context,
+    BaseObjectPtr<SecureContext> secure_context,
     ngtcp2_transport_params* early_transport_params,
     crypto::SSLSessionPointer early_session_ticket,
     Local<Value> dcid,
@@ -1424,7 +1424,7 @@ QuicSession::QuicSession(
         NGTCP2_CRYPTO_SIDE_CLIENT,
         socket,
         wrap,
-        context,
+        secure_context,
         AsyncWrap::PROVIDER_QUICCLIENTSESSION,
         alpn,
         hostname,
@@ -1446,7 +1446,7 @@ QuicSession::QuicSession(
     ngtcp2_crypto_side side,
     QuicSocket* socket,
     Local<Object> wrap,
-    SecureContext* ctx,
+    BaseObjectPtr<SecureContext> secure_context,
     AsyncWrap::ProviderType provider_type,
     const std::string& alpn,
     const std::string& hostname,
@@ -1468,7 +1468,12 @@ QuicSession::QuicSession(
   PushListener(&default_listener_);
   set_connection_id_strategy(RandomConnectionIDStrategy);
   set_preferred_address_strategy(preferred_address_strategy);
-  crypto_context_.reset(new QuicCryptoContext(this, ctx, side, options));
+  crypto_context_.reset(
+      new QuicCryptoContext(
+          this,
+          secure_context,
+          side,
+          options));
   application_.reset(SelectApplication(this));
 
   // TODO(@jasnell): For now, the following is a check rather than properly
@@ -2731,7 +2736,9 @@ void QuicSessionOnCertDone(const FunctionCallbackInfo<Value>& args) {
   crypto::SecureContext* context = nullptr;
   if (args[0]->IsObject() && cons->HasInstance(args[0]))
     context = Unwrap<crypto::SecureContext>(args[0].As<Object>());
-  session->crypto_context()->OnOCSPDone(context, args[1]);
+  session->crypto_context()->OnOCSPDone(
+      BaseObjectPtr<crypto::SecureContext>(context),
+      args[1]);
 }
 }  // namespace
 
@@ -2770,7 +2777,7 @@ BaseObjectPtr<QuicSession> QuicSession::CreateClient(
     QuicSocket* socket,
     const SocketAddress& local_addr,
     const SocketAddress& remote_addr,
-    SecureContext* context,
+    BaseObjectPtr<SecureContext> secure_context,
     ngtcp2_transport_params* early_transport_params,
     crypto::SSLSessionPointer early_session_ticket,
     Local<Value> dcid,
@@ -2792,7 +2799,7 @@ BaseObjectPtr<QuicSession> QuicSession::CreateClient(
           obj,
           local_addr,
           remote_addr,
-          context,
+          secure_context,
           early_transport_params,
           std::move(early_session_ticket),
           dcid,
@@ -3668,7 +3675,7 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
           socket,
           socket->local_address(),
           remote_addr,
-          sc,
+          BaseObjectPtr<crypto::SecureContext>(sc),
           has_early_transport_params ? &early_transport_params : nullptr,
           std::move(early_session_ticket),
           args[ARG_IDX::DCID],

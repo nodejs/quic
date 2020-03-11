@@ -802,7 +802,7 @@ void InitializeTLS(QuicSession* session, const crypto::SSLPointer& ssl) {
 }
 
 void InitializeSecureContext(
-    crypto::SecureContext* sc,
+    BaseObjectPtr<crypto::SecureContext> sc,
     bool early_data,
     ngtcp2_crypto_side side) {
   // TODO(@jasnell): Using a static value for this at the moment but

@@ -17,8 +17,6 @@
 
 namespace node {
 
-using crypto::SecureContext;
-
 namespace quic {
 
 void QuicSessionConfig::GenerateStatelessResetToken(
@@ -58,13 +56,14 @@ void QuicSessionConfig::set_qlog(const ngtcp2_qlog_settings& qlog_) {
 
 QuicCryptoContext::QuicCryptoContext(
     QuicSession* session,
-    SecureContext* ctx,
+    BaseObjectPtr<crypto::SecureContext> secure_context,
     ngtcp2_crypto_side side,
     uint32_t options) :
     session_(session),
+    secure_context_(secure_context),
     side_(side),
     options_(options) {
-  ssl_.reset(SSL_new(ctx->ctx_.get()));
+  ssl_.reset(SSL_new(secure_context_->ctx_.get()));
   CHECK(ssl_);
 }
 

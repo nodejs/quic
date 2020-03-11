@@ -304,16 +304,16 @@ void QuicSocket::MemoryInfo(MemoryTracker* tracker) const {
 }
 
 void QuicSocket::Listen(
-    SecureContext* sc,
+    BaseObjectPtr<SecureContext> sc,
     const sockaddr* preferred_address,
     const std::string& alpn,
     uint32_t options) {
-  CHECK_NOT_NULL(sc);
+  CHECK(sc);
   CHECK(!server_secure_context_);
   CHECK(!is_flag_set(QUICSOCKET_FLAGS_SERVER_LISTENING));
   Debug(this, "Starting to listen");
   server_session_config_.Set(env(), preferred_address);
-  server_secure_context_.reset(sc);
+  server_secure_context_ = sc;
   server_alpn_ = alpn;
   server_options_ = options;
   set_flag(QUICSOCKET_FLAGS_SERVER_LISTENING);
@@ -1077,7 +1077,11 @@ void QuicSocketListen(const FunctionCallbackInfo<Value>& args) {
   uint32_t options = 0;
   if (!args[5]->Uint32Value(env->context()).To(&options)) return;
 
-  socket->Listen(sc, preferred_address, alpn, options);
+  socket->Listen(
+      BaseObjectPtr<crypto::SecureContext>(sc),
+      preferred_address,
+      alpn,
+      options);
 }
 
 void QuicSocketStopListening(const FunctionCallbackInfo<Value>& args) {

@@ -388,7 +388,7 @@ class QuicCryptoContext : public MemoryRetainer {
   int OnOCSP();
 
   void OnOCSPDone(
-      crypto::SecureContext* context,
+      BaseObjectPtr<crypto::SecureContext> secure_context,
       v8::Local<v8::Value> ocsp_response);
 
   bool OnSecrets(
@@ -461,7 +461,7 @@ class QuicCryptoContext : public MemoryRetainer {
  private:
   inline QuicCryptoContext(
       QuicSession* session,
-      crypto::SecureContext* ctx,
+      BaseObjectPtr<crypto::SecureContext> secure_context,
       ngtcp2_crypto_side side,
       uint32_t options);
 
@@ -472,6 +472,7 @@ class QuicCryptoContext : public MemoryRetainer {
       size_t secretlen);
 
   BaseObjectWeakPtr<QuicSession> session_;
+  BaseObjectPtr<crypto::SecureContext> secure_context_;
   ngtcp2_crypto_side side_;
   crypto::SSLPointer ssl_;
   QuicBuffer handshake_[3];
@@ -710,7 +711,7 @@ class QuicSession : public AsyncWrap,
       QuicSocket* socket,
       const SocketAddress& local_addr,
       const SocketAddress& remote_addr,
-      crypto::SecureContext* context,
+      BaseObjectPtr<crypto::SecureContext> secure_context,
       ngtcp2_transport_params* early_transport_params,
       crypto::SSLSessionPointer early_session_ticket,
       v8::Local<v8::Value> dcid,
@@ -734,7 +735,7 @@ class QuicSession : public AsyncWrap,
       // remain the same.
       QuicSocket* socket,
       v8::Local<v8::Object> wrap,
-      crypto::SecureContext* ctx,
+      BaseObjectPtr<crypto::SecureContext> secure_context,
       AsyncWrap::ProviderType provider_type,
       // QUIC is generally just a transport. The ALPN identifier
       // is used to specify the application protocol that is
@@ -769,7 +770,7 @@ class QuicSession : public AsyncWrap,
       v8::Local<v8::Object> wrap,
       const SocketAddress& local_addr,
       const SocketAddress& remote_addr,
-      crypto::SecureContext* context,
+      BaseObjectPtr<crypto::SecureContext> secure_context,
       ngtcp2_transport_params* early_transport_params,
       crypto::SSLSessionPointer early_session_ticket,
       v8::Local<v8::Value> dcid,

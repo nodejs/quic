@@ -92,7 +92,10 @@ void QuicInitSecureContext(const FunctionCallbackInfo<Value>& args) {
 
   bool early_data = args[2]->BooleanValue(env->isolate());
 
-  InitializeSecureContext(sc, early_data, side);
+  InitializeSecureContext(
+      BaseObjectPtr<crypto::SecureContext>(sc),
+      early_data,
+      side);
 
   if (!crypto::SetGroups(sc, *groups))
     THROW_ERR_QUIC_CANNOT_SET_GROUPS(env);
