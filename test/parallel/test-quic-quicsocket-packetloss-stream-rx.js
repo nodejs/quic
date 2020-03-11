@@ -19,7 +19,9 @@ const {
   ca,
   debug
 } = require('../common/quic');
-const { pipeline } = require('stream');
+// TODO(@jasnell): There's currently a bug in pipeline when piping
+// a duplex back into to itself.
+// const { pipeline } = require('stream');
 
 const { createSocket } = require('quic');
 
