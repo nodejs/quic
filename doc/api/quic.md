@@ -1622,7 +1622,7 @@ An array of `QuicEndpoint` instances associated with the `QuicSocket`.
 added: REPLACEME
 -->
 
-* `options` {Objt}
+* `options` {Object}
   * `alpn` {string} A required ALPN protocol identifier.
   * `ca` {string|string[]|Buffer|Buffer[]} Optionally override the trusted CA
     certificates. Default is to trust the well-known CAs curated by Mozilla.
