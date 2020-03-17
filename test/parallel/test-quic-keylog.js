@@ -11,7 +11,7 @@ const assert = require('assert');
 const { key, cert, ca } = require('../common/quic');
 const { once } = require('events');
 
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 
 const kKeylogs = [
   /^CLIENT_HANDSHAKE_TRAFFIC_SECRET .*/,
@@ -27,8 +27,8 @@ const kKeylogs = [
 const options = { key, cert, ca, alpn: 'zzz' };
 
 (async () => {
-  const server = createSocket({ server: options });
-  const client = createSocket({ client: options });
+  const server = createQuicSocket({ server: options });
+  const client = createQuicSocket({ client: options });
 
   const kServerKeylogs = Array.from(kKeylogs);
   const kClientKeylogs = Array.from(kKeylogs);

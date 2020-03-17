@@ -18,7 +18,7 @@ const ca = fixtures.readKey('ca1-cert.pem', 'binary');
 const { debuglog } = require('util');
 const debug = debuglog('test');
 
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 
 const kServerPort = process.env.NODE_DEBUG_KEYLOG ? 5678 : 0;
 const kClientPort = process.env.NODE_DEBUG_KEYLOG ? 5679 : 0;
@@ -27,7 +27,7 @@ const kServerName = 'agent2';  // Intentionally the wrong servername
 const kALPN = 'zzz';  // ALPN can be overriden to whatever we want
 
 let client;
-const server = createSocket({ endpoint: { port: kServerPort } });
+const server = createQuicSocket({ endpoint: { port: kServerPort } });
 
 server.listen({ key, cert, ca, alpn: kALPN });
 
@@ -59,7 +59,7 @@ server.on('session', common.mustCall((session) => {
 server.on('ready', common.mustCall(() => {
   debug('Server is listening on port %d', server.endpoints[0].address.port);
 
-  client = createSocket({
+  client = createQuicSocket({
     endpoint: { port: kClientPort },
     client: { key, cert, ca, alpn: kALPN }
   });

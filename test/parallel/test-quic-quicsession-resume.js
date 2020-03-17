@@ -16,12 +16,12 @@ const {
   debug,
 } = require('../common/quic');
 
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 
 const options = { key, cert, ca, alpn: 'zzz' };
 
-const server = createSocket({ server: options });
-const client = createSocket({ client: options });
+const server = createQuicSocket({ server: options });
+const client = createQuicSocket({ client: options });
 
 const countdown = new Countdown(2, () => {
   server.close();

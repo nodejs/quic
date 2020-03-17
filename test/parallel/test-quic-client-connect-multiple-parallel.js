@@ -7,7 +7,7 @@ if (!common.hasQuic)
 // Test that .connect() can be called multiple times with different servers.
 
 const assert = require('assert');
-const quic = require('quic');
+const { createQuicSocket } = require('net');
 
 const { key, cert, ca } = require('../common/quic');
 const { once } = require('events');
@@ -15,7 +15,7 @@ const { once } = require('events');
 (async function() {
   const servers = [];
   for (let i = 0; i < 3; i++) {
-    const server = quic.createSocket();
+    const server = createQuicSocket();
 
     server.listen({ key, cert, ca, alpn: 'meow' });
 
@@ -33,7 +33,7 @@ const { once } = require('events');
 
   await Promise.all(servers.map((server) => once(server, 'ready')));
 
-  const client = quic.createSocket({ client: { key, cert, ca, alpn: 'meow' } });
+  const client = createQuicSocket({ client: { key, cert, ca, alpn: 'meow' } });
 
   let done = 0;
   for (const server of servers) {

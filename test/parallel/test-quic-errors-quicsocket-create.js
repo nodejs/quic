@@ -17,81 +17,81 @@ async_hooks.createHook({
   })
 }).enable();
 
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 
 // Test invalid QuicSocket options argument
 [1, 'test', false, 1n, null].forEach((i) => {
-  assert.throws(() => createSocket(i), {
+  assert.throws(() => createQuicSocket(i), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
 });
 
 // Test invalid QuicSocket port argument option
 [-1, 'test', 1n, {}, [], NaN, false].forEach((port) => {
-  assert.throws(() => createSocket({ endpoint: { port } }), {
+  assert.throws(() => createQuicSocket({ endpoint: { port } }), {
     code: 'ERR_SOCKET_BAD_PORT'
   });
 });
 
 // Test invalid QuicSocket addressargument option
 [-1, 10, 1n, {}, [], NaN, false].forEach((address) => {
-  assert.throws(() => createSocket({ endpoint: { address } }), {
+  assert.throws(() => createQuicSocket({ endpoint: { address } }), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
 });
 
 // Test invalid QuicSocket type argument option
 [1, false, 1n, {}, null, NaN].forEach((type) => {
-  assert.throws(() => createSocket({ endpoint: { type } }), {
+  assert.throws(() => createQuicSocket({ endpoint: { type } }), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
 });
 
 // Test invalid QuicSocket ipv6Only argument option
 [1, NaN, 1n, null, {}, []].forEach((ipv6Only) => {
-  assert.throws(() => createSocket({ endpoint: { ipv6Only } }), {
+  assert.throws(() => createQuicSocket({ endpoint: { ipv6Only } }), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
 });
 
 // Test invalid QuicSocket reuseAddr argument option
 [1, NaN, 1n, null, {}, []].forEach((reuseAddr) => {
-  assert.throws(() => createSocket({ endpoint: { reuseAddr } }), {
+  assert.throws(() => createQuicSocket({ endpoint: { reuseAddr } }), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
 });
 
 // Test invalid QuicSocket lookup argument option
 [1, 1n, {}, [], 'test', true].forEach((lookup) => {
-  assert.throws(() => createSocket({ lookup }), {
+  assert.throws(() => createQuicSocket({ lookup }), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
 });
 
 // Test invalid QuicSocket validateAddress argument option
 [1, NaN, 1n, null, {}, []].forEach((validateAddress) => {
-  assert.throws(() => createSocket({ validateAddress }), {
+  assert.throws(() => createQuicSocket({ validateAddress }), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
 });
 
 // Test invalid QuicSocket validateAddressLRU argument option
 [1, NaN, 1n, null, {}, []].forEach((validateAddressLRU) => {
-  assert.throws(() => createSocket({ validateAddressLRU }), {
+  assert.throws(() => createQuicSocket({ validateAddressLRU }), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
 });
 
 // Test invalid QuicSocket autoClose argument option
 [1, NaN, 1n, null, {}, []].forEach((autoClose) => {
-  assert.throws(() => createSocket({ autoClose }), {
+  assert.throws(() => createQuicSocket({ autoClose }), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
 });
 
 // Test invalid QuicSocket qlog argument option
 [1, NaN, 1n, null, {}, []].forEach((qlog) => {
-  assert.throws(() => createSocket({ qlog }), {
+  assert.throws(() => createQuicSocket({ qlog }), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
 });
@@ -99,21 +99,21 @@ const { createSocket } = require('quic');
 
 // Test invalid QuicSocket retryTokenTimeout option
 [0, 61, NaN].forEach((retryTokenTimeout) => {
-  assert.throws(() => createSocket({ retryTokenTimeout }), {
+  assert.throws(() => createQuicSocket({ retryTokenTimeout }), {
     code: 'ERR_OUT_OF_RANGE'
   });
 });
 
 // Test invalid QuicSocket retryTokenTimeout option
 ['test', null, 1n, {}, [], false].forEach((retryTokenTimeout) => {
-  assert.throws(() => createSocket({ retryTokenTimeout }), {
+  assert.throws(() => createQuicSocket({ retryTokenTimeout }), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
 });
 
 // Test invalid QuicSocket maxConnectionsPerHost option
 [0, Number.MAX_SAFE_INTEGER + 1, NaN].forEach((maxConnectionsPerHost) => {
-  assert.throws(() => createSocket({ maxConnectionsPerHost }), {
+  assert.throws(() => createQuicSocket({ maxConnectionsPerHost }), {
     code: 'ERR_OUT_OF_RANGE'
   });
 });
@@ -127,14 +127,14 @@ const { createSocket } = require('quic');
   [],
   false
 ].forEach((maxConnectionsPerHost) => {
-  assert.throws(() => createSocket({ maxConnectionsPerHost }), {
+  assert.throws(() => createQuicSocket({ maxConnectionsPerHost }), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
 });
 
 // Test invalid QuicSocket maxConnections option
 [0, Number.MAX_SAFE_INTEGER + 1, NaN].forEach((maxConnections) => {
-  assert.throws(() => createSocket({ maxConnections }), {
+  assert.throws(() => createQuicSocket({ maxConnections }), {
     code: 'ERR_OUT_OF_RANGE'
   });
 });
@@ -148,14 +148,14 @@ const { createSocket } = require('quic');
   [],
   false
 ].forEach((maxConnections) => {
-  assert.throws(() => createSocket({ maxConnections }), {
+  assert.throws(() => createQuicSocket({ maxConnections }), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
 });
 
 // Test invalid QuicSocket maxStatelessResetsPerHost option
 [0, Number.MAX_SAFE_INTEGER + 1, NaN].forEach((maxStatelessResetsPerHost) => {
-  assert.throws(() => createSocket({ maxStatelessResetsPerHost }), {
+  assert.throws(() => createQuicSocket({ maxStatelessResetsPerHost }), {
     code: 'ERR_OUT_OF_RANGE'
   });
 });
@@ -169,19 +169,19 @@ const { createSocket } = require('quic');
   [],
   false
 ].forEach((maxStatelessResetsPerHost) => {
-  assert.throws(() => createSocket({ maxStatelessResetsPerHost }), {
+  assert.throws(() => createQuicSocket({ maxStatelessResetsPerHost }), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
 });
 
 [1, 1n, false, 'test'].forEach((options) => {
-  assert.throws(() => createSocket({ endpoint: options }), {
+  assert.throws(() => createQuicSocket({ endpoint: options }), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
-  assert.throws(() => createSocket({ client: options }), {
+  assert.throws(() => createQuicSocket({ client: options }), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
-  assert.throws(() => createSocket({ server: options }), {
+  assert.throws(() => createQuicSocket({ server: options }), {
     code: 'ERR_INVALID_ARG_TYPE'
   });
 });

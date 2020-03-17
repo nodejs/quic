@@ -73,7 +73,6 @@
       'lib/process.js',
       'lib/punycode.js',
       'lib/querystring.js',
-      'lib/quic.js',
       'lib/readline.js',
       'lib/repl.js',
       'lib/stream.js',

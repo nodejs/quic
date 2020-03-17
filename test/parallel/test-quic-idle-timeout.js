@@ -6,7 +6,7 @@ if (!common.hasQuic)
   common.skip('missing quic');
 
 const assert = require('assert');
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 const { key, cert, ca } = require('../common/quic');
 const { once } = require('events');
 
@@ -18,8 +18,8 @@ const options = { key, cert, ca, alpn: kALPN };
 // if the idleTimeout is not working correctly.
 
 (async () => {
-  const server = createSocket({ server: options });
-  const client = createSocket({ client: options });
+  const server = createQuicSocket({ server: options });
+  const client = createQuicSocket({ client: options });
 
   server.listen();
   server.on('session', common.mustCall());
@@ -46,8 +46,8 @@ const options = { key, cert, ca, alpn: kALPN };
 
 
 (async () => {
-  const server = createSocket({ server: options });
-  const client = createSocket({ client: options });
+  const server = createQuicSocket({ server: options });
+  const client = createQuicSocket({ client: options });
 
   server.listen({ idleTimeout });
 

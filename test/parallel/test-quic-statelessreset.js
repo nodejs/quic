@@ -17,14 +17,14 @@ const {
 } = require('internal/stream_base_commons');
 const { silentCloseSession } = internalBinding('quic');
 
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 
 const kStatelessResetToken =
   Buffer.from('000102030405060708090A0B0C0D0E0F', 'hex');
 
 let client;
 
-const server = createSocket({ statelessResetSecret: kStatelessResetToken });
+const server = createQuicSocket({ statelessResetSecret: kStatelessResetToken });
 
 server.listen({ key, cert, ca, alpn: 'zzz' });
 
@@ -50,7 +50,7 @@ server.on('close', common.mustCall(() => {
 server.on('ready', common.mustCall(() => {
   const endpoint = server.endpoints[0];
 
-  client = createSocket({ client: { key, cert, ca, alpn: 'zzz' } });
+  client = createQuicSocket({ client: { key, cert, ca, alpn: 'zzz' } });
 
   client.on('close', common.mustCall());
 

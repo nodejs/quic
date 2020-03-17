@@ -17,11 +17,11 @@ const {
   kClientPort
 } = require('../common/quic');
 
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 const options = { key, cert, ca, alpn: 'zzz' };
 
 let client;
-const server = createSocket({
+const server = createQuicSocket({
   endpoint: { port: kServerPort },
   server: options
 });
@@ -41,7 +41,7 @@ server.on('session', common.mustNotCall());
 
 server.on('ready', common.mustCall(() => {
   debug('Server is listening on port %d', server.endpoints[0].address.port);
-  client = createSocket({
+  client = createQuicSocket({
     endpoint: { port: kClientPort },
     client: options
   });

@@ -10,7 +10,7 @@ if (!common.hasQuic)
 
 const { createHook } = require('async_hooks');
 const assert = require('assert');
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 
 // Ensure that a QuicClientSession handle is never created during the
 // error condition tests (ensures that argument and error validation)
@@ -21,7 +21,7 @@ createHook({
   }
 }).enable();
 
-const client = createSocket();
+const client = createQuicSocket();
 
 // Test invalid minDHSize options argument
 ['test', 1n, {}, [], false].forEach((minDHSize) => {

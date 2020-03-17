@@ -23,13 +23,13 @@ const {
 // a duplex back into to itself.
 // const { pipeline } = require('stream');
 
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 
 const kData = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const options = { key, cert, ca, alpn: 'echo' };
 
-const client = createSocket({ client: options });
-const server = createSocket({ server: options });
+const client = createQuicSocket({ client: options });
+const server = createQuicSocket({ server: options });
 
 // Both client and server will drop received packets about 20% of the time
 // It is important to keep in mind that this will make the runtime of the

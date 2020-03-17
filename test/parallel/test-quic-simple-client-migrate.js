@@ -14,13 +14,13 @@ const {
   debug,
 } = require('../common/quic');
 
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 const { pipeline } = require('stream');
 
 let req;
 let client;
 let client2;
-const server = createSocket();
+const server = createQuicSocket();
 
 const options = { key, cert, ca, alpn: 'zzz' };
 const countdown = new Countdown(2, () => {
@@ -47,8 +47,8 @@ server.on('session', common.mustCall((session) => {
 server.on('ready', common.mustCall(() => {
   debug('Server is listening on port %d', server.endpoints[0].address.port);
 
-  client = createSocket({ client: options });
-  client2 = createSocket({ client: options });
+  client = createQuicSocket({ client: options });
+  client2 = createQuicSocket({ client: options });
 
   req = client.connect({
     address: common.localhostIPv4,

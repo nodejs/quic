@@ -10,7 +10,7 @@ if (!common.hasQuic)
   common.skip('missing quic');
 
 const assert = require('assert');
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 const { key, cert, ca } = require('../common/quic');
 const { once } = require('events');
 
@@ -19,7 +19,11 @@ const kALPN = 'zzz';
 // Setting `type` to `udp4` while setting `ipv6Only` to `true` is possible
 // and it will throw an error.
 {
-  const server = createSocket({ endpoint: { type: 'udp4', ipv6Only: true } });
+  const server = createQuicSocket({
+    endpoint: {
+      type: 'udp4',
+      ipv6Only: true
+    } });
 
   server.on('error', common.mustCall((err) => {
     assert.strictEqual(err.code, 'EINVAL');
@@ -32,8 +36,12 @@ const kALPN = 'zzz';
 // Connecting ipv6 server by "127.0.0.1" should work when `ipv6Only`
 // is set to `false`.
 (async () => {
-  const server = createSocket({ endpoint: { type: 'udp6', ipv6Only: false } });
-  const client = createSocket({ client: { key, cert, ca, alpn: kALPN } });
+  const server = createQuicSocket({
+    endpoint: {
+      type: 'udp6',
+      ipv6Only: false
+    } });
+  const client = createQuicSocket({ client: { key, cert, ca, alpn: kALPN } });
 
   server.listen({ key, cert, ca, alpn: kALPN });
 
@@ -67,8 +75,12 @@ const kALPN = 'zzz';
 // When the `ipv6Only` set to `true`, a client cann't connect to it
 // through "127.0.0.1".
 (async () => {
-  const server = createSocket({ endpoint: { type: 'udp6', ipv6Only: true } });
-  const client = createSocket({ client: { key, cert, ca, alpn: kALPN } });
+  const server = createQuicSocket({
+    endpoint: {
+      type: 'udp6',
+      ipv6Only: true
+    } });
+  const client = createQuicSocket({ client: { key, cert, ca, alpn: kALPN } });
 
   server.listen({ key, cert, ca, alpn: kALPN });
   server.on('session', common.mustNotCall());
@@ -97,8 +109,8 @@ const kALPN = 'zzz';
 // Creating the QuicSession fails when connect type does not match the
 // the connect IP address...
 (async () => {
-  const server = createSocket({ endpoint: { type: 'udp6' } });
-  const client = createSocket({ client: { key, cert, ca, alpn: kALPN } });
+  const server = createQuicSocket({ endpoint: { type: 'udp6' } });
+  const client = createQuicSocket({ client: { key, cert, ca, alpn: kALPN } });
 
   server.listen({ key, cert, ca, alpn: kALPN });
   server.on('session', common.mustNotCall());

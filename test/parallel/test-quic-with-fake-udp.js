@@ -8,14 +8,14 @@ if (!common.hasQuic)
 
 const { makeUDPPair } = require('../common/udppair');
 const assert = require('assert');
-const quic = require('quic');
+const { createQuicSocket } = require('net');
 const { kUDPHandleForTesting } = require('internal/quic/core');
 
 const { key, cert, ca } = require('../common/quic');
 
 const { serverSide, clientSide } = makeUDPPair();
 
-const server = quic.createSocket({
+const server = createQuicSocket({
   endpoint: { [kUDPHandleForTesting]: serverSide._handle }
 });
 
@@ -36,7 +36,7 @@ server.on('session', common.mustCall((session) => {
 }));
 
 server.on('ready', common.mustCall(() => {
-  const client = quic.createSocket({
+  const client = createQuicSocket({
     endpoint: { [kUDPHandleForTesting]: clientSide._handle },
     client: { key, cert, ca, alpn: 'meow' }
   });

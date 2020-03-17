@@ -5,11 +5,11 @@ if (!common.hasQuic)
   common.skip('missing quic');
 
 const path = require('path');
-const quic = require('quic');
+const { createQuicSocket } = require('net');
 
 const { key, cert, ca } = require('../common/quic');
 
-const server = quic.createSocket();
+const server = createQuicSocket();
 
 server.listen({ key, cert, ca, alpn: 'meow' });
 
@@ -34,7 +34,7 @@ server.on('session', common.mustCall((session) => {
 }));
 
 server.on('ready', common.mustCall(() => {
-  const client = quic.createSocket({ client: { key, cert, ca, alpn: 'meow' } });
+  const client = createQuicSocket({ client: { key, cert, ca, alpn: 'meow' } });
 
   const req = client.connect({
     address: 'localhost',

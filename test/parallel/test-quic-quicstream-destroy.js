@@ -17,11 +17,11 @@ const {
   ca
 } = require('../common/quic');
 
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 
 const options = { key, cert, ca, alpn: 'zzz' };
 
-const server = createSocket({ server: options });
+const server = createQuicSocket({ server: options });
 
 server.listen();
 
@@ -39,7 +39,7 @@ server.on('session', common.mustCall((session) => {
 server.on('ready', common.mustCall(() => {
   debug('Server is listening on port %d', server.endpoints[0].address.port);
 
-  const client = createSocket({ client: options });
+  const client = createQuicSocket({ client: options });
 
   client.on('close', common.mustCall(() => {
     debug('Client closing. Duration', client.duration);

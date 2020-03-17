@@ -9,11 +9,11 @@ if (!common.hasQuic)
   common.skip('missing quic');
 
 const assert = require('assert');
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 
 // Test invalid callback function
 {
-  const server = createSocket();
+  const server = createQuicSocket();
   [1, 1n].forEach((cb) => {
     assert.throws(() => server.listen({}, cb), {
       code: 'ERR_INVALID_CALLBACK'
@@ -23,7 +23,7 @@ const { createSocket } = require('quic');
 
 // Test QuicSocket is already listening
 {
-  const server = createSocket();
+  const server = createQuicSocket();
   server.listen();
   assert.throws(() => server.listen(), {
     code: 'ERR_QUICSOCKET_LISTENING'
@@ -33,7 +33,7 @@ const { createSocket } = require('quic');
 
 // Test QuicSocket listen after destroy error
 {
-  const server = createSocket();
+  const server = createQuicSocket();
   server.close();
   assert.throws(() => server.listen(), {
     code: 'ERR_QUICSOCKET_DESTROYED'
@@ -42,7 +42,7 @@ const { createSocket } = require('quic');
 
 {
   // Test incorrect ALPN
-  const server = createSocket();
+  const server = createQuicSocket();
   [1, 1n, true, {}, [], null].forEach((alpn) => {
     assert.throws(() => server.listen({ alpn }), {
       code: 'ERR_INVALID_ARG_TYPE'

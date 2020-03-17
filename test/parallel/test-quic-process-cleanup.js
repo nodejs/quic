@@ -8,7 +8,7 @@ if (!common.hasQuic)
 // well. We use Workers because they have a more clearly defined shutdown
 // sequence and we can stop execution at any point.
 
-const quic = require('quic');
+const { createQuicSocket } = require('net');
 const { Worker, workerData } = require('worker_threads');
 
 if (workerData == null) {
@@ -20,7 +20,7 @@ if (workerData == null) {
 const { key, cert, ca } = require('../common/quic');
 const options = { key, cert, ca, alpn: 'meow' };
 
-const server = quic.createSocket({ server: options });
+const server = createQuicSocket({ server: options });
 
 server.listen();
 
@@ -38,7 +38,7 @@ server.on('session', common.mustCall((session) => {
 }));
 
 server.on('ready', common.mustCall(() => {
-  const client = quic.createSocket({ client: options });
+  const client = createQuicSocket({ client: options });
 
   const req = client.connect({
     address: common.localhostIPv4,

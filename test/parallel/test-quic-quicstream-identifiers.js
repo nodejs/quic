@@ -26,11 +26,11 @@ const Countdown = require('../common/countdown');
 const assert = require('assert');
 const { debug, key, cert } = require('../common/quic');
 
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 const options = { key, cert, alpn: 'zzz' };
 
 let client;
-const server = createSocket({ server: options });
+const server = createQuicSocket({ server: options });
 
 const countdown = new Countdown(4, () => {
   debug('Countdown expired. Closing sockets');
@@ -99,7 +99,7 @@ server.on('session', common.mustCall((session) => {
 
 server.on('ready', common.mustCall(() => {
   debug('Server listening on port %d', server.endpoints[0].address.port);
-  client = createSocket({ client: options });
+  client = createQuicSocket({ client: options });
   const req = client.connect({
     address: common.localhostIPv4,
     port: server.endpoints[0].address.port,

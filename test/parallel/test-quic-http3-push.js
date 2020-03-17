@@ -11,10 +11,10 @@ const Countdown = require('../common/countdown');
 const assert = require('assert');
 const { key, cert, ca, kHttp3Alpn } = require('../common/quic');
 
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 
 let client;
-const server = createSocket();
+const server = createQuicSocket();
 
 const countdown = new Countdown(2, () => {
   server.close();
@@ -81,7 +81,7 @@ server.on('session', common.mustCall((session) => {
 }));
 
 server.on('ready', common.mustCall(() => {
-  client = createSocket({ client: options });
+  client = createQuicSocket({ client: options });
   client.on('close', common.mustCall());
 
   const req = client.connect({

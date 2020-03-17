@@ -28,14 +28,14 @@ const {
 
 const filedata = fs.readFileSync(__filename, { encoding: 'utf8' });
 
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 
 const kStatelessResetToken =
   Buffer.from('000102030405060708090A0B0C0D0E0F', 'hex');
 
 let client;
 
-const server = createSocket({
+const server = createQuicSocket({
   validateAddress: true,
   statelessResetSecret: kStatelessResetToken
 });
@@ -224,7 +224,7 @@ server.on('ready', common.mustCall(() => {
   }
   const endpoint = endpoints[0];
 
-  client = createSocket({ client: { key, cert, ca, alpn: kALPN }
+  client = createQuicSocket({ client: { key, cert, ca, alpn: kALPN }
   });
 
   client.on('close', common.mustCall(() => {

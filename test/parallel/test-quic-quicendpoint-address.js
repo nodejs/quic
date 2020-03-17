@@ -12,10 +12,10 @@ const assert = require('assert');
 
 const { key, cert, ca } = require('../common/quic');
 
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 
 async function Test1(options, address) {
-  const server = createSocket(options);
+  const server = createQuicSocket(options);
   assert.strictEqual(server.endpoints.length, 1);
   assert.strictEqual(server.endpoints[0].bound, false);
   assert.deepStrictEqual({}, server.endpoints[0].address);
@@ -35,7 +35,7 @@ async function Test1(options, address) {
 
 async function Test2() {
   // Creates a server with multiple endpoints (one on udp4 and udp6)
-  const server = createSocket({ endpoint: { type: 'udp6' } });
+  const server = createQuicSocket({ endpoint: { type: 'udp6' } });
   server.addEndpoint();
   assert.strictEqual(server.endpoints.length, 2);
   assert.strictEqual(server.endpoints[0].bound, false);

@@ -9,7 +9,7 @@ if (!common.hasQuic)
 
 const { createHook } = require('async_hooks');
 const assert = require('assert');
-const quic = require('quic');
+const { createQuicSocket } = require('net');
 
 // Ensure that no QUICSTREAM instances are created during the test
 createHook({
@@ -22,8 +22,8 @@ const Countdown = require('../common/countdown');
 const { key, cert, ca } = require('../common/quic');
 
 const options = { key, cert, ca, alpn: 'zzz', maxStreamsUni: 0 };
-const server = quic.createSocket({ server: options });
-const client = quic.createSocket({ client: options });
+const server = createQuicSocket({ server: options });
+const client = createQuicSocket({ client: options });
 
 const countdown = new Countdown(1, () => {
   server.close();

@@ -5,7 +5,7 @@ const common = require('../common');
 if (!common.hasQuic)
   common.skip('missing quic');
 
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 const assert = require('assert');
 const Countdown = require('../common/countdown');
 const { key, cert, ca } = require('../common/quic');
@@ -16,7 +16,7 @@ const kALPN = 'zzz';
 // safe integer or is out of range.
 {
   [-1, 0, Number.MAX_SAFE_INTEGER + 1, 1.1].forEach((maxConnectionsPerHost) => {
-    assert.throws(() => createSocket({ maxConnectionsPerHost }), {
+    assert.throws(() => createQuicSocket({ maxConnectionsPerHost }), {
       code: 'ERR_OUT_OF_RANGE'
     });
   });
@@ -49,7 +49,7 @@ const kALPN = 'zzz';
     });
   }
 
-  server = createSocket({ maxConnectionsPerHost: kMaxConnectionsPerHost });
+  server = createQuicSocket({ maxConnectionsPerHost: kMaxConnectionsPerHost });
 
   server.listen({ key, cert, ca, alpn: kALPN, idleTimeout: kIdleTimeout });
 
@@ -60,7 +60,7 @@ const kALPN = 'zzz';
   }));
 
   server.on('ready', common.mustCall(() => {
-    client = createSocket();
+    client = createQuicSocket();
 
     const sessions = [];
 

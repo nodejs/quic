@@ -5,7 +5,7 @@ if (!common.hasQuic)
   common.skip('missing quic');
 
 const assert = require('assert');
-const quic = require('quic');
+const { createQuicSocket } = require('net');
 const fs = require('fs');
 
 const { key, cert, ca } = require('../common/quic');
@@ -20,7 +20,7 @@ for (const variant of ['sendFD', 'sendFile', 'sendFD+fileHandle']) {
 }
 
 for (const { variant, offset, length } of variants) {
-  const server = quic.createSocket();
+  const server = createQuicSocket();
   let fd;
 
   server.listen({ key, cert, ca, alpn: 'meow' });
@@ -52,7 +52,7 @@ for (const { variant, offset, length } of variants) {
   }));
 
   server.on('ready', common.mustCall(() => {
-    const client = quic.createSocket({
+    const client = createQuicSocket({
       client: { key, cert, ca, alpn: 'meow' } });
 
     const req = client.connect({

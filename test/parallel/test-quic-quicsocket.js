@@ -9,9 +9,9 @@ if (!common.hasQuic)
 
 const assert = require('assert');
 
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 
-const socket = createSocket();
+const socket = createQuicSocket();
 assert(socket);
 
 // Before listen is called, serverSecureContext is always undefined.

@@ -7,14 +7,14 @@ if (!common.hasQuic)
 // Test that opening a stream works even if the session isn’t ready yet.
 
 const assert = require('assert');
-const quic = require('quic');
+const { createQuicSocket } = require('net');
 const { key, cert, ca } = require('../common/quic');
 const { once } = require('events');
 const options = { key, cert, ca, alpn: 'meow' };
 
 (async () => {
-  const server = quic.createSocket({ server: options });
-  const client = quic.createSocket({ client: options });
+  const server = createQuicSocket({ server: options });
+  const client = createQuicSocket({ client: options });
 
   server.listen();
 

@@ -4,7 +4,7 @@ const common = require('../common');
 if (!common.hasQuic)
   common.skip('missing quic');
 
-const quic = require('quic');
+const { createQuicSocket } = require('net');
 
 const { recordState } = require('../common/heap');
 const fixtures = require('../common/fixtures');
@@ -19,7 +19,7 @@ const ca = fixtures.readKey('ca1-cert.pem', 'binary');
   state.validateSnapshotNodes('Node / QuicSocket', []);
 }
 
-const server = quic.createSocket({ port: 0, validateAddress: true });
+const server = createQuicSocket({ port: 0, validateAddress: true });
 
 server.listen({
   key,
@@ -135,7 +135,7 @@ server.on('session', common.mustCall((session) => {
 }));
 
 server.on('ready', common.mustCall(() => {
-  const client = quic.createSocket({
+  const client = createQuicSocket({
     port: 0,
     client: {
       key,

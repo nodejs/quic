@@ -1115,6 +1115,14 @@ immediately initiates connection with
 [`socket.connect(port[, host][, connectListener])`][`socket.connect(port, host)`],
 then returns the `net.Socket` that starts the connection.
 
+## `net.createQuicSocket([options])`
+<!-- YAML
+added: REPLACEME
+-->
+
+Creates and returns a new `QuicSocket`. Please refer to the [QUIC documentation][]
+for details.
+
 ## `net.createServer([options][, connectionListener])`
 <!-- YAML
 added: v0.5.0
@@ -1224,6 +1232,7 @@ Returns `true` if input is a version 6 IP address, otherwise returns `false`.
 [IPC]: #net_ipc_support
 [Identifying paths for IPC connections]: #net_identifying_paths_for_ipc_connections
 [Readable Stream]: stream.html#stream_class_stream_readable
+[QUIC documentation]: quic.html
 [`'close'`]: #net_event_close
 [`'connect'`]: #net_event_connect
 [`'connection'`]: #net_event_connection

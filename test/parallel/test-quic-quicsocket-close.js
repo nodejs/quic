@@ -6,10 +6,10 @@ if (!common.hasQuic)
   common.skip('missing quic');
 
 const assert = require('assert');
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 
 {
-  const socket = createSocket();
+  const socket = createQuicSocket();
   socket.close(common.mustCall());
   socket.on('close', common.mustCall());
   assert.throws(() => socket.close(), {

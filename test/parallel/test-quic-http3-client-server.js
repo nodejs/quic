@@ -24,10 +24,10 @@ const {
 
 const filedata = fs.readFileSync(__filename, { encoding: 'utf8' });
 
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 
 let client;
-const server = createSocket({ endpoint: { port: kServerPort } });
+const server = createQuicSocket({ endpoint: { port: kServerPort } });
 
 const kServerName = 'agent2';  // Intentionally the wrong servername
 
@@ -95,7 +95,7 @@ server.on('session', common.mustCall((session) => {
 
 server.on('ready', common.mustCall(() => {
   debug('Server is listening on port %d', server.endpoints[0].address.port);
-  client = createSocket({
+  client = createQuicSocket({
     endpoint: { port: kClientPort },
     client: { key, cert, ca, alpn: kHttp3Alpn }
   });

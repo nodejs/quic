@@ -11,11 +11,11 @@ if (!common.hasQuic)
 
 const assert = require('assert');
 const { key, cert, ca } = require('../common/quic');
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 const { once } = require('events');
 
 (async () => {
-  const server = createSocket();
+  const server = createQuicSocket();
 
   let client;
   const options = { key, cert, ca, alpn: 'zzz' };
@@ -37,7 +37,7 @@ const { once } = require('events');
 
   await once(server, 'ready');
 
-  client = createSocket({ client: options });
+  client = createQuicSocket({ client: options });
 
   const clientSession = client.connect({
     address: common.localhostIPv4,

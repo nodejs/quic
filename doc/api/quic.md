@@ -4,11 +4,11 @@
 
 > Stability: 1 - Experimental
 
-The `quic` module provides an implementation of the QUIC protocol. To
+The `net` module provides an implementation of the QUIC protocol. To
 access it:
 
 ```js
-const quic = require('quic');
+const { createQuicSocket } = require('net');
 ```
 
 ## Example
@@ -19,10 +19,10 @@ const quic = require('quic');
 const key = getTLSKeySomehow();
 const cert = getTLSCertSomehow();
 
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 
 // Create the QUIC UDP IPv4 socket bound to local IP port 1234
-const socket = createSocket({ endpoint: { port: 1234 } });
+const socket = createQuicSocket({ endpoint: { port: 1234 } });
 
 // Tell the socket to operate as a server using the given
 // key and certificate to secure new connections, using
@@ -104,10 +104,10 @@ New instances of `QuicClientSession` are created using the `connect()`
 function on a `QuicSocket` as in the example below:
 
 ```js
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 
 // Create a QuicSocket associated with localhost and port 1234
-const socket = createSocket({ endpoint: { port: 1234 } });
+const socket = createQuicSocket({ endpoint: { port: 1234 } });
 
 const client = socket.connect({
   address: 'example.com',
@@ -246,7 +246,7 @@ TBD
 
 ## QUIC JavaScript API
 
-### quic.createSocket(\[options\])
+### net.createQuicSocket(\[options\])
 <!-- YAML
 added: REPLACEME
 -->
@@ -284,8 +284,8 @@ added: REPLACEME
     to `true`, will enable the `validateAddress` option as well. Default:
     `false`.
 
-The `quic.createSocket()` function is used to create new `QuicSocket` instances
-associated with a local UDP address.
+The `net.createQuicSocket()` function is used to create new `QuicSocket`
+instances associated with a local UDP address.
 
 ### Class: QuicEndpoint
 <!-- YAML
@@ -451,7 +451,8 @@ added: REPLACEME
 On most systems, where scope format uses the interface name:
 
 ```js
-const socket = quic.createSocket({ endpoint: { type: 'udp6', port: 1234 } });
+const { createQuicSocket } = require('net');
+const socket = createQuicSocket({ endpoint: { type: 'udp6', port: 1234 } });
 
 socket.on('ready', () => {
   socket.endpoints[0].setMulticastInterface('::%eth1');
@@ -461,7 +462,8 @@ socket.on('ready', () => {
 On Windows, where scope format uses an interface number:
 
 ```js
-const socket = quic.createSocket({ endpoint: { type: 'udp6', port: 1234 } });
+const { createQuicSocket } = require('net');
+const socket = createQuicSocket({ endpoint: { type: 'udp6', port: 1234 } });
 
 socket.on('ready', () => {
   socket.endpoints[0].setMulticastInterface('::%2');
@@ -475,7 +477,8 @@ added: REPLACEME
 All systems use an IP of the host on the desired physical interface:
 
 ```js
-const socket = quic.createSocket({ endpoint: { type: 'udp4', port: 1234 } });
+const { createQuicSocket } = require('net');
+const socket = createQuicSocket({ endpoint: { type: 'udp4', port: 1234 } });
 
 socket.on('ready', () => {
   socket.endpoints[0].setMulticastInterface('10.0.0.2');
@@ -634,7 +637,7 @@ added: REPLACEME
 * `jsonChunk` {string} A JSON fragment.
 
 Emitted if the `qlog: true` option was passed to `quicsocket.connect()` or
-`quic.createSocket()` functions.
+`net.createQuicSocket()` functions.
 
 The argument is a JSON fragment according to the [qlog standard][].
 
@@ -1301,7 +1304,7 @@ TBD
 added: REPLACEME
 -->
 
-New instances of `QuicSocket` are created using the `quic.createSocket()`
+New instances of `QuicSocket` are created using the `net.createQuicSocket()`
 method.
 
 Once created, a `QuicSocket` can be configured to work as both a client and a
@@ -1318,9 +1321,9 @@ boolean argument indicating `true` if busy status is enabled,
 `false` otherwise. This event is strictly informational.
 
 ```js
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 
-const socket = createSocket();
+const socket = createQuicSocket();
 
 socket.on('busy', (busy) => {
   if (busy)

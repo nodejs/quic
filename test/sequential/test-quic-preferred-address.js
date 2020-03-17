@@ -14,11 +14,11 @@ const ca = fixtures.readKey('ca1-cert.pem', 'binary');
 const { debuglog } = require('util');
 const debug = debuglog('test');
 
-const { createSocket } = require('quic');
+const { createQuicSocket } = require('net');
 
 let client;
 
-const server = createSocket();
+const server = createQuicSocket();
 
 const kALPN = 'zzz';  // ALPN can be overriden to whatever we want
 
@@ -54,7 +54,7 @@ server.on('ready', common.mustCall(() => {
   }
   const endpoint = endpoints[0];
 
-  client = createSocket({ client: {
+  client = createQuicSocket({ client: {
     key,
     cert,
     ca,
