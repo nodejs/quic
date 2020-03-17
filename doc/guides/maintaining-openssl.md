@@ -60,7 +60,7 @@ separately after updating the openssl source as described above. The
 current patch implementation can be found in the `deps/openssl/patches`
 directory in the file `0001-deps-add-support-for-BoringSSL-QUIC-APIs.patch`.
 
-```
+```text
     $ git am deps/openssl/patches 0001-deps-add-support-for-BoringSSL-QUIC-APIs.patch
 ```
 
