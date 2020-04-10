@@ -324,23 +324,29 @@ template <typename T>
 StatsBase<T>::StatsBase(
     Environment* env,
     v8::Local<v8::Object> wrap,
-    int options)
-    : stats_buffer_(
-          env->isolate(),
-          sizeof(typename T::Stats) / sizeof(uint64_t),
-          reinterpret_cast<uint64_t*>(&stats_)) {
+    int options) {
   static constexpr uint64_t kMax = std::numeric_limits<int64_t>::max();
-  stats_.created_at = uv_hrtime();
 
-  // TODO(@jasnell): The follow are checks instead of handling
-  // the error. Before this code moves out of experimental,
-  // these should be change to properly handle the error.
+  // Create the backing store for the statistics
+  size_t size = sizeof(Stats);
+  size_t count = size / sizeof(uint64_t);
+  stats_store_ = v8::ArrayBuffer::NewBackingStore(env->isolate(), size);
+  stats_ = new (stats_store_->Data()) Stats;
 
-  wrap->DefineOwnProperty(
+  DCHECK_NOT_NULL(stats_);
+  stats_->created_at = uv_hrtime();
+
+  // The stats buffer is exposed as a BigUint64Array on
+  // the JavaScript side to allow statistics to be monitored.
+  v8::Local<v8::ArrayBuffer> stats_buffer =
+      v8::ArrayBuffer::New(env->isolate(), stats_store_);
+  v8::Local<v8::BigUint64Array> stats_array =
+      v8::BigUint64Array::New(stats_buffer, 0, count);
+  USE(wrap->DefineOwnProperty(
       env->context(),
       env->stats_string(),
-      stats_buffer_.GetJSArray(),
-      v8::PropertyAttribute::ReadOnly).Check();
+      stats_array,
+      v8::PropertyAttribute::ReadOnly));
 
   if (options & HistogramOptions::ACK) {
     ack_ = HistogramBase::New(env, 1, kMax);
@@ -371,28 +377,28 @@ StatsBase<T>::StatsBase(
 }
 
 template <typename T>
-void StatsBase<T>::IncrementStat(uint64_t T::Stats::*member, uint64_t amount) {
+void StatsBase<T>::IncrementStat(uint64_t Stats::*member, uint64_t amount) {
   static constexpr uint64_t kMax = std::numeric_limits<uint64_t>::max();
-  stats_.*member += std::min(amount, kMax - stats_.*member);
+  stats_->*member += std::min(amount, kMax - stats_->*member);
 }
 
 template <typename T>
-void StatsBase<T>::SetStat(uint64_t T::Stats::*member, uint64_t value) {
-  stats_.*member = value;
+void StatsBase<T>::SetStat(uint64_t Stats::*member, uint64_t value) {
+  stats_->*member = value;
 }
 
 template <typename T>
-void StatsBase<T>::RecordTimestamp(uint64_t T::Stats::*member) {
-  stats_.*member = uv_hrtime();
+void StatsBase<T>::RecordTimestamp(uint64_t Stats::*member) {
+  stats_->*member = uv_hrtime();
 }
 
 template <typename T>
-uint64_t StatsBase<T>::GetStat(uint64_t T::Stats::*member) const {
-  return stats_.*member;
+uint64_t StatsBase<T>::GetStat(uint64_t Stats::*member) const {
+  return stats_->*member;
 }
 
 template <typename T>
-inline void StatsBase<T>::RecordRate(uint64_t T::Stats::*member) {
+inline void StatsBase<T>::RecordRate(uint64_t Stats::*member) {
   CHECK(rate_);
   uint64_t received_at = GetStat(member);
   uint64_t now = uv_hrtime();
@@ -408,7 +414,7 @@ inline void StatsBase<T>::RecordSize(uint64_t val) {
 }
 
 template <typename T>
-inline void StatsBase<T>::RecordAck(uint64_t T::Stats::*member) {
+inline void StatsBase<T>::RecordAck(uint64_t Stats::*member) {
   CHECK(ack_);
   uint64_t acked_at = GetStat(member);
   uint64_t now = uv_hrtime();
@@ -419,7 +425,7 @@ inline void StatsBase<T>::RecordAck(uint64_t T::Stats::*member) {
 
 template <typename T>
 void StatsBase<T>::StatsMemoryInfo(MemoryTracker* tracker) const {
-  tracker->TrackField("stats_buffer", stats_buffer_);
+  tracker->TrackField("stats_store", stats_store_);
   tracker->TrackField("rate_histogram", rate_);
   tracker->TrackField("size_histogram", size_);
   tracker->TrackField("ack_histogram", ack_);
@@ -441,7 +447,7 @@ std::string StatsBase<T>::StatsDebug::ToString() const {
     out += std::to_string(val);
     out += "\n";
   };
-  add_field("Duration", uv_hrtime() - ptr->GetStat(&T::Stats::created_at));
+  add_field("Duration", uv_hrtime() - ptr->GetStat(&Stats::created_at));
   T::ToString(*ptr, add_field);
   return out;
 }
