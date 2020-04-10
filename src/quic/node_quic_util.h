@@ -109,6 +109,8 @@ struct StatsTraits {
 template <typename T>
 class StatsBase {
  public:
+   typedef typename T::Stats Stats;
+
   // A StatsBase instance may have one of three histogram
   // instances. One that records rate of data flow, one
   // that records size of data chunk, and one that records
@@ -127,7 +129,7 @@ class StatsBase {
       v8::Local<v8::Object> wrap,
       int options = HistogramOptions::NONE);
 
-  inline ~StatsBase() = default;
+  inline ~StatsBase() { if (stats_ != nullptr) stats_->~Stats(); }
 
   // The StatsDebug utility is used when StatsBase is destroyed
   // to output statistical information to Debug. It is designed
@@ -141,21 +143,21 @@ class StatsBase {
 
   // Increments the given stat field by the given amount or 1 if
   // no amount is specified.
-  inline void IncrementStat(uint64_t T::Stats::*member, uint64_t amount = 1);
+  inline void IncrementStat(uint64_t Stats::*member, uint64_t amount = 1);
 
   // Sets an entirely new value for the given stat field
-  inline void SetStat(uint64_t T::Stats::*member, uint64_t value);
+  inline void SetStat(uint64_t Stats::*member, uint64_t value);
 
   // Sets the given stat field to the current uv_hrtime()
-  inline void RecordTimestamp(uint64_t T::Stats::*member);
+  inline void RecordTimestamp(uint64_t Stats::*member);
 
   // Gets the current value of the given stat field
-  inline uint64_t GetStat(uint64_t T::Stats::*member) const;
+  inline uint64_t GetStat(uint64_t Stats::*member) const;
 
   // If the rate histogram is used, records the time elapsed
   // between now and the timestamp specified by the member
   // field.
-  inline void RecordRate(uint64_t T::Stats::*member);
+  inline void RecordRate(uint64_t Stats::*member);
 
   // If the size histogram is used, records the given size.
   inline void RecordSize(uint64_t val);
@@ -163,18 +165,18 @@ class StatsBase {
   // If the ack rate histogram is used, records the time
   // elapsed between now and the timestamp specified by
   // the member field.
-  inline void RecordAck(uint64_t T::Stats::*member);
+  inline void RecordAck(uint64_t Stats::*member);
 
   inline void StatsMemoryInfo(MemoryTracker* tracker) const;
 
   inline void DebugStats();
 
  private:
-  typename T::Stats stats_{};
   BaseObjectPtr<HistogramBase> rate_;
   BaseObjectPtr<HistogramBase> size_;
   BaseObjectPtr<HistogramBase> ack_;
-  AliasedBigUint64Array stats_buffer_;
+  std::shared_ptr<v8::BackingStore> stats_store_;
+  Stats* stats_ = nullptr;
 };
 
 // PreferredAddress is a helper class used only when a client QuicSession
