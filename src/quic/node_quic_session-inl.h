@@ -502,7 +502,7 @@ void QuicSession::StreamDataBlocked(int64_t stream_id) {
 // possible strategies that we currently support via user
 // configuration: use the preferred address or ignore it.
 void QuicSession::SelectPreferredAddress(
-    const QuicPreferredAddress& preferred_address) {
+    const PreferredAddress& preferred_address) {
   CHECK(!is_server());
   preferred_address_strategy_(this, preferred_address);
 }

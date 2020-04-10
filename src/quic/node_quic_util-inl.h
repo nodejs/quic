@@ -42,6 +42,12 @@ size_t QuicCID::Hash::operator()(const QuicCID& token) const {
   return hash;
 }
 
+QuicCID& QuicCID::operator=(const QuicCID& cid) {
+  if (this == &cid) return *this;
+  this->~QuicCID();
+  return *new(this) QuicCID(std::move(cid));
+}
+
 bool QuicCID::operator==(const QuicCID& other) const {
   return memcmp(cid()->data, other.cid()->data, cid()->datalen) == 0;
 }
@@ -183,15 +189,15 @@ const char* QuicError::family_name() {
   }
 }
 
-const ngtcp2_cid* QuicPreferredAddress::cid() const {
+const ngtcp2_cid* PreferredAddress::cid() const {
   return &paddr_->cid;
 }
 
-const uint8_t* QuicPreferredAddress::stateless_reset_token() const {
+const uint8_t* PreferredAddress::stateless_reset_token() const {
   return paddr_->stateless_reset_token;
 }
 
-std::string QuicPreferredAddress::preferred_ipv6_address() const {
+std::string PreferredAddress::ipv6_address() const {
   char host[NI_MAXHOST];
   // Return an empty string if unable to convert...
   if (uv_inet_ntop(AF_INET6, paddr_->ipv6_addr, host, sizeof(host)) != 0)
@@ -199,7 +205,7 @@ std::string QuicPreferredAddress::preferred_ipv6_address() const {
 
   return std::string(host);
 }
-std::string QuicPreferredAddress::preferred_ipv4_address() const {
+std::string PreferredAddress::ipv4_address() const {
   char host[NI_MAXHOST];
   // Return an empty string if unable to convert...
   if (uv_inet_ntop(AF_INET, paddr_->ipv4_addr, host, sizeof(host)) != 0)
@@ -208,14 +214,15 @@ std::string QuicPreferredAddress::preferred_ipv4_address() const {
   return std::string(host);
 }
 
-int16_t QuicPreferredAddress::preferred_ipv6_port() const {
+uint16_t PreferredAddress::ipv6_port() const {
   return paddr_->ipv6_port;
 }
-int16_t QuicPreferredAddress::preferred_ipv4_port() const {
+
+uint16_t PreferredAddress::ipv4_port() const {
   return paddr_->ipv4_port;
 }
 
-bool QuicPreferredAddress::Use(int family) const {
+bool PreferredAddress::Use(int family) const {
   uv_getaddrinfo_t req;
 
   if (!ResolvePreferredAddress(family, &req))
@@ -227,7 +234,7 @@ bool QuicPreferredAddress::Use(int family) const {
   return true;
 }
 
-bool QuicPreferredAddress::ResolvePreferredAddress(
+bool PreferredAddress::ResolvePreferredAddress(
     int local_address_family,
     uv_getaddrinfo_t* req) const {
   int af;

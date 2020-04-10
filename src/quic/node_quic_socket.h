@@ -283,50 +283,62 @@ class QuicSocket : public AsyncWrap,
       QlogMode qlog = QlogMode::kDisabled,
       const uint8_t* session_reset_secret = nullptr,
       bool disable_session_reset = false);
+
   ~QuicSocket() override;
 
   // Returns the default/preferred local address. Additional
   // QuicEndpoint instances may be associated with the
   // QuicSocket bound to other local addresses.
-  const SocketAddress& local_address() {
-    CHECK(preferred_endpoint_);
-    return preferred_endpoint_->local_address();
-  }
+  inline const SocketAddress& local_address();
 
   void MaybeClose();
 
   inline void AddSession(
       const QuicCID& cid,
       BaseObjectPtr<QuicSession> session);
+
   inline void AssociateCID(
       const QuicCID& cid,
       const QuicCID& scid);
+
   inline void DisassociateCID(
       const QuicCID& cid);
+
   inline void AssociateStatelessResetToken(
       const StatelessResetToken& token,
       BaseObjectPtr<QuicSession> session);
+
   inline void DisassociateStatelessResetToken(
       const StatelessResetToken& token);
+
   void Listen(
       BaseObjectPtr<crypto::SecureContext> context,
       const sockaddr* preferred_address = nullptr,
       const std::string& alpn = NGTCP2_ALPN_H3,
       uint32_t options = 0);
+
   inline void ReceiveStart();
+
   inline void ReceiveStop();
+
   inline void RemoveSession(
       const QuicCID& cid,
       const SocketAddress& addr);
+
   inline void ReportSendError(int error);
+
   int SendPacket(
       const SocketAddress& local_addr,
       const SocketAddress& remote_addr,
       std::unique_ptr<QuicPacket> packet,
       BaseObjectPtr<QuicSession> session = BaseObjectPtr<QuicSession>());
+
   inline void SessionReady(BaseObjectPtr<QuicSession> session);
+
   inline void set_server_busy(bool on);
+
   inline void set_diagnostic_packet_loss(double rx = 0.0, double tx = 0.0);
+
   inline void StopListening();
 
   // Toggles whether or not stateless reset is enabled or not.
@@ -346,24 +358,34 @@ class QuicSocket : public AsyncWrap,
 
   // Implementation for mem::NgLibMemoryManager
   void CheckAllocatedSize(size_t previous_size) const;
+
   void IncreaseAllocatedSize(size_t size);
+
   void DecreaseAllocatedSize(size_t size);
 
-  const uint8_t* session_reset_secret() {
-    return reset_token_secret_;
-  }
+  const uint8_t* session_reset_secret() { return reset_token_secret_; }
 
   // Implementation for QuicListener
   ReqWrap<uv_udp_send_t>* OnCreateSendWrap(size_t msg_size) override;
+
+  // Implementation for QuicListener
   void OnSendDone(ReqWrap<uv_udp_send_t>* wrap, int status) override;
+
+  // Implementation for QuicListener
   void OnBind(QuicEndpoint* endpoint) override;
+
+  // Implementation for QuicListener
   void OnReceive(
       ssize_t nread,
       AllocatedBuffer buf,
       const SocketAddress& local_addr,
       const SocketAddress& remote_addr,
       unsigned int flags) override;
+
+  // Implementation for QuicListener
   void OnError(QuicEndpoint* endpoint, ssize_t error) override;
+
+  // Implementation for QuicListener
   void OnEndpointDone(QuicEndpoint* endpoint) override;
 
   // Serializes and transmits a RETRY packet to the connected peer.
@@ -390,6 +412,7 @@ class QuicSocket : public AsyncWrap,
       const SocketAddress& remote_addr);
 
   void PushListener(QuicSocketListener* listener);
+
   void RemoveListener(QuicSocketListener* listener);
 
   inline void AddEndpoint(
@@ -412,6 +435,7 @@ class QuicSocket : public AsyncWrap,
   void OnSend(int status, QuicPacket* packet);
 
   inline void set_validated_address(const SocketAddress& addr);
+
   inline bool is_validated_address(const SocketAddress& addr) const;
 
   bool MaybeStatelessReset(
@@ -436,9 +460,13 @@ class QuicSocket : public AsyncWrap,
   BaseObjectPtr<QuicSession> FindSession(const QuicCID& cid);
 
   inline void IncrementSocketAddressCounter(const SocketAddress& addr);
+
   inline void DecrementSocketAddressCounter(const SocketAddress& addr);
+
   inline void IncrementStatelessResetCounter(const SocketAddress& addr);
+
   inline size_t GetCurrentSocketAddressCounter(const SocketAddress& addr);
+
   inline size_t GetCurrentStatelessResetCounter(const SocketAddress& addr);
 
   // Returns true if, and only if, diagnostic packet loss is enabled
@@ -556,8 +584,11 @@ class QuicSocket : public AsyncWrap,
     void set_packet(std::unique_ptr<QuicPacket> packet) {
       packet_ = std::move(packet);
     }
+
     QuicPacket* packet() { return packet_.get(); }
+
     void set_session(BaseObjectPtr<QuicSession> session) { session_ = session; }
+
     size_t total_length() const { return total_length_; }
 
     QuicState* quic_state() { return quic_state_.get(); }

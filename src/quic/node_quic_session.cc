@@ -330,7 +330,7 @@ void QuicSessionListener::OnSessionSilentClose(
 
 void QuicSessionListener::OnUsePreferredAddress(
     int family,
-    const QuicPreferredAddress& preferred_address) {
+    const PreferredAddress& preferred_address) {
   if (previous_listener_ != nullptr)
     previous_listener_->OnUsePreferredAddress(family, preferred_address);
 }
@@ -677,23 +677,23 @@ void JSQuicSessionListener::OnSessionSilentClose(
 
 void JSQuicSessionListener::OnUsePreferredAddress(
     int family,
-    const QuicPreferredAddress& preferred_address) {
+    const PreferredAddress& preferred_address) {
   Environment* env = session()->env();
   HandleScope scope(env->isolate());
   Local<Context> context = env->context();
   Context::Scope context_scope(context);
 
   std::string hostname = family == AF_INET ?
-      preferred_address.preferred_ipv4_address():
-      preferred_address.preferred_ipv6_address();
-  int16_t port =
+      preferred_address.ipv4_address():
+      preferred_address.ipv6_address();
+  uint16_t port =
       family == AF_INET ?
-          preferred_address.preferred_ipv4_port() :
-          preferred_address.preferred_ipv6_port();
+          preferred_address.ipv4_port() :
+          preferred_address.ipv6_port();
 
   Local<Value> argv[] = {
       OneByteString(env->isolate(), hostname.c_str()),
-      Integer::New(env->isolate(), port),
+      Integer::NewFromUnsigned(env->isolate(), port),
       Integer::New(env->isolate(), family)
   };
 
@@ -2203,13 +2203,13 @@ bool QuicSession::SendConnectionClose() {
 
 void QuicSession::IgnorePreferredAddressStrategy(
     QuicSession* session,
-    const QuicPreferredAddress& preferred_address) {
+    const PreferredAddress& preferred_address) {
   Debug(session, "Ignoring server preferred address");
 }
 
 void QuicSession::UsePreferredAddressStrategy(
     QuicSession* session,
-    const QuicPreferredAddress& preferred_address) {
+    const PreferredAddress& preferred_address) {
   static constexpr int idx =
       IDX_QUIC_SESSION_STATE_USE_PREFERRED_ADDRESS_ENABLED;
   int family = session->socket()->local_address().family();
@@ -3203,7 +3203,7 @@ int QuicSession::OnSelectPreferredAddress(
   // even in such a failure, we debug log and ignore it.
   // If the preferred address is not selected, dest remains
   // unchanged.
-  QuicPreferredAddress preferred_address(session->env(), dest, paddr);
+  PreferredAddress preferred_address(session->env(), dest, paddr);
   session->SelectPreferredAddress(preferred_address);
   return 0;
 }
@@ -3634,7 +3634,7 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
   CHECK(args[ARG_IDX::PREFERRED_ADDRESS_POLICY]->Int32Value(
       env->context()).To(&preferred_address_policy));
   switch (preferred_address_policy) {
-    case QUIC_PREFERRED_ADDRESS_ACCEPT:
+    case QUIC_PREFERRED_ADDRESS_USE:
       preferred_address_strategy = QuicSession::UsePreferredAddressStrategy;
       break;
     default:

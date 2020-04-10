@@ -53,7 +53,7 @@ typedef void(*ConnectionIDStrategy)(
 
 typedef void(*PreferredAddressStrategy)(
     QuicSession* session,
-    const QuicPreferredAddress& preferred_address);
+    const PreferredAddress& preferred_address);
 
 // The QuicSessionConfig class holds the initial transport parameters and
 // configuration options set by the JavaScript side when either a
@@ -284,7 +284,7 @@ class QuicSessionListener {
       const sockaddr* remote);
   virtual void OnUsePreferredAddress(
       int family,
-      const QuicPreferredAddress& preferred_address);
+      const PreferredAddress& preferred_address);
   virtual void OnSessionTicket(int size, SSL_SESSION* session);
   virtual void OnSessionSilentClose(
       bool stateless_reset,
@@ -335,7 +335,7 @@ class JSQuicSessionListener : public QuicSessionListener {
   void OnSessionSilentClose(bool stateless_reset, QuicError error) override;
   void OnUsePreferredAddress(
       int family,
-      const QuicPreferredAddress& preferred_address) override;
+      const PreferredAddress& preferred_address) override;
   void OnStreamBlocked(int64_t stream_id) override;
   void OnVersionNegotiation(
       uint32_t supported_version,
@@ -684,11 +684,11 @@ class QuicSession : public AsyncWrap,
   // The default preferred address strategy is to ignore it
   static void IgnorePreferredAddressStrategy(
       QuicSession* session,
-      const QuicPreferredAddress& preferred_address);
+      const PreferredAddress& preferred_address);
 
   static void UsePreferredAddressStrategy(
       QuicSession* session,
-      const QuicPreferredAddress& preferred_address);
+      const PreferredAddress& preferred_address);
 
   static void Initialize(
       Environment* env,
@@ -784,6 +784,7 @@ class QuicSession : public AsyncWrap,
   ~QuicSession() override;
 
   std::string diagnostic_name() const override;
+
   inline QuicCID dcid() const;
 
   // When a client QuicSession is created, if the autoStart
@@ -799,7 +800,9 @@ class QuicSession : public AsyncWrap,
   QuicSessionListener* listener() const { return listener_; }
 
   BaseObjectPtr<QuicStream> CreateStream(int64_t id);
+
   BaseObjectPtr<QuicStream> FindStream(int64_t id) const;
+
   inline bool HasStream(int64_t id) const;
 
   inline bool allow_early_data() const;
@@ -866,6 +869,7 @@ class QuicSession : public AsyncWrap,
   ngtcp2_conn* connection() const { return connection_.get(); }
 
   void AddStream(BaseObjectPtr<QuicStream> stream);
+
   void AddToSocket(QuicSocket* socket);
 
   // Immediately discards the state of the QuicSession
@@ -899,6 +903,7 @@ class QuicSession : public AsyncWrap,
   inline void OnIdleTimeout();
 
   bool OpenBidirectionalStream(int64_t* stream_id);
+
   bool OpenUnidirectionalStream(int64_t* stream_id);
 
   // Ping causes the QuicSession to serialize any currently
@@ -926,6 +931,7 @@ class QuicSession : public AsyncWrap,
       uint64_t offset);
 
   void RemoveStream(int64_t stream_id);
+
   void RemoveFromSocket();
 
   // Causes pending ngtcp2 frames to be serialized and sent
@@ -936,6 +942,7 @@ class QuicSession : public AsyncWrap,
       const ngtcp2_path_storage& path);
 
   inline uint64_t max_data_left() const;
+
   inline uint64_t max_local_streams_uni() const;
 
   inline void set_last_error(
@@ -943,11 +950,15 @@ class QuicSession : public AsyncWrap,
           uint32_t{QUIC_ERROR_SESSION},
           uint64_t{NGTCP2_NO_ERROR}
       });
+
   inline void set_last_error(int32_t family, uint64_t error_code);
+
   inline void set_last_error(int32_t family, int error_code);
 
   inline void set_remote_transport_params();
+
   bool set_socket(QuicSocket* socket, bool nat_rebinding = false);
+
   int set_session(SSL_SESSION* session);
 
   const StreamsMap& streams() const { return streams_; }
@@ -1018,6 +1029,7 @@ class QuicSession : public AsyncWrap,
   void HandleError();
 
   bool SendConnectionClose();
+
   bool IsResetToken(
       const QuicCID& cid,
       const uint8_t* data,
@@ -1025,7 +1037,9 @@ class QuicSession : public AsyncWrap,
 
   // Implementation for mem::NgLibMemoryManager
   inline void CheckAllocatedSize(size_t previous_size) const;
+
   inline void IncreaseAllocatedSize(size_t size);
+
   inline void DecreaseAllocatedSize(size_t size);
 
   // Immediately close the QuicSession. All currently open
@@ -1062,21 +1076,24 @@ class QuicSession : public AsyncWrap,
   void SilentClose();
 
   void PushListener(QuicSessionListener* listener);
+
   void RemoveListener(QuicSessionListener* listener);
 
   inline void set_connection_id_strategy(
       ConnectionIDStrategy strategy);
+
   inline void set_preferred_address_strategy(
       PreferredAddressStrategy strategy);
 
   inline void SetSessionTicketAppData(
       const SessionTicketAppData& app_data);
+
   inline SessionTicketAppData::Status GetSessionTicketAppData(
       const SessionTicketAppData& app_data,
       SessionTicketAppData::Flag flag);
 
   inline void SelectPreferredAddress(
-      const QuicPreferredAddress& preferred_address);
+      const PreferredAddress& preferred_address);
 
   // Report that the stream data is flow control blocked
   inline void StreamDataBlocked(int64_t stream_id);
@@ -1169,40 +1186,67 @@ class QuicSession : public AsyncWrap,
       size_t datalen);
 
   inline void AssociateCID(const QuicCID& cid);
+
   inline void DisassociateCID(const QuicCID& cid);
+
   inline void ExtendMaxStreamData(int64_t stream_id, uint64_t max_data);
+
   void ExtendMaxStreams(bool bidi, uint64_t max_streams);
+
   inline void ExtendMaxStreamsUni(uint64_t max_streams);
+
   inline void ExtendMaxStreamsBidi(uint64_t max_streams);
+
   inline void ExtendMaxStreamsRemoteUni(uint64_t max_streams);
+
   inline void ExtendMaxStreamsRemoteBidi(uint64_t max_streams);
+
   bool GetNewConnectionID(ngtcp2_cid* cid, uint8_t* token, size_t cidlen);
+
   inline void GetConnectionCloseInfo();
+
   inline void HandshakeCompleted();
+
   inline void HandshakeConfirmed();
+
   void PathValidation(
     const ngtcp2_path* path,
     ngtcp2_path_validation_result res);
+
   bool ReceiveClientInitial(const QuicCID& dcid);
+
   bool ReceivePacket(ngtcp2_path* path, const uint8_t* data, ssize_t nread);
+
   bool ReceiveRetry();
+
   inline void RemoveConnectionID(const QuicCID& cid);
+
   void ScheduleRetransmit();
+
   bool SendPacket(std::unique_ptr<QuicPacket> packet);
+
   inline void set_local_address(const ngtcp2_addr* addr);
+
   void StreamClose(int64_t stream_id, uint64_t app_error_code);
+
   void StreamOpen(int64_t stream_id);
+
   void StreamReset(
       int64_t stream_id,
       uint64_t final_size,
       uint64_t app_error_code);
+
   bool WritePackets(const char* diagnostic_label = nullptr);
+
   void UpdateRecoveryStats();
+
   void UpdateConnectionID(
       int type,
       const QuicCID& cid,
       const StatelessResetToken& token);
+
   void UpdateDataStats();
+
   inline void UpdateEndpoint(const ngtcp2_path& path);
 
   inline void VersionNegotiation(const uint32_t* sv, size_t nsv);
@@ -1211,10 +1255,12 @@ class QuicSession : public AsyncWrap,
   static int OnClientInitial(
       ngtcp2_conn* conn,
       void* user_data);
+
   static int OnReceiveClientInitial(
       ngtcp2_conn* conn,
       const ngtcp2_cid* dcid,
       void* user_data);
+
   static int OnReceiveCryptoData(
       ngtcp2_conn* conn,
       ngtcp2_crypto_level crypto_level,
@@ -1222,12 +1268,15 @@ class QuicSession : public AsyncWrap,
       const uint8_t* data,
       size_t datalen,
       void* user_data);
+
   static int OnHandshakeCompleted(
       ngtcp2_conn* conn,
       void* user_data);
+
   static int OnHandshakeConfirmed(
       ngtcp2_conn* conn,
       void* user_data);
+
   static int OnReceiveStreamData(
       ngtcp2_conn* conn,
       int64_t stream_id,
@@ -1237,17 +1286,20 @@ class QuicSession : public AsyncWrap,
       size_t datalen,
       void* user_data,
       void* stream_user_data);
+
   static int OnReceiveRetry(
       ngtcp2_conn* conn,
       const ngtcp2_pkt_hd* hd,
       const ngtcp2_pkt_retry* retry,
       void* user_data);
+
   static int OnAckedCryptoOffset(
       ngtcp2_conn* conn,
       ngtcp2_crypto_level crypto_level,
       uint64_t offset,
       size_t datalen,
       void* user_data);
+
   static int OnAckedStreamDataOffset(
       ngtcp2_conn* conn,
       int64_t stream_id,
@@ -1255,21 +1307,25 @@ class QuicSession : public AsyncWrap,
       size_t datalen,
       void* user_data,
       void* stream_user_data);
+
   static int OnSelectPreferredAddress(
       ngtcp2_conn* conn,
       ngtcp2_addr* dest,
       const ngtcp2_preferred_addr* paddr,
       void* user_data);
+
   static int OnStreamClose(
       ngtcp2_conn* conn,
       int64_t stream_id,
       uint64_t app_error_code,
       void* user_data,
       void* stream_user_data);
+
   static int OnStreamOpen(
       ngtcp2_conn* conn,
       int64_t stream_id,
       void* user_data);
+
   static int OnStreamReset(
       ngtcp2_conn* conn,
       int64_t stream_id,
@@ -1277,59 +1333,71 @@ class QuicSession : public AsyncWrap,
       uint64_t app_error_code,
       void* user_data,
       void* stream_user_data);
+
   static int OnRand(
       ngtcp2_conn* conn,
       uint8_t* dest,
       size_t destlen,
       ngtcp2_rand_ctx ctx,
       void* user_data);
+
   static int OnGetNewConnectionID(
       ngtcp2_conn* conn,
       ngtcp2_cid* cid,
       uint8_t* token,
       size_t cidlen,
       void* user_data);
+
   static int OnRemoveConnectionID(
       ngtcp2_conn* conn,
       const ngtcp2_cid* cid,
       void* user_data);
+
   static int OnPathValidation(
       ngtcp2_conn* conn,
       const ngtcp2_path* path,
       ngtcp2_path_validation_result res,
       void* user_data);
+
   static int OnExtendMaxStreamsUni(
       ngtcp2_conn* conn,
       uint64_t max_streams,
       void* user_data);
+
   static int OnExtendMaxStreamsBidi(
       ngtcp2_conn* conn,
       uint64_t max_streams,
       void* user_data);
+
   static int OnExtendMaxStreamData(
       ngtcp2_conn* conn,
       int64_t stream_id,
       uint64_t max_data,
       void* user_data,
       void* stream_user_data);
+
   static int OnVersionNegotiation(
       ngtcp2_conn* conn,
       const ngtcp2_pkt_hd* hd,
       const uint32_t* sv,
       size_t nsv,
       void* user_data);
+
   static int OnStatelessReset(
       ngtcp2_conn* conn,
       const ngtcp2_pkt_stateless_reset* sr,
       void* user_data);
+
   static int OnExtendMaxStreamsRemoteUni(
       ngtcp2_conn* conn,
       uint64_t max_streams,
       void* user_data);
+
   static int OnExtendMaxStreamsRemoteBidi(
       ngtcp2_conn* conn,
       uint64_t max_streams,
       void* user_data);
+
   static int OnConnectionIDStatus(
       ngtcp2_conn* conn,
       int type,
@@ -1337,12 +1405,17 @@ class QuicSession : public AsyncWrap,
       const ngtcp2_cid* cid,
       const uint8_t* token,
       void* user_data);
+
   static void OnQlogWrite(void* user_data, const void* data, size_t len);
 
   void UpdateIdleTimer();
+
   inline void UpdateRetransmitTimer(uint64_t timeout);
+
   inline void StopRetransmitTimer();
+
   inline void StopIdleTimer();
+
   bool StartClosingPeriod();
 
   enum QuicSessionFlags : uint32_t {
