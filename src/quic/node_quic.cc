@@ -191,7 +191,7 @@ void Initialize(Local<Object> target,
   V(QUIC_ERROR_APPLICATION)                                                    \
   V(QUIC_ERROR_CRYPTO)                                                         \
   V(QUIC_ERROR_SESSION)                                                        \
-  V(QUIC_PREFERRED_ADDRESS_ACCEPT)                                             \
+  V(QUIC_PREFERRED_ADDRESS_USE)                                                \
   V(QUIC_PREFERRED_ADDRESS_IGNORE)                                             \
   V(QUICCLIENTSESSION_OPTION_REQUEST_OCSP)                                     \
   V(QUICCLIENTSESSION_OPTION_VERIFY_HOSTNAME_IDENTITY)                         \

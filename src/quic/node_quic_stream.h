@@ -3,7 +3,7 @@
 
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
-#include "memory_tracker-inl.h"
+#include "memory_tracker.h"
 #include "async_wrap.h"
 #include "env.h"
 #include "node_http_common.h"
@@ -211,7 +211,12 @@ class QuicStream : public AsyncWrap,
 
   std::string diagnostic_name() const override;
 
+  // The numeric identifier of the QuicStream.
   int64_t id() const { return stream_id_; }
+
+  // If the QuicStream is associated with a push promise,
+  // the numeric identifier of the promise. Currently only
+  // used by HTTP/3.
   int64_t push_id() const { return push_id_; }
 
   QuicSession* session() const { return session_.get(); }
@@ -321,9 +326,17 @@ class QuicStream : public AsyncWrap,
 
   // Required for StreamBase
   bool IsAlive() override;
+
+  // Required for StreamBase
   bool IsClosing() override;
+
+  // Required for StreamBase
   int ReadStart() override;
+
+  // Required for StreamBase
   int ReadStop() override;
+
+  // Required for StreamBase
   int DoShutdown(ShutdownWrap* req_wrap) override;
 
   AsyncWrap* GetAsyncWrap() override { return this; }
@@ -345,6 +358,7 @@ class QuicStream : public AsyncWrap,
 
  private:
   inline bool is_flag_set(int32_t flag) const;
+
   inline void set_flag(int32_t flag, bool on = true);
 
   // WasEverWritable returns true if it is a bidirectional stream,
@@ -375,10 +389,13 @@ class QuicStream : public AsyncWrap,
   ListNode<QuicStream> stream_queue_;
 
   BaseObjectPtr<QuicState> quic_state_;
+
  public:
   // Linked List of QuicStream objects
   using Queue = ListHead<QuicStream, &QuicStream::stream_queue_>;
+
   inline void Schedule(Queue* queue);
+
   inline void Unschedule();
 };
 

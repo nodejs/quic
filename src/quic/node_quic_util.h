@@ -32,13 +32,10 @@ constexpr size_t kScidLen = NGTCP2_MAX_CIDLEN;
 constexpr size_t kTokenRandLen = 16;
 constexpr size_t kTokenSecretLen = 16;
 
+constexpr uint64_t DEFAULT_ACTIVE_CONNECTION_ID_LIMIT = 2;
 constexpr uint64_t DEFAULT_MAX_CONNECTIONS =
     std::min<uint64_t>(kMaxSizeT, kMaxSafeJsInteger);
 constexpr uint64_t DEFAULT_MAX_CONNECTIONS_PER_HOST = 100;
-constexpr uint64_t NGTCP2_APP_NOERROR = 0xff00;
-constexpr uint64_t MIN_RETRYTOKEN_EXPIRATION = 1;
-constexpr uint64_t MAX_RETRYTOKEN_EXPIRATION = 60;
-constexpr uint64_t DEFAULT_ACTIVE_CONNECTION_ID_LIMIT = 2;
 constexpr uint64_t DEFAULT_MAX_STREAM_DATA_BIDI_LOCAL = 256 * 1024;
 constexpr uint64_t DEFAULT_MAX_STREAM_DATA_BIDI_REMOTE = 256 * 1024;
 constexpr uint64_t DEFAULT_MAX_STREAM_DATA_UNI = 256 * 1024;
@@ -47,7 +44,10 @@ constexpr uint64_t DEFAULT_MAX_STATELESS_RESETS_PER_HOST = 10;
 constexpr uint64_t DEFAULT_MAX_STREAMS_BIDI = 100;
 constexpr uint64_t DEFAULT_MAX_STREAMS_UNI = 3;
 constexpr uint64_t DEFAULT_MAX_IDLE_TIMEOUT = 10;
-constexpr uint64_t DEFAULT_RETRYTOKEN_EXPIRATION = 10ULL;
+constexpr uint64_t DEFAULT_RETRYTOKEN_EXPIRATION = 10;
+constexpr uint64_t MIN_RETRYTOKEN_EXPIRATION = 1;
+constexpr uint64_t MAX_RETRYTOKEN_EXPIRATION = 60;
+constexpr uint64_t NGTCP2_APP_NOERROR = 0xff00;
 
 constexpr int ERR_FAILED_TO_CREATE_SESSION = -1;
 
@@ -55,14 +55,20 @@ constexpr int ERR_FAILED_TO_CREATE_SESSION = -1;
 // handles a server-advertised preferred address. As suggested, the
 // preferred address is the address the server would prefer the
 // client to use for subsequent communication for a QuicSession.
-// The client may choose to ignore the preference but really shouldn't.
-// We currently only support two options in the Node.js implementation,
-// but additional options may be added later.
+// The client may choose to ignore the preference but really shouldn't
+// without good reason. We currently only support two options but
+// additional options may be added later.
 enum SelectPreferredAddressPolicy : int {
   // Ignore the server-provided preferred address
   QUIC_PREFERRED_ADDRESS_IGNORE,
-  // Accept the server-provided preferred address
-  QUIC_PREFERRED_ADDRESS_ACCEPT
+
+  // Use the server-provided preferred address.
+  // With this policy in effect, when a client
+  // receives a preferred address from the server,
+  // the client QuicSession will be automatically
+  // switched to use the selected address if it
+  // matches the current local address family.
+  QUIC_PREFERRED_ADDRESS_USE
 };
 
 // QUIC error codes generally fall into two distinct namespaces:
@@ -81,6 +87,7 @@ enum QuicErrorFamily : int32_t {
   QUIC_ERROR_CRYPTO,
   QUIC_ERROR_APPLICATION
 };
+
 
 template <typename T> class StatsBase;
 
@@ -170,14 +177,13 @@ class StatsBase {
   AliasedBigUint64Array stats_buffer_;
 };
 
-// QuicPreferredAddress is a helper class used only when a
-// client QuicSession receives an advertised preferred address
-// from a server. The helper provides information about the
-// preferred address. The Use() function is used to let
+// PreferredAddress is a helper class used only when a client QuicSession
+// receives an advertised preferred address from a server. The helper provides
+// information about the preferred address. The Use() function is used to let
 // ngtcp2 know to use the preferred address for the given family.
-class QuicPreferredAddress {
+class PreferredAddress {
  public:
-  QuicPreferredAddress(
+  PreferredAddress(
       Environment* env,
       ngtcp2_addr* dest,
       const ngtcp2_preferred_addr* paddr) :
@@ -185,13 +191,34 @@ class QuicPreferredAddress {
       dest_(dest),
       paddr_(paddr) {}
 
+  // When a preferred address is advertised by a server, the
+  // advertisement also includes a new CID and (optionally)
+  // a stateless reset token. If the preferred address is
+  // selected, then the client QuicSession will make use of
+  // these new values. Access to the cid and reset token
+  // are provided via the PreferredAddress class only as a
+  // convenience.
   inline const ngtcp2_cid* cid() const;
-  inline std::string preferred_ipv6_address() const;
-  inline std::string preferred_ipv4_address() const;
-  inline int16_t preferred_ipv6_port() const;
-  inline int16_t preferred_ipv4_port() const;
+
+  // The stateless reset token associated with the preferred
+  // address CID
   inline const uint8_t* stateless_reset_token() const;
 
+  // A preferred address advertisement may include both an
+  // IPv4 and IPv6 address. Only one of which will be used.
+
+  inline std::string ipv4_address() const;
+
+  inline uint16_t ipv4_port() const;
+
+  inline std::string ipv6_address() const;
+
+  inline uint16_t ipv6_port() const;
+
+  // Instructs the QuicSession to use the advertised
+  // preferred address matching the given family. If
+  // the advertisement does not include a matching
+  // address, the preferred address is ignored.
   inline bool Use(int family = AF_INET) const;
 
  private:
@@ -242,6 +269,8 @@ struct QuicPathStorage : public ngtcp2_path_storage {
 };
 
 // Simple wrapper for ngtcp2_cid that handles hex encoding
+// CIDs are used to identify QuicSession instances and may
+// be between 0 and 20 bytes in length.
 class QuicCID : public MemoryRetainer {
  public:
   // Empty constructor
@@ -268,21 +297,18 @@ class QuicCID : public MemoryRetainer {
 
   inline bool operator==(const QuicCID& other) const;
   inline bool operator!=(const QuicCID& other) const;
+  inline QuicCID& operator=(const QuicCID& cid);
+  const ngtcp2_cid& operator*() const { return *ptr_; }
+  const ngtcp2_cid* operator->() const { return ptr_; }
 
   inline std::string ToString() const;
 
-  // Copy assignment
-  QuicCID& operator=(const QuicCID& cid) {
-    if (this == &cid) return *this;
-    this->~QuicCID();
-    return *new(this) QuicCID(std::move(cid));
-  }
-
-  const ngtcp2_cid& operator*() const { return *ptr_; }
-  const ngtcp2_cid* operator->() const { return ptr_; }
   const ngtcp2_cid* cid() const { return ptr_; }
+
   const uint8_t* data() const { return ptr_->data; }
+
   operator bool() const { return ptr_->datalen > 0; }
+
   size_t length() const { return ptr_->datalen; }
 
   ngtcp2_cid* cid() {
@@ -342,20 +368,28 @@ class Timer final : public MemoryRetainer {
 
 using TimerPointer = DeleteFnPtr<Timer, Timer::Free>;
 
+// A Stateless Reset Token is a mechanism by which a QUIC
+// endpoint can discreetly signal to a peer that it has
+// lost all state associated with a connection. This
+// helper class is used to both store received tokens and
+// provide storage when creating new tokens to send.
 class StatelessResetToken : public MemoryRetainer {
  public:
   inline StatelessResetToken(
       uint8_t* token,
       const uint8_t* secret,
       const QuicCID& cid);
+
   inline StatelessResetToken(
       const uint8_t* secret,
       const QuicCID& cid);
+
   explicit StatelessResetToken(
       const uint8_t* token)
       : token_(token) {}
 
   inline std::string ToString() const;
+
   const uint8_t* data() const { return token_; }
 
   struct Hash {

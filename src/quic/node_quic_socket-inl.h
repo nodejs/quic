@@ -78,6 +78,11 @@ void QuicSocket::AssociateStatelessResetToken(
   token_map_[token] = session;
 }
 
+const SocketAddress& QuicSocket::local_address() {
+  CHECK(preferred_endpoint_);
+  return preferred_endpoint_->local_address();
+}
+
 void QuicSocket::DisassociateStatelessResetToken(
     const StatelessResetToken& token) {
   Debug(this, "Removing stateless reset token %s", token);
