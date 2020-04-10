@@ -47,7 +47,7 @@ template <typename M, typename T>
 void Http3Application::SetConfig(
     int idx,
     M T::*member) {
-  AliasedFloat64Array& buffer = env()->quic_state()->http3config_buffer;
+  AliasedFloat64Array& buffer = session()->quic_state()->http3config_buffer;
   uint64_t flags = static_cast<uint64_t>(buffer[IDX_HTTP3_CONFIG_COUNT]);
   if (flags & (1ULL << idx))
     config_.*member = static_cast<uint64_t>(buffer[idx]);
@@ -76,7 +76,7 @@ Http3Application::Http3Application(
           : GetClientMaxHeaderPairs(config_.max_header_pairs));
   set_max_header_length(config_.max_header_length);
 
-  session->env()->quic_state()->http3config_buffer[IDX_HTTP3_CONFIG_COUNT] = 0;
+  session->quic_state()->http3config_buffer[IDX_HTTP3_CONFIG_COUNT] = 0;
 }
 
 // Push streams in HTTP/3 are a bit complicated.

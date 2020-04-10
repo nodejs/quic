@@ -758,6 +758,7 @@ void SetHostname(const crypto::SSLPointer& ssl, const std::string& hostname) {
 void InitializeTLS(QuicSession* session, const crypto::SSLPointer& ssl) {
   QuicCryptoContext* ctx = session->crypto_context();
   Environment* env = session->env();
+  QuicState* quic_state = session->quic_state();
 
   SSL_set_app_data(ssl.get(), session);
   SSL_set_cert_cb(ssl.get(), CertCB,
@@ -767,8 +768,8 @@ void InitializeTLS(QuicSession* session, const crypto::SSLPointer& ssl) {
   // Enable tracing if the `--trace-tls` command line flag is used.
   if (env->options()->trace_tls) {
     ctx->EnableTrace();
-    if (env->quic_state()->warn_trace_tls) {
-      env->quic_state()->warn_trace_tls = false;
+    if (quic_state->warn_trace_tls) {
+      quic_state->warn_trace_tls = false;
       ProcessEmitWarning(env,
           "Enabling --trace-tls can expose sensitive data "
           "in the resulting log");

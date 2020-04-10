@@ -6,6 +6,7 @@
 #include "aliased_buffer.h"
 
 namespace node {
+namespace quic {
 
 enum QuicSessionConfigIndex : int {
   IDX_QUIC_SESSION_ACTIVE_CONNECTION_ID_LIMIT,
@@ -33,22 +34,23 @@ enum Http3ConfigIndex : int {
   IDX_HTTP3_CONFIG_COUNT
 };
 
-class QuicState {
+class QuicState : public BaseObject {
  public:
-  explicit QuicState(v8::Isolate* isolate) :
-    root_buffer(
-      isolate,
-      sizeof(quic_state_internal)),
-    quicsessionconfig_buffer(
-      isolate,
-      offsetof(quic_state_internal, quicsessionconfig_buffer),
-      IDX_QUIC_SESSION_CONFIG_COUNT + 1,
-      root_buffer),
-    http3config_buffer(
-      isolate,
-      offsetof(quic_state_internal, http3config_buffer),
-      IDX_HTTP3_CONFIG_COUNT +1,
-      root_buffer) {
+  explicit QuicState(Environment* env, v8::Local<v8::Object> obj)
+    : BaseObject(env, obj),
+      root_buffer(
+        env->isolate(),
+        sizeof(quic_state_internal)),
+      quicsessionconfig_buffer(
+        env->isolate(),
+        offsetof(quic_state_internal, quicsessionconfig_buffer),
+        IDX_QUIC_SESSION_CONFIG_COUNT + 1,
+        root_buffer),
+      http3config_buffer(
+        env->isolate(),
+        offsetof(quic_state_internal, http3config_buffer),
+        IDX_HTTP3_CONFIG_COUNT + 1,
+        root_buffer) {
   }
 
   AliasedUint8Array root_buffer;
@@ -56,6 +58,10 @@ class QuicState {
   AliasedFloat64Array http3config_buffer;
 
   bool warn_trace_tls = true;
+
+  void MemoryInfo(MemoryTracker* tracker) const override;
+  SET_SELF_SIZE(QuicState)
+  SET_MEMORY_INFO_NAME(QuicState)
 
  private:
   struct quic_state_internal {
@@ -65,6 +71,7 @@ class QuicState {
   };
 };
 
+}  // namespace quic
 }  // namespace node
 
 #endif  // defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS

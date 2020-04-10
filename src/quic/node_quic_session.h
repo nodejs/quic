@@ -11,6 +11,7 @@
 #include "node_crypto.h"
 #include "node_http_common.h"
 #include "node_mem.h"
+#include "node_quic_state.h"
 #include "node_quic_buffer-inl.h"
 #include "node_quic_crypto.h"
 #include "node_quic_util.h"
@@ -64,8 +65,8 @@ class QuicSessionConfig : public ngtcp2_settings {
  public:
   QuicSessionConfig() {}
 
-  explicit QuicSessionConfig(Environment* env) {
-    Set(env);
+  explicit QuicSessionConfig(QuicState* quic_state) {
+    Set(quic_state);
   }
 
   QuicSessionConfig(const QuicSessionConfig& config) {
@@ -76,13 +77,13 @@ class QuicSessionConfig : public ngtcp2_settings {
     token = config.token;
   }
 
-  void ResetToDefaults(Environment* env);
+  void ResetToDefaults(QuicState* quic_state);
 
   // QuicSessionConfig::Set() pulls values out of the AliasedBuffer
   // defined in node_quic_state.h and stores the values in settings_.
   // If preferred_addr is not nullptr, it is copied into the
   // settings_.preferred_addr field
-  void Set(Environment* env,
+  void Set(QuicState* quic_state,
            const struct sockaddr* preferred_addr = nullptr);
 
   inline void set_original_connection_id(const QuicCID& ocid);
@@ -1129,6 +1130,8 @@ class QuicSession : public AsyncWrap,
     BaseObjectPtr<QuicSession> session_;
   };
 
+  QuicState* quic_state() { return quic_state_.get(); }
+
   void MemoryInfo(MemoryTracker* tracker) const override;
   SET_MEMORY_INFO_NAME(QuicSession)
   SET_SELF_SIZE(QuicSession)
@@ -1472,6 +1475,8 @@ class QuicSession : public AsyncWrap,
   };
 
   static const ngtcp2_conn_callbacks callbacks[2];
+
+  BaseObjectPtr<QuicState> quic_state_;
 
   friend class QuicCryptoContext;
   friend class QuicSessionListener;

@@ -7,6 +7,7 @@
 #include "async_wrap.h"
 #include "env.h"
 #include "node_http_common.h"
+#include "node_quic_state.h"
 #include "node_quic_util.h"
 #include "stream_base-inl.h"
 #include "util-inl.h"
@@ -327,6 +328,8 @@ class QuicStream : public AsyncWrap,
 
   AsyncWrap* GetAsyncWrap() override { return this; }
 
+  QuicState* quic_state() { return quic_state_.get(); }
+
   // Required for MemoryRetainer
   void MemoryInfo(MemoryTracker* tracker) const override;
   SET_MEMORY_INFO_NAME(QuicStream)
@@ -370,6 +373,8 @@ class QuicStream : public AsyncWrap,
   size_t current_headers_length_ = 0;
 
   ListNode<QuicStream> stream_queue_;
+
+  BaseObjectPtr<QuicState> quic_state_;
  public:
   // Linked List of QuicStream objects
   using Queue = ListHead<QuicStream, &QuicStream::stream_queue_>;

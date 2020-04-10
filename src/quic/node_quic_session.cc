@@ -18,7 +18,6 @@
 #include "node_quic_crypto.h"
 #include "node_quic_socket-inl.h"
 #include "node_quic_stream-inl.h"
-#include "node_quic_state.h"
 #include "node_quic_util-inl.h"
 #include "node_quic_default_application.h"
 #include "node_quic_http3_application.h"
@@ -56,8 +55,8 @@ using v8::Value;
 namespace quic {
 
 namespace {
-void SetConfig(Environment* env, int idx, uint64_t* val) {
-  AliasedFloat64Array& buffer = env->quic_state()->quicsessionconfig_buffer;
+void SetConfig(QuicState* quic_state, int idx, uint64_t* val) {
+  AliasedFloat64Array& buffer = quic_state->quicsessionconfig_buffer;
   uint64_t flags = static_cast<uint64_t>(buffer[IDX_QUIC_SESSION_CONFIG_COUNT]);
   if (flags & (1ULL << idx))
     *val = static_cast<uint64_t>(buffer[idx]);
@@ -143,12 +142,12 @@ std::string QuicSession::RemoteTransportParamsDebug::ToString() const {
   return out;
 }
 
-void QuicSessionConfig::ResetToDefaults(Environment* env) {
+void QuicSessionConfig::ResetToDefaults(QuicState* quic_state) {
   ngtcp2_settings_default(this);
   initial_ts = uv_hrtime();
   // Detailed(verbose) logging provided by ngtcp2 is only enabled
   // when the NODE_DEBUG_NATIVE=NGTCP2_DEBUG category is used.
-  if (UNLIKELY(env->enabled_debug_list()->enabled(
+  if (UNLIKELY(quic_state->env()->enabled_debug_list()->enabled(
           DebugCategory::NGTCP2_DEBUG))) {
     log_printf = Ngtcp2DebugLog;
   }
@@ -177,28 +176,28 @@ void QuicSessionConfig::ResetToDefaults(Environment* env) {
 
 // Sets the QuicSessionConfig using an AliasedBuffer for efficiency.
 void QuicSessionConfig::Set(
-    Environment* env,
+    QuicState* quic_state,
     const sockaddr* preferred_addr) {
-  ResetToDefaults(env);
-  SetConfig(env, IDX_QUIC_SESSION_ACTIVE_CONNECTION_ID_LIMIT,
+  ResetToDefaults(quic_state);
+  SetConfig(quic_state, IDX_QUIC_SESSION_ACTIVE_CONNECTION_ID_LIMIT,
             &transport_params.active_connection_id_limit);
-  SetConfig(env, IDX_QUIC_SESSION_MAX_STREAM_DATA_BIDI_LOCAL,
+  SetConfig(quic_state, IDX_QUIC_SESSION_MAX_STREAM_DATA_BIDI_LOCAL,
             &transport_params.initial_max_stream_data_bidi_local);
-  SetConfig(env, IDX_QUIC_SESSION_MAX_STREAM_DATA_BIDI_REMOTE,
+  SetConfig(quic_state, IDX_QUIC_SESSION_MAX_STREAM_DATA_BIDI_REMOTE,
             &transport_params.initial_max_stream_data_bidi_remote);
-  SetConfig(env, IDX_QUIC_SESSION_MAX_STREAM_DATA_UNI,
+  SetConfig(quic_state, IDX_QUIC_SESSION_MAX_STREAM_DATA_UNI,
             &transport_params.initial_max_stream_data_uni);
-  SetConfig(env, IDX_QUIC_SESSION_MAX_DATA,
+  SetConfig(quic_state, IDX_QUIC_SESSION_MAX_DATA,
             &transport_params.initial_max_data);
-  SetConfig(env, IDX_QUIC_SESSION_MAX_STREAMS_BIDI,
+  SetConfig(quic_state, IDX_QUIC_SESSION_MAX_STREAMS_BIDI,
             &transport_params.initial_max_streams_bidi);
-  SetConfig(env, IDX_QUIC_SESSION_MAX_STREAMS_UNI,
+  SetConfig(quic_state, IDX_QUIC_SESSION_MAX_STREAMS_UNI,
             &transport_params.initial_max_streams_uni);
-  SetConfig(env, IDX_QUIC_SESSION_MAX_IDLE_TIMEOUT,
+  SetConfig(quic_state, IDX_QUIC_SESSION_MAX_IDLE_TIMEOUT,
             &transport_params.max_idle_timeout);
-  SetConfig(env, IDX_QUIC_SESSION_MAX_PACKET_SIZE,
+  SetConfig(quic_state, IDX_QUIC_SESSION_MAX_PACKET_SIZE,
             &transport_params.max_packet_size);
-  SetConfig(env, IDX_QUIC_SESSION_MAX_ACK_DELAY,
+  SetConfig(quic_state, IDX_QUIC_SESSION_MAX_ACK_DELAY,
             &transport_params.max_ack_delay);
 
   transport_params.max_idle_timeout =
@@ -1464,7 +1463,8 @@ QuicSession::QuicSession(
     idle_(new Timer(socket->env(), [this]() { OnIdleTimeout(); })),
     retransmit_(new Timer(socket->env(), [this]() { MaybeTimeout(); })),
     rcid_(rcid),
-    state_(env()->isolate(), IDX_QUIC_SESSION_STATE_COUNT) {
+    state_(env()->isolate(), IDX_QUIC_SESSION_STATE_COUNT),
+    quic_state_(socket->quic_state()) {
   PushListener(&default_listener_);
   set_connection_id_strategy(RandomConnectionIDStrategy);
   set_preferred_address_strategy(preferred_address_strategy);
@@ -2840,7 +2840,7 @@ void QuicSession::InitClient(
   // prevent IP fragmentation.
   max_pktlen_ = GetMaxPktLen(remote_address_);
 
-  QuicSessionConfig config(env());
+  QuicSessionConfig config(quic_state());
   ExtendMaxStreamsBidi(DEFAULT_MAX_STREAMS_BIDI);
   ExtendMaxStreamsUni(DEFAULT_MAX_STREAMS_UNI);
 

@@ -8,6 +8,7 @@
 #include "node_crypto.h"
 #include "node_internals.h"
 #include "ngtcp2/ngtcp2.h"
+#include "node_quic_state.h"
 #include "node_quic_session.h"
 #include "node_quic_util.h"
 #include "node_sockaddr.h"
@@ -197,7 +198,7 @@ class QuicEndpoint : public BaseObject,
     Local<Context> context);
 
   QuicEndpoint(
-      Environment* env,
+      QuicState* quic_state,
       Local<Object> wrap,
       QuicSocket* listener,
       Local<Object> udp_wrap);
@@ -235,6 +236,8 @@ class QuicEndpoint : public BaseObject,
   bool has_pending_callbacks() { return pending_callbacks_ > 0; }
   inline void WaitForPendingCallbacks();
 
+  QuicState* quic_state() const { return quic_state_.get(); }
+
   void MemoryInfo(MemoryTracker* tracker) const override;
   SET_MEMORY_INFO_NAME(QuicEndpoint)
   SET_SELF_SIZE(QuicEndpoint)
@@ -246,6 +249,7 @@ class QuicEndpoint : public BaseObject,
   BaseObjectPtr<AsyncWrap> strong_ptr_;
   size_t pending_callbacks_ = 0;
   bool waiting_for_callbacks_ = false;
+  BaseObjectPtr<QuicState> quic_state_;
 };
 
 // QuicSocket manages the flow of data from the UDP socket to the
@@ -263,7 +267,7 @@ class QuicSocket : public AsyncWrap,
       Local<Context> context);
 
   QuicSocket(
-      Environment* env,
+      QuicState* quic_state,
       Local<Object> wrap,
       // A retry token should only be valid for a small window of time.
       // The retry_token_expiration specifies the number of seconds a
@@ -333,6 +337,8 @@ class QuicSocket : public AsyncWrap,
   BaseObjectPtr<crypto::SecureContext> server_secure_context() const {
     return server_secure_context_;
   }
+
+  QuicState* quic_state() { return quic_state_.get(); }
 
   void MemoryInfo(MemoryTracker* tracker) const override;
   SET_MEMORY_INFO_NAME(QuicSocket)
@@ -543,7 +549,7 @@ class QuicSocket : public AsyncWrap,
 
   class SendWrap : public ReqWrap<uv_udp_send_t> {
    public:
-    SendWrap(Environment* env,
+    SendWrap(QuicState* quic_state,
              v8::Local<v8::Object> req_wrap_obj,
              size_t total_length_);
 
@@ -554,6 +560,8 @@ class QuicSocket : public AsyncWrap,
     void set_session(BaseObjectPtr<QuicSession> session) { session_ = session; }
     size_t total_length() const { return total_length_; }
 
+    QuicState* quic_state() { return quic_state_.get(); }
+
     SET_SELF_SIZE(SendWrap);
     std::string MemoryInfoName() const override;
     void MemoryInfo(MemoryTracker* tracker) const override;
@@ -562,9 +570,11 @@ class QuicSocket : public AsyncWrap,
     BaseObjectPtr<QuicSession> session_;
     std::unique_ptr<QuicPacket> packet_;
     size_t total_length_;
+    BaseObjectPtr<QuicState> quic_state_;
   };
 
   SendWrap* last_created_send_wrap_ = nullptr;
+  BaseObjectPtr<QuicState> quic_state_;
 
   friend class QuicSocketListener;
 };

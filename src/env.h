@@ -30,9 +30,6 @@
 #include "inspector_profiler.h"
 #endif
 #include "debug_utils.h"
-#if HAVE_OPENSSL && defined(NODE_EXPERIMENTAL_QUIC)
-#include "quic/node_quic_state.h"
-#endif
 #include "handle_wrap.h"
 #include "node.h"
 #include "node_binding.h"
@@ -1056,11 +1053,6 @@ class Environment : public MemoryRetainer {
 
   EnabledDebugList* enabled_debug_list() { return &enabled_debug_list_; }
 
-#if HAVE_OPENSSL && defined(NODE_EXPERIMENTAL_QUIC)
-  inline QuicState* quic_state() const;
-  inline void set_quic_state(std::unique_ptr<QuicState> state);
-#endif
-
   inline performance::PerformanceState* performance_state();
 
   inline std::unordered_map<std::string, uint64_t>* performance_marks();
@@ -1409,10 +1401,6 @@ class Environment : public MemoryRetainer {
   std::list<HandleCleanup> handle_cleanup_queue_;
   int handle_cleanup_waiting_ = 0;
   int request_waiting_ = 0;
-
-#if HAVE_OPENSSL && defined(NODE_EXPERIMENTAL_QUIC)
-  std::unique_ptr<QuicState> quic_state_;
-#endif
 
   EnabledDebugList enabled_debug_list_;
 

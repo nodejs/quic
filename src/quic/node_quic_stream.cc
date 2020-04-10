@@ -47,7 +47,8 @@ QuicStream::QuicStream(
               HistogramOptions::SIZE),
     session_(sess),
     stream_id_(stream_id),
-    push_id_(push_id) {
+    push_id_(push_id),
+    quic_state_(sess->quic_state()) {
   CHECK_NOT_NULL(sess);
   Debug(this, "Created");
   StreamBase::AttachToObject(GetObject());

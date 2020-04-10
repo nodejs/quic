@@ -172,12 +172,13 @@ void JSQuicSocketListener::OnDestroy() {
 }
 
 QuicEndpoint::QuicEndpoint(
-    Environment* env,
+    QuicState* quic_state,
     Local<Object> wrap,
     QuicSocket* listener,
     Local<Object> udp_wrap) :
-    BaseObject(env, wrap),
-    listener_(listener) {
+    BaseObject(quic_state->env(), wrap),
+    listener_(listener),
+    quic_state_(quic_state) {
   MakeWeak();
   udp_ = static_cast<UDPWrapBase*>(
       udp_wrap->GetAlignedPointerFromInternalField(
@@ -230,7 +231,7 @@ void QuicEndpoint::OnAfterBind() {
 }
 
 QuicSocket::QuicSocket(
-    Environment* env,
+    QuicState* quic_state,
     Local<Object> wrap,
     uint64_t retry_token_expiration,
     size_t max_connections,
@@ -240,8 +241,8 @@ QuicSocket::QuicSocket(
     QlogMode qlog,
     const uint8_t* session_reset_secret,
     bool disable_stateless_reset)
-  : AsyncWrap(env, wrap, AsyncWrap::PROVIDER_QUICSOCKET),
-    StatsBase(env, wrap),
+  : AsyncWrap(quic_state->env(), wrap, AsyncWrap::PROVIDER_QUICSOCKET),
+    StatsBase(quic_state->env(), wrap),
     alloc_info_(MakeAllocator()),
     options_(options),
     max_connections_(max_connections),
@@ -249,7 +250,8 @@ QuicSocket::QuicSocket(
     max_stateless_resets_per_host_(max_stateless_resets_per_host),
     retry_token_expiration_(retry_token_expiration),
     qlog_(qlog),
-    server_alpn_(NGTCP2_ALPN_H3) {
+    server_alpn_(NGTCP2_ALPN_H3),
+    quic_state_(quic_state) {
   MakeWeak();
   PushListener(&default_listener_);
 
@@ -312,7 +314,7 @@ void QuicSocket::Listen(
   CHECK(!server_secure_context_);
   CHECK(!is_flag_set(QUICSOCKET_FLAGS_SERVER_LISTENING));
   Debug(this, "Starting to listen");
-  server_session_config_.Set(env(), preferred_address);
+  server_session_config_.Set(quic_state(), preferred_address);
   server_secure_context_ = sc;
   server_alpn_ = alpn;
   server_options_ = options;
@@ -331,7 +333,7 @@ ReqWrap<uv_udp_send_t>* QuicSocket::OnCreateSendWrap(size_t msg_size) {
   Local<Object> obj;
   if (!env()->quicsocketsendwrap_instance_template()
           ->NewInstance(env()->context()).ToLocal(&obj)) return nullptr;
-  return last_created_send_wrap_ = new SendWrap(env(), obj, msg_size);
+  return last_created_send_wrap_ = new SendWrap(quic_state(), obj, msg_size);
 }
 
 void QuicSocket::OnEndpointDone(QuicEndpoint* endpoint) {
@@ -822,11 +824,12 @@ BaseObjectPtr<QuicSession> QuicSocket::AcceptInitialPacket(
 }
 
 QuicSocket::SendWrap::SendWrap(
-    Environment* env,
+    QuicState* quic_state,
     Local<Object> req_wrap_obj,
     size_t total_length)
-  : ReqWrap(env, req_wrap_obj, PROVIDER_QUICSOCKET),
-    total_length_(total_length) {
+  : ReqWrap(quic_state->env(), req_wrap_obj, PROVIDER_QUICSOCKET),
+    total_length_(total_length),
+    quic_state_(quic_state) {
 }
 
 std::string QuicSocket::SendWrap::MemoryInfoName() const {
@@ -946,7 +949,7 @@ void QuicSocket::RemoveListener(QuicSocketListener* listener) {
 // JavaScript API
 namespace {
 void NewQuicEndpoint(const FunctionCallbackInfo<Value>& args) {
-  Environment* env = Environment::GetCurrent(args);
+  QuicState* state = Unwrap<QuicState>(args.Data());
   CHECK(args.IsConstructCall());
   CHECK(args[0]->IsObject());
   QuicSocket* socket;
@@ -954,11 +957,12 @@ void NewQuicEndpoint(const FunctionCallbackInfo<Value>& args) {
   CHECK(args[1]->IsObject());
   CHECK_GE(args[1].As<Object>()->InternalFieldCount(),
            UDPWrapBase::kUDPWrapBaseField);
-  new QuicEndpoint(env, args.This(), socket, args[1].As<Object>());
+  new QuicEndpoint(state, args.This(), socket, args[1].As<Object>());
 }
 
 void NewQuicSocket(const FunctionCallbackInfo<Value>& args) {
-  Environment* env = Environment::GetCurrent(args);
+  QuicState* state = Unwrap<QuicState>(args.Data());
+  Environment* env = state->env();
   CHECK(args.IsConstructCall());
 
   uint32_t options;
@@ -986,7 +990,7 @@ void NewQuicSocket(const FunctionCallbackInfo<Value>& args) {
   }
 
   new QuicSocket(
-      env,
+      state,
       args.This(),
       retry_token_expiration,
       max_connections,

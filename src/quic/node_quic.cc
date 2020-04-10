@@ -30,6 +30,10 @@ using v8::Value;
 
 namespace quic {
 
+void QuicState::MemoryInfo(MemoryTracker* tracker) const {
+  tracker->TrackField("root_buffer", root_buffer);
+}
+
 namespace {
 // Register the JavaScript callbacks the internal binding will use to report
 // status and updates. This is called only once when the quic module is loaded.
@@ -108,11 +112,13 @@ void Initialize(Local<Object> target,
                 void* priv) {
   Environment* env = Environment::GetCurrent(context);
   Isolate* isolate = env->isolate();
-  HandleScope scope(isolate);
+  HandleScope handle_scope(isolate);
 
   HistogramBase::Initialize(env);
 
-  std::unique_ptr<QuicState> state = std::make_unique<QuicState>(isolate);
+  Environment::BindingScope<QuicState> binding_scope(env);
+  if (!binding_scope) return;
+  QuicState* state = binding_scope.data;
 
 #define SET_STATE_TYPEDARRAY(name, field)             \
   target->Set(context,                                \
@@ -121,8 +127,6 @@ void Initialize(Local<Object> target,
   SET_STATE_TYPEDARRAY("sessionConfig", state->quicsessionconfig_buffer);
   SET_STATE_TYPEDARRAY("http3Config", state->http3config_buffer);
 #undef SET_STATE_TYPEDARRAY
-
-  env->set_quic_state(std::move(state));
 
   QuicSocket::Initialize(env, target, context);
   QuicEndpoint::Initialize(env, target, context);
