@@ -11,11 +11,12 @@
 
 #if HAVE_OPENSSL
 #include <openssl/opensslv.h>
-#if defined(NODE_EXPERIMENTAL_QUIC)
+#endif  // HAVE_OPENSSL
+
+#if defined(NODE_EXPERIMENTAL_QUIC) && NODE_EXPERIMENTAL_QUIC
 #include <ngtcp2/version.h>
 #include <nghttp3/version.h>
 #endif
-#endif  // HAVE_OPENSSL
 
 #ifdef NODE_HAVE_I18N_SUPPORT
 #include <unicode/timezone.h>
@@ -93,10 +94,11 @@ Metadata::Versions::Versions() {
 
 #if HAVE_OPENSSL
   openssl = GetOpenSSLVersion();
-#if defined(NODE_EXPERIMENTAL_QUIC)
+#endif
+
+#if defined(NODE_EXPERIMENTAL_QUIC) && NODE_EXPERIMENTAL_QUIC
   ngtcp2 = NGTCP2_VERSION;
   nghttp3 = NGHTTP3_VERSION;
-#endif
 #endif
 
 #ifdef NODE_HAVE_I18N_SUPPORT

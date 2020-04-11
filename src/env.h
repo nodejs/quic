@@ -394,7 +394,7 @@ constexpr size_t kFsStatsBufferLength =
   V(x_forwarded_string, "x-forwarded-for")                                     \
   V(zero_return_string, "ZERO_RETURN")
 
-#if HAVE_OPENSSL && defined(NODE_EXPERIMENTAL_QUIC)
+#if defined(NODE_EXPERIMENTAL_QUIC) && NODE_EXPERIMENTAL_QUIC
 # define QUIC_ENVIRONMENT_STRONG_PERSISTENT_TEMPLATES(V)                       \
   V(quicclientsession_instance_template, v8::ObjectTemplate)                   \
   V(quicserversession_instance_template, v8::ObjectTemplate)                   \
@@ -435,7 +435,7 @@ constexpr size_t kFsStatsBufferLength =
   V(worker_heap_snapshot_taker_template, v8::ObjectTemplate)                   \
   QUIC_ENVIRONMENT_STRONG_PERSISTENT_TEMPLATES(V)
 
-#if HAVE_OPENSSL && defined(NODE_EXPERIMENTAL_QUIC)
+#if defined(NODE_EXPERIMENTAL_QUIC) && NODE_EXPERIMENTAL_QUIC
 # define QUIC_ENVIRONMENT_STRONG_PERSISTENT_VALUES(V)                          \
   V(quic_on_socket_close_function, v8::Function)                               \
   V(quic_on_socket_error_function, v8::Function)                               \

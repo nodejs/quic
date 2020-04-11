@@ -7,13 +7,13 @@
 
 #if HAVE_OPENSSL
 #define NODE_BUILTIN_OPENSSL_MODULES(V) V(crypto) V(tls_wrap)
-#if defined(NODE_EXPERIMENTAL_QUIC)
-#define NODE_BUILTIN_QUIC_MODULES(V) V(quic)
-#else
-#define NODE_BUILTIN_QUIC_MODULES(V)
-#endif
 #else
 #define NODE_BUILTIN_OPENSSL_MODULES(V)
+#endif
+
+#if defined(NODE_EXPERIMENTAL_QUIC) && NODE_EXPERIMENTAL_QUIC
+#define NODE_BUILTIN_QUIC_MODULES(V) V(quic)
+#else
 #define NODE_BUILTIN_QUIC_MODULES(V)
 #endif
 
