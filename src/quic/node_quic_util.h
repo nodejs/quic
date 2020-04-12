@@ -109,7 +109,7 @@ struct StatsTraits {
 template <typename T>
 class StatsBase {
  public:
-   typedef typename T::Stats Stats;
+  typedef typename T::Stats Stats;
 
   // A StatsBase instance may have one of three histogram
   // instances. One that records rate of data flow, one
