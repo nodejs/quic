@@ -42,12 +42,6 @@ size_t QuicCID::Hash::operator()(const QuicCID& token) const {
   return hash;
 }
 
-QuicCID& QuicCID::operator=(const QuicCID& cid) {
-  if (this == &cid) return *this;
-  this->~QuicCID();
-  return *new(this) QuicCID(std::move(cid));
-}
-
 bool QuicCID::operator==(const QuicCID& other) const {
   return memcmp(cid()->data, other.cid()->data, cid()->datalen) == 0;
 }
