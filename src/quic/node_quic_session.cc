@@ -692,10 +692,7 @@ void JSQuicSessionListener::OnUsePreferredAddress(
           preferred_address.preferred_ipv6_port();
 
   Local<Value> argv[] = {
-      String::NewFromOneByte(
-          env->isolate(),
-          reinterpret_cast<const uint8_t*>(hostname.c_str()),
-          v8::NewStringType::kNormal).ToLocalChecked(),
+      OneByteString(env->isolate(), hostname.c_str()),
       Integer::New(env->isolate(), port),
       Integer::New(env->isolate(), family)
   };
@@ -744,12 +741,7 @@ void JSQuicSessionListener::OnQLog(const uint8_t* data, size_t len) {
   HandleScope handle_scope(env->isolate());
   Context::Scope context_scope(env->context());
 
-  Local<Value> str =
-      String::NewFromOneByte(env->isolate(),
-                             data,
-                             v8::NewStringType::kNormal,
-                             len).ToLocalChecked();
-
+  Local<Value> str = OneByteString(env->isolate(), data, len);
   session()->MakeCallback(env->quic_on_session_qlog_function(), 1, &str);
 }
 
