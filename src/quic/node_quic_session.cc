@@ -996,7 +996,7 @@ int QuicCryptoContext::OnOCSP() {
 // The OnCertDone function is called by the QuicSessionOnCertDone
 // function when usercode is done handling the OCSPRequest event.
 void QuicCryptoContext::OnOCSPDone(
-    BaseObjectPtr<crypto::SecureContext> context,
+    BaseObjectPtr<SecureContext> context,
     Local<Value> ocsp_response) {
   Debug(session(),
         "OCSPRequest completed. Context Provided? %s, OCSP Provided? %s",
@@ -2733,11 +2733,11 @@ void QuicSessionOnCertDone(const FunctionCallbackInfo<Value>& args) {
   ASSIGN_OR_RETURN_UNWRAP(&session, args.Holder());
 
   Local<FunctionTemplate> cons = env->secure_context_constructor_template();
-  crypto::SecureContext* context = nullptr;
+  SecureContext* context = nullptr;
   if (args[0]->IsObject() && cons->HasInstance(args[0]))
-    context = Unwrap<crypto::SecureContext>(args[0].As<Object>());
+    context = Unwrap<SecureContext>(args[0].As<Object>());
   session->crypto_context()->OnOCSPDone(
-      BaseObjectPtr<crypto::SecureContext>(context),
+      BaseObjectPtr<SecureContext>(context),
       args[1]);
 }
 }  // namespace
@@ -3675,7 +3675,7 @@ void NewQuicClientSession(const FunctionCallbackInfo<Value>& args) {
           socket,
           socket->local_address(),
           remote_addr,
-          BaseObjectPtr<crypto::SecureContext>(sc),
+          BaseObjectPtr<SecureContext>(sc),
           has_early_transport_params ? &early_transport_params : nullptr,
           std::move(early_session_ticket),
           args[ARG_IDX::DCID],
