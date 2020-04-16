@@ -97,7 +97,7 @@ void QuicInitSecureContext(const FunctionCallbackInfo<Value>& args) {
   bool early_data = args[2]->BooleanValue(env->isolate());
 
   InitializeSecureContext(
-      BaseObjectPtr<crypto::SecureContext>(sc),
+      BaseObjectPtr<SecureContext>(sc),
       early_data,
       side);
 

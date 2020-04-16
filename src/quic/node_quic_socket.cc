@@ -1082,7 +1082,7 @@ void QuicSocketListen(const FunctionCallbackInfo<Value>& args) {
   if (!args[5]->Uint32Value(env->context()).To(&options)) return;
 
   socket->Listen(
-      BaseObjectPtr<crypto::SecureContext>(sc),
+      BaseObjectPtr<SecureContext>(sc),
       preferred_address,
       alpn,
       options);
