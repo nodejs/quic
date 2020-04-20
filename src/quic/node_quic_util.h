@@ -299,6 +299,7 @@ class QuicCID : public MemoryRetainer {
 
   inline bool operator==(const QuicCID& other) const;
   inline bool operator!=(const QuicCID& other) const;
+  inline QuicCID& operator=(const QuicCID& cid);
   const ngtcp2_cid& operator*() const { return *ptr_; }
   const ngtcp2_cid* operator->() const { return ptr_; }
 
