@@ -27,13 +27,13 @@ TEST(QuicBuffer, Simple) {
   });
 
   buffer.Consume(100);
-  CHECK_EQ(0, buffer.length());
+  ASSERT_EQ(0u, buffer.length());
 
   // We have to move the read head forward in order to consume
   buffer.Seek(1);
   buffer.Consume(100);
-  CHECK_EQ(true, done);
-  CHECK_EQ(0, buffer.length());
+  ASSERT_TRUE(done);
+  ASSERT_EQ(0u, buffer.length());
 }
 
 TEST(QuicBuffer, ConsumeMore) {
@@ -45,14 +45,14 @@ TEST(QuicBuffer, ConsumeMore) {
 
   QuicBuffer buffer;
   buffer.Push(&buf, 1, [&](int status) {
-    EXPECT_EQ(0, status);
+    EXPECT_EQ(0u, status);
     done = true;
   });
 
   buffer.Seek(1);
   buffer.Consume(150);  // Consume more than what was buffered
-  CHECK_EQ(true, done);
-  CHECK_EQ(0, buffer.length());
+  ASSERT_TRUE(done);
+  ASSERT_EQ(0u, buffer.length());
 }
 
 TEST(QuicBuffer, Multiple) {
@@ -66,17 +66,17 @@ TEST(QuicBuffer, Multiple) {
   buf.Push(bufs, 2, [&](int status) { done = true; });
 
   buf.Seek(2);
-  CHECK_EQ(buf.remaining(), 50);
-  CHECK_EQ(buf.length(), 52);
+  ASSERT_EQ(buf.remaining(), 50);
+  ASSERT_EQ(buf.length(), 52);
 
   buf.Consume(25);
-  CHECK_EQ(buf.length(), 27);
+  ASSERT_EQ(buf.length(), 27);
 
   buf.Consume(25);
-  CHECK_EQ(buf.length(), 2);
+  ASSERT_EQ(buf.length(), 2);
 
   buf.Consume(2);
-  CHECK_EQ(0, buf.length());
+  ASSERT_EQ(0u, buf.length());
 }
 
 TEST(QuicBuffer, Multiple2) {
@@ -96,22 +96,22 @@ TEST(QuicBuffer, Multiple2) {
       bufs, node::arraysize(bufs),
       [&](int status) {
     count++;
-    CHECK_EQ(0, status);
+    ASSERT_EQ(0, status);
     delete[] ptr;
   });
   buffer.Seek(node::arraysize(bufs));
 
   buffer.Consume(25);
-  CHECK_EQ(75, buffer.length());
+  ASSERT_EQ(75, buffer.length());
   buffer.Consume(25);
-  CHECK_EQ(50, buffer.length());
+  ASSERT_EQ(50, buffer.length());
   buffer.Consume(25);
-  CHECK_EQ(25, buffer.length());
+  ASSERT_EQ(25, buffer.length());
   buffer.Consume(25);
-  CHECK_EQ(0, buffer.length());
+  ASSERT_EQ(0u, buffer.length());
 
   // The callback was only called once tho
-  CHECK_EQ(1, count);
+  ASSERT_EQ(1, count);
 }
 
 TEST(QuicBuffer, Cancel) {
@@ -131,18 +131,18 @@ TEST(QuicBuffer, Cancel) {
       bufs, node::arraysize(bufs),
       [&](int status) {
     count++;
-    CHECK_EQ(UV_ECANCELED, status);
+    ASSERT_EQ(UV_ECANCELED, status);
     delete[] ptr;
   });
 
   buffer.Seek(1);
   buffer.Consume(25);
-  CHECK_EQ(75, buffer.length());
+  ASSERT_EQ(75, buffer.length());
   buffer.Cancel();
-  CHECK_EQ(0, buffer.length());
+  ASSERT_EQ(0, buffer.length());
 
   // The callback was only called once tho
-  CHECK_EQ(1, count);
+  ASSERT_EQ(1, count);
 }
 
 TEST(QuicBuffer, Move) {
@@ -155,11 +155,11 @@ TEST(QuicBuffer, Move) {
 
   buffer1.Push(&buf, 1);
 
-  CHECK_EQ(100, buffer1.length());
+  ASSERT_EQ(100, buffer1.length());
 
   buffer2 = std::move(buffer1);
-  CHECK_EQ(0, buffer1.length());
-  CHECK_EQ(100, buffer2.length());
+  ASSERT_EQ(0u, buffer1.length());
+  ASSERT_EQ(100, buffer2.length());
 }
 
 TEST(QuicBuffer, QuicBufferChunk) {
@@ -170,30 +170,30 @@ TEST(QuicBuffer, QuicBufferChunk) {
   QuicBuffer buffer;
   buffer.Push(std::move(chunk));
   buffer.End();
-  CHECK_EQ(100, buffer.length());
+  ASSERT_EQ(100, buffer.length());
 
   auto next = [&](
       int status,
       const ngtcp2_vec* data,
       size_t count,
       Done done) {
-    CHECK_EQ(status, Status::STATUS_END);
-    CHECK_EQ(count, 1);
-    CHECK_NOT_NULL(data);
+    ASSERT_EQ(status, Status::STATUS_END);
+    ASSERT_EQ(count, 1);
+    ASSERT_NE(data, nullptr);
     done(100);
   };
 
-  CHECK_EQ(buffer.remaining(), 100);
+  ASSERT_EQ(buffer.remaining(), 100);
 
   ngtcp2_vec data[2];
   size_t len = sizeof(data) / sizeof(ngtcp2_vec);
   buffer.Pull(next, Options::OPTIONS_SYNC | Options::OPTIONS_END, data, len);
 
-  CHECK_EQ(buffer.remaining(), 0);
+  ASSERT_EQ(buffer.remaining(), 0);
 
   buffer.Consume(50);
-  CHECK_EQ(50, buffer.length());
+  ASSERT_EQ(50, buffer.length());
 
   buffer.Consume(50);
-  CHECK_EQ(0, buffer.length());
+  ASSERT_EQ(0u, buffer.length());
 }
