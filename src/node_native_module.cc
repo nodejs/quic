@@ -104,7 +104,7 @@ void NativeModuleLoader::InitializeModuleCategories() {
       "internal/process/policy",
       "internal/streams/lazy_transform",
 #endif  // !HAVE_OPENSSL
-#if !defined(NODE_EXPERIMENTAL_QUIC) && NODE_EXPERIMENTAL_QUIC
+#if !NODE_EXPERIMENTAL_QUIC
       "internal/quic/core",
       "internal/quic/util",
 #endif
