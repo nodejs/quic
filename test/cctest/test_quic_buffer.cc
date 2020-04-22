@@ -12,6 +12,13 @@ using node::quic::QuicBufferChunk;
 using node::bob::Status;
 using node::bob::Options;
 using node::bob::Done;
+using ::testing::AssertionSuccess;
+using ::testing::AssertionFailure;
+
+::testing::AssertionResult IsEqual(size_t actual, int expected) {
+  return (static_cast<size_t>(expected) == actual) ? AssertionSuccess() :
+      AssertionFailure() << actual << " is not equal to " << expected;
+}
 
 TEST(QuicBuffer, Simple) {
   char data[100];
@@ -27,13 +34,13 @@ TEST(QuicBuffer, Simple) {
   });
 
   buffer.Consume(100);
-  ASSERT_EQ(0u, buffer.length());
+  ASSERT_TRUE(IsEqual(buffer.length(), 0));
 
   // We have to move the read head forward in order to consume
   buffer.Seek(1);
   buffer.Consume(100);
   ASSERT_TRUE(done);
-  ASSERT_EQ(0u, buffer.length());
+  ASSERT_TRUE(IsEqual(buffer.length(), 0));
 }
 
 TEST(QuicBuffer, ConsumeMore) {
@@ -45,14 +52,14 @@ TEST(QuicBuffer, ConsumeMore) {
 
   QuicBuffer buffer;
   buffer.Push(&buf, 1, [&](int status) {
-    EXPECT_EQ(0u, status);
+    EXPECT_EQ(0, status);
     done = true;
   });
 
   buffer.Seek(1);
   buffer.Consume(150);  // Consume more than what was buffered
   ASSERT_TRUE(done);
-  ASSERT_EQ(0u, buffer.length());
+  ASSERT_TRUE(IsEqual(buffer.length(), 0));
 }
 
 TEST(QuicBuffer, Multiple) {
@@ -66,17 +73,17 @@ TEST(QuicBuffer, Multiple) {
   buf.Push(bufs, 2, [&](int status) { done = true; });
 
   buf.Seek(2);
-  ASSERT_EQ(buf.remaining(), 50);
-  ASSERT_EQ(buf.length(), 52);
+  ASSERT_TRUE(IsEqual(buf.remaining(), 50));
+  ASSERT_TRUE(IsEqual(buf.length(), 52));
 
   buf.Consume(25);
-  ASSERT_EQ(buf.length(), 27);
+  ASSERT_TRUE(IsEqual(buf.length(), 27));
 
   buf.Consume(25);
-  ASSERT_EQ(buf.length(), 2);
+  ASSERT_TRUE(IsEqual(buf.length(), 2));
 
   buf.Consume(2);
-  ASSERT_EQ(0u, buf.length());
+  ASSERT_TRUE(IsEqual(buf.length(), 0));
 }
 
 TEST(QuicBuffer, Multiple2) {
@@ -102,13 +109,13 @@ TEST(QuicBuffer, Multiple2) {
   buffer.Seek(node::arraysize(bufs));
 
   buffer.Consume(25);
-  ASSERT_EQ(75, buffer.length());
+  ASSERT_TRUE(IsEqual(buffer.length(), 75));
   buffer.Consume(25);
-  ASSERT_EQ(50, buffer.length());
+  ASSERT_TRUE(IsEqual(buffer.length(), 50));
   buffer.Consume(25);
-  ASSERT_EQ(25, buffer.length());
+  ASSERT_TRUE(IsEqual(buffer.length(), 25));
   buffer.Consume(25);
-  ASSERT_EQ(0u, buffer.length());
+  ASSERT_TRUE(IsEqual(buffer.length(), 0));
 
   // The callback was only called once tho
   ASSERT_EQ(1, count);
@@ -137,9 +144,9 @@ TEST(QuicBuffer, Cancel) {
 
   buffer.Seek(1);
   buffer.Consume(25);
-  ASSERT_EQ(75, buffer.length());
+  ASSERT_TRUE(IsEqual(buffer.length(), 75));
   buffer.Cancel();
-  ASSERT_EQ(0, buffer.length());
+  ASSERT_TRUE(IsEqual(buffer.length(), 0));
 
   // The callback was only called once tho
   ASSERT_EQ(1, count);
@@ -155,11 +162,11 @@ TEST(QuicBuffer, Move) {
 
   buffer1.Push(&buf, 1);
 
-  ASSERT_EQ(100, buffer1.length());
+  ASSERT_TRUE(IsEqual(buffer1.length(), 100));
 
   buffer2 = std::move(buffer1);
-  ASSERT_EQ(0u, buffer1.length());
-  ASSERT_EQ(100, buffer2.length());
+  ASSERT_TRUE(IsEqual(buffer1.length(), 0));
+  ASSERT_TRUE(IsEqual(buffer2.length(), 100));
 }
 
 TEST(QuicBuffer, QuicBufferChunk) {
@@ -170,7 +177,7 @@ TEST(QuicBuffer, QuicBufferChunk) {
   QuicBuffer buffer;
   buffer.Push(std::move(chunk));
   buffer.End();
-  ASSERT_EQ(100, buffer.length());
+  ASSERT_TRUE(IsEqual(buffer.length(), 100));
 
   auto next = [&](
       int status,
@@ -178,22 +185,22 @@ TEST(QuicBuffer, QuicBufferChunk) {
       size_t count,
       Done done) {
     ASSERT_EQ(status, Status::STATUS_END);
-    ASSERT_EQ(count, 1);
+    ASSERT_TRUE(IsEqual(count, 1));
     ASSERT_NE(data, nullptr);
     done(100);
   };
 
-  ASSERT_EQ(buffer.remaining(), 100);
+  ASSERT_TRUE(IsEqual(buffer.remaining(), 100));
 
   ngtcp2_vec data[2];
   size_t len = sizeof(data) / sizeof(ngtcp2_vec);
   buffer.Pull(next, Options::OPTIONS_SYNC | Options::OPTIONS_END, data, len);
 
-  ASSERT_EQ(buffer.remaining(), 0);
+  ASSERT_TRUE(IsEqual(buffer.remaining(), 0));
 
   buffer.Consume(50);
-  ASSERT_EQ(50, buffer.length());
+  ASSERT_TRUE(IsEqual(buffer.length(), 50));
 
   buffer.Consume(50);
-  ASSERT_EQ(0u, buffer.length());
+  ASSERT_TRUE(IsEqual(buffer.length(), 0));
 }
