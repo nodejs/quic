@@ -33,8 +33,6 @@ const invalidArgValueError = {
   [1, false, [], {}, NaN, 1n, null, undefined].forEach((i) => {
     assert.throws(() => validateString(i, 'foo'), invalidArgTypeError);
   });
-
-  validateString(undefined, 'foo', { allowUndefined: true });
 }
 
 {
@@ -47,8 +45,6 @@ const invalidArgValueError = {
   [1, false, '', {}, [], 1n, null, undefined].forEach((i) => {
     assert.throws(() => validateBuffer(i, 'foo'), invalidArgTypeError);
   });
-
-  validateBuffer(undefined, 'foo', { allowUndefined: true });
 }
 
 {
@@ -68,12 +64,11 @@ const invalidArgValueError = {
   validateInteger(
     MAX_SAFE_INTEGER + 1,
     'foo',
-    { min: 0, max: MAX_SAFE_INTEGER + 1 });
+    0, MAX_SAFE_INTEGER + 1);
   validateInteger(
     MIN_SAFE_INTEGER - 1,
     'foo',
-    { min: MIN_SAFE_INTEGER - 1 });
-  validateInteger(undefined, 'foo', { allowUndefined: true });
+    MIN_SAFE_INTEGER - 1);
 }
 
 {
@@ -104,8 +99,6 @@ const invalidArgValueError = {
       validateBoolean(val, 'foo');
     }, invalidArgTypeError);
   });
-
-  validateBoolean(undefined, 'foo', { allowUndefined: true });
 }
 
 {
