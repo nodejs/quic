@@ -43,7 +43,6 @@ server.on('session', common.mustCall((session) => {
 
     uni.write('hi', common.expectsError());
 
-    uni.close(3);
 
     uni.on('error', common.mustCall(() => {
       assert.strictEqual(uni.aborted, true);
@@ -55,6 +54,7 @@ server.on('session', common.mustCall((session) => {
             uni.id);
     }));
 
+    uni.close(3);
     debug('Unidirectional, Server-initiated stream %d opened', uni.id);
   }));
 
@@ -83,8 +83,6 @@ server.on('ready', common.mustCall(() => {
     stream.write('hello', common.expectsError());
     stream.write('there', common.expectsError());
 
-    stream.close(1);
-
     stream.on('error', common.mustCall(() => {
       assert.strictEqual(stream.aborted, true);
     }));
@@ -94,6 +92,8 @@ server.on('ready', common.mustCall(() => {
     stream.on('close', common.mustCall(() => {
       countdown.dec();
     }));
+
+    stream.close(1);
 
     debug('Bidirectional, Client-initiated stream %d opened', stream.id);
   }));
