@@ -17,10 +17,8 @@
 
 namespace node {
 
-using v8::Eternal;
-using v8::MaybeLocal;
-using v8::String;
-using v8::Value;
+using v8::Array;
+using v8::Local;
 
 namespace quic {
 
@@ -238,7 +236,7 @@ bool Http3Application::SubmitHeaders(
 // SubmitHeaders() function on the created QuicStream.
 BaseObjectPtr<QuicStream> Http3Application::SubmitPush(
     int64_t id,
-    v8::Local<v8::Array> headers) {
+    Local<Array> headers) {
   // If the QuicSession is not a server session, return false
   // immediately. Push streams cannot be sent by an HTTP/3 client.
   if (!session()->is_server())
@@ -262,7 +260,7 @@ BaseObjectPtr<QuicStream> Http3Application::SubmitPush(
 // client
 bool Http3Application::SubmitInformation(
     int64_t stream_id,
-    v8::Local<v8::Array> headers) {
+    Local<Array> headers) {
   if (!session()->is_server())
     return false;
   Http3Headers nva(session()->env(), headers);
@@ -273,7 +271,7 @@ bool Http3Application::SubmitInformation(
 // submits response headers.
 bool Http3Application::SubmitHeaders(
     int64_t stream_id,
-    v8::Local<v8::Array> headers,
+    Local<Array> headers,
     uint32_t flags) {
   Http3Headers nva(session()->env(), headers);
   return SubmitHeaders(stream_id, nva, flags);
@@ -282,7 +280,7 @@ bool Http3Application::SubmitHeaders(
 // Submits trailing headers for the HTTP/3 request or response.
 bool Http3Application::SubmitTrailers(
     int64_t stream_id,
-    v8::Local<v8::Array> headers) {
+    Local<Array> headers) {
   Http3Headers nva(session()->env(), headers);
   return SubmitTrailers(stream_id, nva);
 }
