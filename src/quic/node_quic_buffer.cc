@@ -3,10 +3,9 @@
 #include "util.h"
 #include "uv.h"
 
-#include <array>
 #include <algorithm>
-#include <functional>
-#include <vector>
+#include <memory>
+#include <utility>
 
 namespace node {
 namespace quic {
