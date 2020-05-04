@@ -25,9 +25,8 @@
 #include "v8.h"
 #include "uv.h"
 
-#include <array>
+#include <vector>
 #include <string>
-#include <type_traits>
 #include <utility>
 
 namespace node {
