@@ -677,7 +677,7 @@ The `'stream'` event may be emitted multiple times.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the number of retransmissions caused by delayed
 acknowledgements.
@@ -726,7 +726,7 @@ representing the reason the peer certificate verification failed.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the total number of bidirectional streams
 created for this `QuicSession`.
@@ -736,7 +736,7 @@ created for this `QuicSession`.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the total number of times the `QuicSession` has
 been blocked from sending stream data due to flow control.
@@ -759,7 +759,7 @@ to the connected peer.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the total number of bytes received from the peer.
 
@@ -768,7 +768,7 @@ A `BigInt` representing the total number of bytes received from the peer.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the total number of bytes sent to the peer.
 
@@ -841,7 +841,7 @@ Set to `true` if the `QuicSession` has been destroyed.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the length of time the `QuicSession` was active.
 
@@ -912,7 +912,7 @@ Set to `true` when the TLS handshake completion has been confirmed.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the length of time taken to complete the TLS handshake.
 
@@ -930,7 +930,7 @@ Set to `true` if the `QuicSession` was closed due to an idle timeout.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the number of key update operations that have
 occured.
@@ -940,7 +940,7 @@ occured.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 The most recently recorded RTT for this `QuicSession`.
 
@@ -949,7 +949,7 @@ The most recently recorded RTT for this `QuicSession`.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the number of lost-packet retransmissions that have been
 performed on this `QuicSession`.
@@ -969,7 +969,7 @@ send to the connected peer.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the maximum number of in-flight bytes recorded
 for this `QuicSession`.
@@ -993,7 +993,7 @@ of the `QuicSession` as the connected peer allows new streams to be created.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 The minimum RTT recorded so far for this `QuicSession`.
 
@@ -1035,7 +1035,7 @@ of the `ping()` operation.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the total number of `QuicStreams` initiated by the
 connected peer.
@@ -1058,7 +1058,7 @@ An object containing the remote address information for the connected peer.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the total number of `QuicStream` instances initiated
 by this `QuicSession`.
@@ -1077,7 +1077,7 @@ The SNI servername requested for this session by the client.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 The modified RTT calculated for this `QuicSession`.
 
@@ -1104,7 +1104,7 @@ True if the `QuicSession` was closed due to QUIC stateless reset.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the total number of unidirectional streams
 created on this `QuicSession`.
@@ -1407,7 +1407,7 @@ port.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the length of time this `QuicSocket` has been bound
 to a local port.
@@ -1417,7 +1417,7 @@ to a local port.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the number of bytes received by this `QuicSocket`.
 
@@ -1426,7 +1426,7 @@ A `BigInt` representing the number of bytes received by this `QuicSocket`.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the number of bytes sent by this `QuicSocket`.
 
@@ -1435,7 +1435,7 @@ A `BigInt` representing the number of bytes sent by this `QuicSocket`.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the number of client `QuicSession` instances that
 have been associated with this `QuicSocket`.
@@ -1607,7 +1607,7 @@ Will be `true` if the `QuicSocket` has been destroyed.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the length of time this `QuicSocket` has been active,
 
@@ -1743,7 +1743,7 @@ If a `callback` is given, it is registered as a handler for the
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the length of time this `QuicSocket` has been listening
 for connections.
@@ -1762,7 +1762,7 @@ Set to `true` if the `QuicSocket` is listening for new connections.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the number of packets received by this `QuicSocket` that
 have been ignored.
@@ -1772,7 +1772,7 @@ have been ignored.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the number of packets successfully received by this
 `QuicSocket`.
@@ -1782,7 +1782,7 @@ A `BigInt` representing the number of packets successfully received by this
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the number of packets sent by this `QuicSocket`.
 
@@ -1805,7 +1805,7 @@ added: REPLACEME
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the number of `QuicSession` instances rejected
 due to server busy status.
@@ -1815,7 +1815,7 @@ due to server busy status.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the number of server `QuicSession` instances that
 have been associated with this `QuicSocket`.
@@ -1855,7 +1855,7 @@ error code. To begin receiving connections again, disable busy mode by calling
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` that represents the number of stateless resets that have been sent.
 
@@ -2016,7 +2016,7 @@ Set to `true` if the `QuicStream` is bidirectional.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the total number of bytes received for this
 `QuicStream`.
@@ -2026,7 +2026,7 @@ A `BigInt` representing the total number of bytes received for this
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the total number of bytes sent by this
 `QuicStream`.
@@ -2075,7 +2075,7 @@ TBD
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the length of time the `QuicStream` has been active.
 
@@ -2084,7 +2084,7 @@ A `BigInt` representing the length of time the `QuicStream` has been active.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` specifying the total number of bytes successfully received by the
 `QuicStream`.
@@ -2103,7 +2103,7 @@ The numeric identifier of the `QuicStream`.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the highest acknowledged data offset received
 for this `QuicStream`.
@@ -2113,7 +2113,7 @@ for this `QuicStream`.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the maximum extended data offset that has been
 reported to the connected peer.
@@ -2123,7 +2123,7 @@ reported to the connected peer.
 added: REPLACEME
 -->
 
-* Type: {BigInt}
+* Type: {bigint}
 
 A `BigInt` representing the maximum received offset for this `QuicStream`.
 
